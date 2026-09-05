@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Prevent the browser from serving a stale copy after edits -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Barrage — Tank Artillery</title>
+<style>
+  :root {
+    --sky-top: #2b3a55;
+    --sky-bot: #7d5a6e;
+    --ground-1: #4a3728;
+    --ground-2: #2e2118;
+    --panel-bg: #1c1b22;
+    --panel-line: #3a3844;
+    --accent-p1: #ff7a45;
+    --accent-p2: #4dc0ff;
+    --text-main: #ece7e1;
+    --text-dim: #8d8a99;
+    --danger: #e14b4b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%;
+    background: #0c0b10;
+    font-family: 'Courier New', ui-monospace, monospace;
+    color: var(--text-main);
+    overflow: hidden;
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-text-size-adjust: 100%;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: calc(var(--vh, 1vh) * 100); /* JS-set fallback for iOS < 15.4 */
+    height: 100dvh; /* dvh excludes mobile browser chrome where supported */
+    width: 100vw;
+    overflow: hidden;
+  }
+  #hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: stretch;
+    background: var(--panel-bg);
+    border-bottom: 2px solid var(--panel-line);
+    padding: 8px 14px;
+    gap: 10px;
+    flex-wrap: nowrap;
+    flex: 0 0 auto;
+    z-index: 5;
+  }
+  .player-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 140px;
+  }
+  .player-card.active {
+    outline: 1px dashed currentColor;
+    outline-offset: 4px;
+  }
+  .player-name {
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    font-weight: bold;
+  }
+  .p1 { color: var(--accent-p1); }
+  .p2 { color: var(--accent-p2); }
+  .health-bar-track {
+    width: 130px;
+    height: 10px;
+    background: #000;
+    border: 1px solid var(--panel-line);
+    position: relative;
+  }
+  .health-bar-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+  }
+  .health-text { font-size: 11px; color: var(--text-dim); }
+
+  #center-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--text-dim);
+    min-width: 160px;
+    text-align: center;
+  }
+  #turn-banner {
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--text-main);
+    margin-bottom: 2px;
+  }
+  #wind-row { display: flex; align-items: center; gap: 6px; }
+  #wind-arrow {
+    display: inline-block;
+    font-size: 16px;
+    transition: color 0.3s ease;
+  }
+
+  #game-wrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 120px;
+    overflow: hidden;
+  }
+  canvas#game {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  #controls {
+    background: var(--panel-bg);
+    border-top: 2px solid var(--panel-line);
+    padding: 10px 16px 14px;
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    flex-wrap: wrap;
+    flex: 0 0 auto;
+    z-index: 5;
+  }
+  .ctrl-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 150px;
+  }
+  .ctrl-label {
+    font-size: 10px;
+    letter-spacing: 0.6px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  .ctrl-label span.val {
+    color: var(--text-main);
+    font-weight: bold;
+  }
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: #444;
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--text-main);
+    cursor: pointer;
+    border: 2px solid #000;
+  }
+  select#weapon-select {
+    background: #12111a;
+    color: var(--text-main);
+    border: 1px solid var(--panel-line);
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 12px;
+  }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+  }
+  #fire-btn {
+    background: var(--danger);
+    color: #fff;
+    border: none;
+    padding: 12px 26px;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    border-radius: 3px;
+    transition: transform 0.08s ease, background 0.15s;
+  }
+  #fire-btn:hover { background: #ff5f5f; }
+  #fire-btn:active { transform: scale(0.96); }
+  #fire-btn:disabled {
+    background: #4a4750;
+    cursor: not-allowed;
+  }
+  #keys-hint {
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-left: auto;
+  }
+
+  #overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(8,7,12,0.86);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    z-index: 20;
+    text-align: center;
+  }
+  #overlay.show { display: flex; }
+  #overlay h1 {
+    font-size: 28px;
+    margin: 0;
+    letter-spacing: 1px;
+  }
+  #overlay p { color: var(--text-dim); margin: 0; font-size: 13px; }
+  #overlay button {
+    background: var(--accent-p1);
+    border: none;
+    color: #1a1a1a;
+    padding: 12px 24px;
+    font-weight: bold;
+    border-radius: 3px;
+    font-size: 13px;
+  }
+  #ai-badge {
+    font-size: 9px;
+    color: var(--text-dim);
+    border: 1px solid var(--panel-line);
+    padding: 1px 5px;
+    border-radius: 2px;
+    margin-left: 6px;
+  }
+
+  /* ---- Narrow / portrait screens ---- */
+  @media (max-width: 720px) and (orientation: portrait) {
+    #hud { padding: 5px 8px; gap: 6px; }
+    .player-card { min-width: 0; flex: 1 1 0; gap: 2px; }
+    .player-name { font-size: 10px; }
+    .health-bar-track { width: 100%; max-width: 110px; height: 8px; }
+    .health-text { font-size: 9px; }
+    #center-info { min-width: 0; flex: 0 0 auto; font-size: 10px; }
+    #turn-banner { font-size: 10px; }
+    #ai-badge { font-size: 8px; margin-left: 3px; }
+
+    #controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+      padding: 8px 10px 10px;
+      align-items: end;
+    }
+    .ctrl-group { min-width: 0; }
+    .ctrl-label { font-size: 9px; }
+    select#weapon-select, select#difficulty-select {
+      width: 100%;
+      font-size: 11px;
+      padding: 5px 6px;
+    }
+    #fire-btn {
+      grid-column: 1 / -1;
+      width: 100%;
+      padding: 14px;
+      font-size: 15px;
+    }
+    /* keyboard hints are useless on touch devices */
+    #keys-hint { display: none; }
+    #overlay h1 { font-size: 20px; }
+    #overlay p { font-size: 11px; padding: 0 20px; }
+  }
+
+  /* Very short screens: shrink the sliders row further */
+  @media (max-height: 500px) and (orientation: portrait) {
+    #game-wrap { min-height: 90px; }
+    #fire-btn { padding: 10px; font-size: 13px; }
+    #controls { gap: 6px 10px; padding: 6px 8px 8px; }
+  }
+
+  /* ---- Landscape on short screens: move panels to the sides ----
+     Stacking panels vertically would leave almost no height for the
+     playfield, which makes the terrain look flat. Flanking the canvas
+     instead keeps the full screen height for the game. */
+  @media (orientation: landscape) and (max-height: 620px) {
+    #app { flex-direction: row; }
+
+    #hud {
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: stretch;
+      width: 132px;
+      flex: 0 0 132px;
+      height: 100%;
+      overflow-y: auto;
+      border-bottom: none;
+      border-right: 2px solid var(--panel-line);
+      padding: 8px;
+      gap: 10px;
+    }
+    .player-card { align-items: stretch !important; flex: 0 0 auto; }
+    .health-bar-track { width: 100% !important; max-width: none; }
+    .health-bar-fill { margin-left: 0 !important; }
+    #center-info {
+      align-items: flex-start;
+      text-align: left;
+      border-top: 1px solid var(--panel-line);
+      padding-top: 8px;
+    }
+    #wind-row { justify-content: flex-start; }
+
+    #game-wrap { flex: 1 1 auto; height: 100%; min-height: 0; }
+
+    #controls {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: stretch;
+      width: 158px;
+      flex: 0 0 158px;
+      height: 100%;
+      overflow-y: auto;
+      border-top: none;
+      border-left: 2px solid var(--panel-line);
+      padding: 8px;
+      gap: 9px;
+    }
+    .ctrl-group { min-width: 0; width: 100%; }
+    #controls select { width: 100%; }
+    #fire-btn {
+      width: 100%;
+      grid-column: auto;
+      margin-top: auto;
+      padding: 14px 10px;
+      font-size: 14px;
+    }
+    #keys-hint { display: none; }
+  }
+
+  /* Ultra-short landscape (small phones): tighten the side panels */
+  @media (orientation: landscape) and (max-height: 400px) {
+    #hud { width: 112px; flex: 0 0 112px; gap: 6px; padding: 6px; }
+    #controls { width: 138px; flex: 0 0 138px; gap: 6px; padding: 6px; }
+    .player-name { font-size: 9px; }
+    .health-text { font-size: 8px; }
+    #turn-banner { font-size: 9px; }
+    #fire-btn { padding: 11px 8px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div class="player-card p1" id="card-p1">
+      <div class="player-name">PLAYER 1</div>
+      <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div></div>
+      <div class="health-text" id="hp-text-1">100 / 100</div>
+    </div>
+
+    <div id="center-info">
+      <div id="turn-banner">—</div>
+      <div id="level-info" style="font-size:10px; color:var(--text-dim); margin-bottom:2px;">—</div>
+      <div id="wind-row">WIND <span id="wind-arrow">→</span> <span id="wind-val">0</span></div>
+    </div>
+
+    <div class="player-card p2" id="card-p2" style="align-items:flex-end;">
+      <div class="player-name">PLAYER 2 <span id="ai-badge">CPU</span></div>
+      <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%; margin-left:auto;"></div></div>
+      <div class="health-text" id="hp-text-2">100 / 100</div>
+    </div>
+  </div>
+
+  <div id="game-wrap">
+    <canvas id="game"></canvas>
+    <div id="overlay">
+      <h1 id="overlay-title">Tank 1 wins!</h1>
+      <p id="overlay-sub">Round over.</p>
+      <button id="restart-btn">Play Again</button>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="ctrl-group">
+      <div class="ctrl-label">ANGLE <span class="val" id="angle-val">45°</span></div>
+      <input type="range" id="angle-slider" min="0" max="180" value="45">
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">POWER <span class="val" id="power-val">50</span></div>
+      <input type="range" id="power-slider" min="0" max="100" value="50">
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">WEAPON</div>
+      <select id="weapon-select">
+        <option value="standard">Standard Shell</option>
+        <option value="big">Big Bomb</option>
+        <option value="cluster">Cluster Bomb</option>
+      </select>
+      <div class="ctrl-label" id="ammo-readout" style="margin-top:2px;"></div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">OPPONENT</div>
+      <select id="mode-select">
+        <option value="cpu" selected>vs CPU</option>
+        <option value="human">2 Players</option>
+      </select>
+    </div>
+    <div class="ctrl-group" id="difficulty-group">
+      <div class="ctrl-label">CPU LEVEL</div>
+      <select id="difficulty-select">
+        <option value="easy">Easy</option>
+        <option value="medium" selected>Medium</option>
+        <option value="hard">Hard</option>
+        <option value="brutal">Brutal</option>
+      </select>
+    </div>
+    <button id="fire-btn">FIRE</button>
+    <div id="keys-hint">
+      ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v12</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Surface any startup failure on screen — a blank canvas is otherwise silent.
+(function () {
+  function showError(msg) {
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#7a1420;color:#fff;' +
+      'font:12px/1.45 monospace;padding:10px 12px;white-space:pre-wrap;max-height:45%;overflow:auto;';
+    d.textContent = 'Startup error: ' + msg;
+    (document.body || document.documentElement).appendChild(d);
+  }
+  window.addEventListener('error', function (e) {
+    showError((e.message || 'unknown') + (e.filename ? ' @' + e.lineno + ':' + e.colno : ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    showError('promise: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+  // iOS < 15.4 has no dvh; keep a real pixel height in a CSS variable.
+  function setVh() {
+    document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px');
+  }
+  setVh();
+  window.addEventListener('resize', setVh);
+  window.addEventListener('orientationchange', function () { setTimeout(setVh, 150); });
+})();
+</script>
+<script>
+(() => {
+  const BUILD = 'v12';
+  console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const gameWrap = document.getElementById('game-wrap');
+
+  const angleSlider = document.getElementById('angle-slider');
+  const powerSlider = document.getElementById('power-slider');
+  const angleVal = document.getElementById('angle-val');
+  const powerVal = document.getElementById('power-val');
+  const weaponSelect = document.getElementById('weapon-select');
+  const ammoReadout = document.getElementById('ammo-readout');
+  const fireBtn = document.getElementById('fire-btn');
+  const turnBanner = document.getElementById('turn-banner');
+  const levelInfo = document.getElementById('level-info');
+  const windArrow = document.getElementById('wind-arrow');
+  const windVal = document.getElementById('wind-val');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlay-title');
+  const overlaySub = document.getElementById('overlay-sub');
+  const restartBtn = document.getElementById('restart-btn');
+  const aiBadge = document.getElementById('ai-badge');
+  const difficultySelect = document.getElementById('difficulty-select');
+  const modeSelect = document.getElementById('mode-select');
+  const difficultyGroup = document.getElementById('difficulty-group');
+
+  const hpFill = [document.getElementById('hp-fill-1'), document.getElementById('hp-fill-2')];
+  const hpText = [document.getElementById('hp-text-1'), document.getElementById('hp-text-2')];
+  const cards = [document.getElementById('card-p1'), document.getElementById('card-p2')];
+
+  let AI_ENABLED = modeSelect.value === 'cpu'; // false = Tank 2 is a second human
+  let aiDifficulty = difficultySelect.value;   // 'easy' | 'medium' | 'hard' | 'brutal'
+
+  function refreshOpponentUi() {
+    aiBadge.style.display = AI_ENABLED ? 'inline-block' : 'none';
+    aiBadge.textContent = 'CPU · ' + aiDifficulty.toUpperCase();
+    // CPU level only matters when playing against the computer
+    difficultyGroup.style.display = AI_ENABLED ? '' : 'none';
+  }
+
+  modeSelect.addEventListener('change', () => {
+    AI_ENABLED = modeSelect.value === 'cpu';
+    refreshOpponentUi();
+    updateHUD();
+    syncControlsFromTank();
+    // if we just switched to CPU mid-way through tank 2's turn, let it play
+    maybeAiTurn();
+  });
+
+  difficultySelect.addEventListener('change', () => {
+    aiDifficulty = difficultySelect.value;
+    refreshOpponentUi();
+  });
+  weaponSelect.addEventListener('change', () => {
+    const remaining = tanks[currentPlayer].ammo[weaponSelect.value];
+    ammoReadout.textContent = remaining === Infinity ? 'unlimited' : `${remaining} left`;
+  });
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = gameWrap.clientWidth;
+    H = gameWrap.clientHeight;
+    // Some mobile browsers report 0 during early layout / orientation change.
+    // Falling through with 0 would produce a blank canvas with no error.
+    if (!W || !H) {
+      const r = gameWrap.getBoundingClientRect();
+      W = Math.round(r.width) || window.innerWidth || 320;
+      H = Math.round(r.height) || Math.max(160, (window.innerHeight || 480) - 200);
+    }
+    W = Math.max(160, W);
+    H = Math.max(120, H);
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (terrain.length) {
+      // Keep tanks at the same relative spot when the canvas changes size,
+      // otherwise rotating the device leaves them stranded off-screen.
+      const fracs = tanks.map(t => (prevW > 0 ? t.x / prevW : null));
+      rebuildTerrainToWidth();
+      tanks.forEach((t, i) => {
+        if (fracs[i] !== null && isFinite(fracs[i])) {
+          t.x = Math.max(20, Math.min(W - 20, fracs[i] * W));
+        }
+      });
+    }
+    prevW = W;
+  }
+  let prevW = 0;
+
+  // ---------- Environments ----------
+  // Each level gets a distinct sky, ground palette, and terrain personality.
+  const THEMES = [
+    {
+      name: 'Dusk Ridge',
+      skyTop: '#2b3a55', skyBot: '#7d5a6e',
+      ground1: '#4a3728', ground2: '#2e2118',
+      rim: 'rgba(255,200,150,0.20)',
+      decor: 'stars', decorColor: 'rgba(255,255,255,0.25)',
+      roughness: 0.28, falloff: 0.55, points: 160, baseLo: 0.45, baseHi: 0.65
+    },
+    {
+      name: 'Salt Flats',
+      skyTop: '#8fb8d6', skyBot: '#e8d9b8',
+      ground1: '#d9c9a3', ground2: '#8a7a5c',
+      rim: 'rgba(255,255,255,0.35)',
+      decor: 'clouds', decorColor: 'rgba(255,255,255,0.5)',
+      roughness: 0.10, falloff: 0.45, points: 200, baseLo: 0.55, baseHi: 0.68
+    },
+    {
+      name: 'Ash Peaks',
+      skyTop: '#3a2b33', skyBot: '#8c4a35',
+      ground1: '#5c4038', ground2: '#241a19',
+      rim: 'rgba(255,120,60,0.30)',
+      decor: 'embers', decorColor: 'rgba(255,140,60,0.45)',
+      roughness: 0.40, falloff: 0.60, points: 140, baseLo: 0.40, baseHi: 0.60
+    },
+    {
+      name: 'Glacier',
+      skyTop: '#1d3550', skyBot: '#6fa8bf',
+      ground1: '#cfe4ee', ground2: '#6d8ba0',
+      rim: 'rgba(255,255,255,0.55)',
+      decor: 'snow', decorColor: 'rgba(255,255,255,0.6)',
+      roughness: 0.34, falloff: 0.58, points: 150, baseLo: 0.42, baseHi: 0.62
+    },
+    {
+      name: 'Verdant Hills',
+      skyTop: '#5aa4d6', skyBot: '#cfe6c8',
+      ground1: '#5c8a3c', ground2: '#2c4520',
+      rim: 'rgba(200,255,170,0.30)',
+      decor: 'clouds', decorColor: 'rgba(255,255,255,0.55)',
+      roughness: 0.18, falloff: 0.50, points: 180, baseLo: 0.50, baseHi: 0.66
+    },
+    {
+      name: 'Night Crater',
+      skyTop: '#0d1024', skyBot: '#2a1f45',
+      ground1: '#3b3550', ground2: '#161327',
+      rim: 'rgba(160,150,255,0.30)',
+      decor: 'stars', decorColor: 'rgba(220,220,255,0.45)',
+      roughness: 0.32, falloff: 0.56, points: 150, baseLo: 0.44, baseHi: 0.64
+    },
+    {
+      name: 'Rust Canyon',
+      skyTop: '#7a4a2e', skyBot: '#e0a05a',
+      ground1: '#a85a35', ground2: '#4a2418',
+      rim: 'rgba(255,180,120,0.30)',
+      decor: 'dust', decorColor: 'rgba(255,200,150,0.35)',
+      roughness: 0.44, falloff: 0.62, points: 130, baseLo: 0.38, baseHi: 0.58
+    }
+  ];
+
+  let level = 1;
+  let theme = THEMES[0];
+  let decorItems = []; // clouds / stars / embers positions for the current theme
+
+  function applyTheme(t) {
+    theme = t;
+    const root = document.documentElement;
+    if (root && root.style) {
+      root.style.setProperty('--sky-top', t.skyTop);
+      root.style.setProperty('--sky-bot', t.skyBot);
+      root.style.setProperty('--ground-1', t.ground1);
+      root.style.setProperty('--ground-2', t.ground2);
+    }
+    buildDecor();
+  }
+
+  function buildDecor() {
+    decorItems = [];
+    const kind = theme.decor;
+    if (kind === 'stars') {
+      for (let i = 0; i < 70; i++) {
+        decorItems.push({ x: Math.random(), y: Math.random() * 0.55, r: Math.random() * 1.4 + 0.5, tw: Math.random() * 6.28 });
+      }
+    } else if (kind === 'clouds') {
+      for (let i = 0; i < 6; i++) {
+        decorItems.push({ x: Math.random(), y: 0.08 + Math.random() * 0.3, s: 0.6 + Math.random() * 0.9, drift: 0.004 + Math.random() * 0.008 });
+      }
+    } else if (kind === 'embers' || kind === 'dust' || kind === 'snow') {
+      const count = kind === 'snow' ? 60 : 40;
+      for (let i = 0; i < count; i++) {
+        decorItems.push({
+          x: Math.random(), y: Math.random(),
+          r: Math.random() * 1.8 + 0.6,
+          vy: (kind === 'snow' ? 0.02 : -0.03) * (0.5 + Math.random()),
+          vx: (Math.random() * 2 - 1) * 0.01
+        });
+      }
+    }
+  }
+
+  function nextTheme() {
+    // advance through environments, avoiding an immediate repeat
+    let idx;
+    do { idx = Math.floor(Math.random() * THEMES.length); }
+    while (THEMES.length > 1 && THEMES[idx] === theme);
+    applyTheme(THEMES[idx]);
+  }
+
+  // ---------- Terrain ----------
+  const GROUND_MARGIN_TOP = 0.35; // terrain never rises above 35% of canvas height
+  let terrain = []; // heightmap, index = x pixel, value = y of ground surface
+  let terrainSeedShape = []; // normalized 0..1 shape independent of width, resampled on resize
+
+  function generateTerrainShape() {
+    // midpoint displacement, tuned per theme so each environment has its own feel
+    const n = theme.points;
+    const arr = new Array(n);
+    arr[0] = theme.baseLo + Math.random() * (theme.baseHi - theme.baseLo);
+    arr[n - 1] = theme.baseLo + Math.random() * (theme.baseHi - theme.baseLo);
+    function subdivide(lo, hi, roughness) {
+      if (hi - lo < 2) return;
+      const mid = Math.floor((lo + hi) / 2);
+      const avg = (arr[lo] + arr[hi]) / 2;
+      arr[mid] = avg + (Math.random() * 2 - 1) * roughness;
+      arr[mid] = Math.max(0.05, Math.min(0.85, arr[mid]));
+      subdivide(lo, mid, roughness * theme.falloff);
+      subdivide(mid, hi, roughness * theme.falloff);
+    }
+    subdivide(0, n - 1, theme.roughness);
+    return arr;
+  }
+
+  function rebuildTerrainToWidth() {
+    const n = terrainSeedShape.length;
+    terrain = new Array(Math.ceil(W));
+
+    // Terrain relief used to be a flat fraction of H, so a short (landscape)
+    // canvas produced almost flat ground. Scale the vertical span against the
+    // canvas aspect instead: wide-and-short viewports get proportionally more
+    // relief so hills keep the same *shape* they'd have in portrait.
+    const aspect = W / Math.max(1, H);
+    // 1.0 at a squarish 4:3 view, growing (capped) as the view gets wider
+    const reliefBoost = Math.min(1.55, Math.max(1, Math.sqrt(aspect / 1.33)));
+    const usableSpan = H * (1 - GROUND_MARGIN_TOP - 0.03);
+    const span = Math.min(usableSpan * reliefBoost, H * 0.72);
+    const top = Math.max(H * 0.06, H - H * 0.05 - span);
+
+    for (let x = 0; x < W; x++) {
+      const t = (x / (W - 1)) * (n - 1);
+      const i0 = Math.floor(t);
+      const i1 = Math.min(n - 1, i0 + 1);
+      const f = t - i0;
+      const shapeVal = terrainSeedShape[i0] * (1 - f) + terrainSeedShape[i1] * f;
+      const y = top + shapeVal * span;
+      terrain[x] = Math.min(Math.max(y, H * 0.06), H - TANK_H - 6);
+    }
+  }
+
+  function newTerrain() {
+    terrainSeedShape = generateTerrainShape();
+    rebuildTerrainToWidth();
+  }
+
+  // Craters dig downward; without a floor, repeated hits in one spot push the
+  // ground (and any tank resting on it) below the bottom of the canvas.
+  function bedrockY() {
+    return H - TANK_H - 6; // deepest the ground is allowed to go, keeping tanks visible
+  }
+
+  function craterAt(cx, groundY, radius) {
+    // carve a circular crater into terrain heightmap
+    const rSq = radius * radius;
+    const floor = bedrockY();
+    const xStart = Math.max(0, Math.floor(cx - radius));
+    const xEnd = Math.min(terrain.length - 1, Math.ceil(cx + radius));
+    for (let x = xStart; x <= xEnd; x++) {
+      const dx = x - cx;
+      const dySq = rSq - dx * dx;
+      if (dySq < 0) continue;
+      const dy = Math.sqrt(dySq);
+      const craterBottom = Math.min(groundY + dy, floor); // clamp to bedrock
+      if (craterBottom > terrain[x]) {
+        terrain[x] = craterBottom;
+      }
+    }
+  }
+
+  function groundHeightAt(x) {
+    const xi = Math.max(0, Math.min(terrain.length - 1, Math.round(x)));
+    return terrain[xi];
+  }
+
+  // ---------- Game state ----------
+  const GRAVITY = 340; // px/s^2
+  const TANK_W = 26, TANK_H = 14;
+  const MAX_HP = 100;
+
+  let tanks = [
+    { x: 0, hp: MAX_HP, color: getVar('--accent-p1'), alive: true, angle: 45, power: 50, ammo: null },
+    { x: 0, hp: MAX_HP, color: getVar('--accent-p2'), alive: true, angle: 135, power: 50, ammo: null }
+  ];
+
+  function getVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  let wind = 0; // px/s^2 lateral accel
+  let currentPlayer = 0;
+  let state = 'AIMING'; // AIMING | FIRING | EXPLODING | GAMEOVER
+  let projectile = null;
+  let trail = [];
+  let explosions = []; // active explosion animations {x,y,r,maxR,t}
+  let clusterQueue = []; // pending sub-explosions for cluster bomb
+  let particles = [];
+
+  const WEAPONS = {
+    standard: { radius: 26, damageMax: 34, color: '#ffcf5c', label: 'Standard Shell', startAmmo: Infinity },
+    big:      { radius: 46, damageMax: 55, color: '#ff7a45', label: 'Big Bomb', startAmmo: 5 },
+    cluster:  { radius: 18, damageMax: 22, color: '#ff5c9c', label: 'Cluster Bomb', clusterCount: 5, startAmmo: 3 }
+  };
+
+  function freshAmmo() {
+    const a = {};
+    for (const key in WEAPONS) a[key] = WEAPONS[key].startAmmo;
+    return a;
+  }
+
+  function placeTanks() {
+    const margin = 0.12;
+    const x1 = W * (margin + Math.random() * 0.12);
+    const x2 = W * (1 - margin - Math.random() * 0.12);
+    tanks[0].x = x1;
+    tanks[1].x = x2;
+  }
+
+  function setWind() {
+    wind = (Math.random() * 2 - 1) * 60; // -60..60
+    windVal.textContent = Math.abs(wind).toFixed(0);
+    windArrow.textContent = wind >= 0 ? '→' : '←';
+    windArrow.style.color = Math.abs(wind) > 35 ? 'var(--danger)' : 'var(--text-main)';
+  }
+
+  function resetGame() {
+    tanks[0].hp = MAX_HP; tanks[0].alive = true; tanks[0].ammo = freshAmmo();
+    tanks[1].hp = MAX_HP; tanks[1].alive = true; tanks[1].ammo = freshAmmo();
+    currentPlayer = 0;
+    state = 'AIMING';
+    projectile = null;
+    trail = [];
+    explosions = [];
+    particles = [];
+    nextTheme();
+    newTerrain();
+    placeTanks();
+    setWind();
+    updateHUD();
+    overlay.classList.remove('show');
+    syncControlsFromTank();
+    maybeAiTurn();
+  }
+
+  function updateHUD() {
+    for (let i = 0; i < 2; i++) {
+      const pct = Math.max(0, tanks[i].hp / MAX_HP * 100);
+      hpFill[i].style.width = pct + '%';
+      hpText[i].textContent = `${Math.max(0, Math.round(tanks[i].hp))} / ${MAX_HP}`;
+      cards[i].classList.toggle('active', currentPlayer === i && state === 'AIMING');
+    }
+    if (state === 'GAMEOVER') {
+      turnBanner.textContent = 'ROUND OVER';
+    } else if (state !== 'AIMING') {
+      turnBanner.textContent = 'IN FLIGHT…';
+    } else if (currentPlayer === 1 && AI_ENABLED) {
+      turnBanner.textContent = 'CPU THINKING…';
+    } else {
+      turnBanner.textContent = `PLAYER ${currentPlayer + 1} — AIM & FIRE`;
+    }
+    levelInfo.textContent = `LEVEL ${level} · ${theme.name} · ${BUILD}`;
+  }
+
+  function syncControlsFromTank() {
+    const t = tanks[currentPlayer];
+    angleSlider.value = t.angle;
+    powerSlider.value = t.power;
+    angleVal.textContent = t.angle + '°';
+    powerVal.textContent = t.power;
+    const isAiTurn = AI_ENABLED && currentPlayer === 1;
+    fireBtn.disabled = (state !== 'AIMING') || isAiTurn;
+    angleSlider.disabled = isAiTurn;
+    powerSlider.disabled = isAiTurn;
+    syncWeaponOptions(t);
+  }
+
+  function syncWeaponOptions(t) {
+    for (const opt of weaponSelect.options) {
+      const key = opt.value;
+      const remaining = t.ammo[key];
+      const label = WEAPONS[key].label;
+      opt.textContent = remaining === Infinity ? `${label} (∞)` : `${label} (${remaining})`;
+      opt.disabled = remaining <= 0;
+    }
+    // if the currently selected weapon just ran dry, fall back to standard
+    if (t.ammo[weaponSelect.value] <= 0) {
+      weaponSelect.value = 'standard';
+    }
+    const cur = weaponSelect.value;
+    const curRemaining = t.ammo[cur];
+    ammoReadout.textContent = curRemaining === Infinity ? 'unlimited' : `${curRemaining} left`;
+  }
+
+  angleSlider.addEventListener('input', () => {
+    tanks[currentPlayer].angle = parseInt(angleSlider.value, 10);
+    angleVal.textContent = angleSlider.value + '°';
+  });
+  powerSlider.addEventListener('input', () => {
+    tanks[currentPlayer].power = parseInt(powerSlider.value, 10);
+    powerVal.textContent = powerSlider.value;
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (state !== 'AIMING' || (AI_ENABLED && currentPlayer === 1)) return;
+    const t = tanks[currentPlayer];
+    if (e.key === 'ArrowLeft') { t.angle = Math.max(0, t.angle - 1); syncControlsFromTank(); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { t.angle = Math.min(180, t.angle + 1); syncControlsFromTank(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { t.power = Math.min(100, t.power + 2); syncControlsFromTank(); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { t.power = Math.max(0, t.power - 2); syncControlsFromTank(); e.preventDefault(); }
+    else if (e.code === 'Space') { fire(); e.preventDefault(); }
+  });
+
+  fireBtn.addEventListener('click', fire);
+  restartBtn.addEventListener('click', () => { level++; resetGame(); });
+
+  function fire() {
+    if (state !== 'AIMING') return;
+    const shooter = tanks[currentPlayer];
+    let weaponKey = weaponSelect.value;
+    if (shooter.ammo[weaponKey] <= 0) weaponKey = 'standard'; // safety fallback, shouldn't normally trigger
+    shooter.ammo[weaponKey] -= 1;
+    const angleRad = shooter.angle * Math.PI / 180;
+    // player 0 shoots rightward-biased angle convention, player 1 mirrors
+    const dir = currentPlayer === 0 ? 1 : -1;
+    const speed = shooter.power * 6.2;
+    const vx = Math.cos(angleRad) * speed * dir;
+    const vy = -Math.sin(angleRad) * speed;
+    const barrelLen = 20;
+    projectile = {
+      x: shooter.x + dir * barrelLen * Math.cos(angleRad),
+      y: groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad),
+      vx, vy,
+      weapon: weaponKey,
+      firedBy: currentPlayer
+    };
+    trail = [];
+    state = 'FIRING';
+    updateHUD();
+  }
+
+  function applyDamageAndCrater(px, py, weaponKey) {
+    const w = WEAPONS[weaponKey];
+    // Compute damage using terrain heights BEFORE cratering — otherwise a
+    // close/direct hit carves the ground out from under the tank first,
+    // which makes the tank look farther from the blast than it really was
+    // and under-credits exactly the hits that should do the most damage.
+    for (const t of tanks) {
+      if (!t.alive) continue;
+      const tankTopY = groundHeightAt(t.x) - TANK_H;
+      const dx = t.x - px;
+      const dy = tankTopY - py;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < w.radius) {
+        const falloff = 1 - dist / w.radius;
+        const dmg = w.damageMax * falloff;
+        t.hp -= dmg;
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+      }
+    }
+    craterAt(px, py, w.radius);
+    spawnExplosionFx(px, py, w.radius, w.color);
+  }
+
+  function spawnExplosionFx(x, y, radius, color) {
+    explosions.push({ x, y, r: 4, maxR: radius * 1.15, t: 0, color });
+    const count = Math.round(radius * 0.9);
+    for (let i = 0; i < count; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 40 + Math.random() * 140;
+      particles.push({
+        x, y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - 60,
+        life: 0.5 + Math.random() * 0.5,
+        age: 0,
+        color: Math.random() < 0.5 ? color : '#fff2c9'
+      });
+    }
+  }
+
+  function endTurnCheckWin() {
+    const alive = tanks.filter(t => t.alive);
+    if (alive.length <= 1) {
+      state = 'GAMEOVER';
+      const winnerIdx = tanks[0].alive ? 0 : 1;
+      const winnerName = (winnerIdx === 1 && AI_ENABLED) ? 'CPU' : `Player ${winnerIdx + 1}`;
+      overlayTitle.textContent = `${winnerName} wins!`;
+      overlaySub.textContent = 'Tap Play Again for a new terrain and rematch.';
+      overlay.classList.add('show');
+      updateHUD();
+      return true;
+    }
+    return false;
+  }
+
+  function nextTurn() {
+    if (endTurnCheckWin()) return;
+    currentPlayer = 1 - currentPlayer;
+    setWind();
+    state = 'AIMING';
+    updateHUD();
+    syncControlsFromTank();
+    maybeAiTurn();
+  }
+
+  // ---------- AI: trajectory-solving aim, scaled by difficulty ----------
+  const DIFFICULTY_SETTINGS = {
+    easy:    { angleStep: 6, powerStep: 6,  angleJitter: 16, powerJitter: 22, missChance: 0.30, thinkMs: 900 },
+    medium:  { angleStep: 3, powerStep: 3,  angleJitter: 7,  powerJitter: 10, missChance: 0.12, thinkMs: 750 },
+    hard:    { angleStep: 1.5, powerStep: 1.5, angleJitter: 3,  powerJitter: 4,  missChance: 0.04, thinkMs: 600 },
+    brutal:  { angleStep: 1, powerStep: 1,  angleJitter: 0.5, powerJitter: 1,  missChance: 0,    thinkMs: 450 }
+  };
+
+  // Simulates a shot with the same physics as the real game and returns
+  // where it would land (x coordinate), so the AI can search for the
+  // angle/power combo that actually lands on the target.
+  function predictLandingX(x0, y0, angleDeg, power, windAccel, dir) {
+    const angleRad = angleDeg * Math.PI / 180;
+    let vx = Math.cos(angleRad) * power * 6.2 * dir;
+    let vy = -Math.sin(angleRad) * power * 6.2;
+    let x = x0, y = y0, t = 0;
+    const dt = 0.03;
+    while (t < 12) {
+      vx += windAccel * dt;
+      vy += GRAVITY * dt;
+      x += vx * dt;
+      y += vy * dt;
+      t += dt;
+      if (x < -80 || x > W + 80) break;
+      if (y >= groundHeightAt(Math.max(0, Math.min(terrain.length - 1, x)))) break;
+    }
+    return x;
+  }
+
+  function chooseAiShot(difficulty) {
+    const cfg = DIFFICULTY_SETTINGS[difficulty] || DIFFICULTY_SETTINGS.medium;
+    const shooter = tanks[1];
+    const target = tanks[0];
+    const dir = -1; // tank 2 always fires leftward
+    const barrelLen = 20;
+    let bestAngle = 45, bestPower = 55, bestErr = Infinity;
+
+    for (let angle = 12; angle <= 85; angle += cfg.angleStep) {
+      const angleRad = angle * Math.PI / 180;
+      const y0 = groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad);
+      for (let power = 15; power <= 100; power += cfg.powerStep) {
+        const landX = predictLandingX(shooter.x, y0, angle, power, wind, dir);
+        const err = Math.abs(landX - target.x);
+        if (err < bestErr) {
+          bestErr = err;
+          bestAngle = angle;
+          bestPower = power;
+        }
+      }
+    }
+
+    // Difficulty-scaled human-like imprecision on top of the solved shot.
+    let jitterAngle = cfg.angleJitter;
+    let jitterPower = cfg.powerJitter;
+    if (Math.random() < cfg.missChance) {
+      // occasional bigger miss, more likely at lower difficulty
+      jitterAngle *= 2.5;
+      jitterPower *= 2.5;
+    }
+    const finalAngle = Math.max(5, Math.min(175, bestAngle + (Math.random() * 2 - 1) * jitterAngle));
+    const finalPower = Math.max(10, Math.min(100, bestPower + (Math.random() * 2 - 1) * jitterPower));
+    return { angle: Math.round(finalAngle), power: Math.round(finalPower) };
+  }
+
+  function maybeAiTurn() {
+    if (!AI_ENABLED || currentPlayer !== 1 || state !== 'AIMING') return;
+    updateHUD();
+    const cfg = DIFFICULTY_SETTINGS[aiDifficulty] || DIFFICULTY_SETTINGS.medium;
+    setTimeout(() => {
+      if (state !== 'AIMING' || currentPlayer !== 1) return;
+      const shot = chooseAiShot(aiDifficulty);
+      const shooter = tanks[1];
+      shooter.angle = shot.angle;
+      shooter.power = shot.power;
+      // Stronger CPU levels lean on the bigger/smarter weapons more often,
+      // but only when it actually still has ammo for them.
+      const r = Math.random();
+      let preferred;
+      if (aiDifficulty === 'easy') {
+        preferred = r < 0.8 ? 'standard' : (r < 0.9 ? 'big' : 'cluster');
+      } else if (aiDifficulty === 'medium') {
+        preferred = r < 0.6 ? 'standard' : (r < 0.85 ? 'big' : 'cluster');
+      } else {
+        preferred = r < 0.4 ? 'standard' : (r < 0.75 ? 'big' : 'cluster');
+      }
+      weaponSelect.value = shooter.ammo[preferred] > 0 ? preferred : 'standard';
+      syncControlsFromTank();
+      setTimeout(fire, 350);
+    }, cfg.thinkMs);
+  }
+
+  // ---------- Physics step ----------
+  let lastTime = null;
+  function step(ts) {
+    if (lastTime === null) lastTime = ts;
+    let dt = (ts - lastTime) / 1000;
+    dt = Math.min(dt, 0.033);
+    lastTime = ts;
+
+    if (state === 'FIRING' && projectile) {
+      const sub = 2;
+      for (let s = 0; s < sub; s++) {
+        const sdt = dt / sub;
+        projectile.vx += wind * sdt;
+        projectile.vy += GRAVITY * sdt;
+        projectile.x += projectile.vx * sdt;
+        projectile.y += projectile.vy * sdt;
+      }
+      trail.push({ x: projectile.x, y: projectile.y });
+      if (trail.length > 60) trail.shift();
+
+      let hit = false;
+      let outOfBounds = false;
+      if (projectile.x < -20 || projectile.x > W + 20 || projectile.y > H + 60) {
+        outOfBounds = true;
+      } else if (projectile.y >= groundHeightAt(projectile.x)) {
+        hit = true;
+      } else {
+        // direct tank hit check
+        for (const t of tanks) {
+          if (!t.alive) continue;
+          const topY = groundHeightAt(t.x) - TANK_H;
+          if (Math.abs(projectile.x - t.x) < TANK_W / 2 && projectile.y > topY - 4 && projectile.y < topY + TANK_H) {
+            hit = true;
+            break;
+          }
+        }
+      }
+
+      if (outOfBounds) {
+        projectile = null;
+        trail = [];
+        state = 'RESOLVED'; // shot missed entirely, move straight to next turn
+      } else if (hit && projectile) {
+        const weaponKey = projectile.weapon;
+        const w = WEAPONS[weaponKey];
+        const px = projectile.x, py = Math.min(projectile.y, groundHeightAt(projectile.x));
+        if (weaponKey === 'cluster') {
+          applyDamageAndCrater(px, py, weaponKey);
+          for (let i = 0; i < w.clusterCount; i++) {
+            clusterQueue.push({
+              x: px + (Math.random() * 2 - 1) * 60,
+              vy: -(80 + Math.random() * 60),
+              vx: (Math.random() * 2 - 1) * 40,
+              delay: i * 0.08
+            });
+          }
+          spawnClusterTimer = 0;
+        } else {
+          applyDamageAndCrater(px, py, weaponKey);
+        }
+        projectile = null;
+        trail = [];
+        state = 'EXPLODING';
+        explodeTimer = 0;
+      }
+    }
+
+    if (state === 'EXPLODING') {
+      explodeTimer += dt;
+      if (clusterQueue.length) {
+        spawnClusterTimer += dt;
+        const remaining = [];
+        for (const c of clusterQueue) {
+          c.delay -= dt;
+          if (c.delay <= 0) {
+            // simulate a short lob then explode
+            let x = c.x, y = groundHeightAt(c.x) - 200;
+            let vx = c.vx, vy = c.vy;
+            let t = 0;
+            while (y < groundHeightAt(x) && t < 2) {
+              vy += GRAVITY * 0.05;
+              x += vx * 0.05;
+              y += vy * 0.05;
+              t += 0.05;
+            }
+            applyDamageAndCrater(x, groundHeightAt(x), 'cluster');
+          } else {
+            remaining.push(c);
+          }
+        }
+        clusterQueue = remaining;
+      }
+      updateHUD();
+      if (explodeTimer > 0.9 && clusterQueue.length === 0 && explosions.every(e => e.t > e.maxR / 90)) {
+        state = 'RESOLVED';
+      }
+    }
+
+    if (state === 'RESOLVED') {
+      nextTurn();
+    }
+
+    // explosion fx aging
+    explosions.forEach(e => { e.t += dt * 90; e.r = Math.min(e.maxR, 4 + e.t); });
+    explosions = explosions.filter(e => e.r < e.maxR - 0.5);
+    particles.forEach(p => {
+      p.age += dt;
+      p.vy += 220 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+    });
+    particles = particles.filter(p => p.age < p.life);
+
+    render();
+    requestAnimationFrame(step);
+  }
+  let explodeTimer = 0;
+  let spawnClusterTimer = 0;
+
+  // ---------- Rendering ----------
+  let decorClock = 0;
+
+  function drawDecor() {
+    const kind = theme.decor;
+    decorClock += 0.016;
+
+    if (kind === 'stars') {
+      for (const s of decorItems) {
+        const twinkle = 0.55 + 0.45 * Math.sin(decorClock * 1.5 + s.tw);
+        ctx.globalAlpha = twinkle;
+        ctx.fillStyle = theme.decorColor;
+        ctx.beginPath();
+        ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    if (kind === 'clouds') {
+      ctx.fillStyle = theme.decorColor;
+      for (const c of decorItems) {
+        c.x += c.drift * 0.006;
+        if (c.x > 1.2) c.x = -0.2;
+        const cx = c.x * W, cy = c.y * H, s = c.s * (W * 0.05);
+        ctx.beginPath();
+        ctx.arc(cx, cy, s, 0, Math.PI * 2);
+        ctx.arc(cx + s * 0.8, cy + s * 0.15, s * 0.75, 0, Math.PI * 2);
+        ctx.arc(cx - s * 0.85, cy + s * 0.2, s * 0.65, 0, Math.PI * 2);
+        ctx.arc(cx + s * 0.2, cy - s * 0.45, s * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      return;
+    }
+
+    // embers / dust / snow: drifting particles
+    ctx.fillStyle = theme.decorColor;
+    for (const p of decorItems) {
+      p.y += p.vy * 0.01;
+      p.x += p.vx * 0.01;
+      if (p.y < -0.05) p.y = 1.05;
+      if (p.y > 1.05) p.y = -0.05;
+      if (p.x < -0.05) p.x = 1.05;
+      if (p.x > 1.05) p.x = -0.05;
+      ctx.beginPath();
+      ctx.arc(p.x * W, p.y * H, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    // sky
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, theme.skyTop);
+    skyGrad.addColorStop(1, theme.skyBot);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    drawDecor();
+
+    // terrain
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x < terrain.length; x += 2) {
+      ctx.lineTo(x, terrain[x]);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    const groundGrad = ctx.createLinearGradient(0, H * 0.3, 0, H);
+    groundGrad.addColorStop(0, theme.ground1);
+    groundGrad.addColorStop(1, theme.ground2);
+    ctx.fillStyle = groundGrad;
+    ctx.fill();
+    ctx.strokeStyle = theme.rim;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // tanks
+    tanks.forEach((t, i) => {
+      if (!t.alive) return;
+      const gy = groundHeightAt(t.x);
+      ctx.save();
+      ctx.translate(t.x, gy);
+      // body
+      ctx.fillStyle = t.color;
+      ctx.fillRect(-TANK_W / 2, -TANK_H, TANK_W, TANK_H);
+      // treads
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(-TANK_W / 2 - 2, -4, TANK_W + 4, 4);
+      // barrel
+      const dir = i === 0 ? 1 : -1;
+      const ang = t.angle * Math.PI / 180;
+      ctx.strokeStyle = t.color;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(0, -TANK_H + 2);
+      ctx.lineTo(dir * 20 * Math.cos(ang), -TANK_H + 2 - 20 * Math.sin(ang));
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // trail
+    if (trail.length > 1) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      trail.forEach((p, idx) => idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+    }
+
+    // projectile
+    if (projectile) {
+      ctx.fillStyle = WEAPONS[projectile.weapon].color;
+      ctx.beginPath();
+      ctx.arc(projectile.x, projectile.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // explosions
+    explosions.forEach(e => {
+      const alpha = Math.max(0, 1 - e.r / e.maxR);
+      const grad = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r);
+      grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      grad.addColorStop(0.4, e.color);
+      grad.addColorStop(1, 'rgba(255,80,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // particles
+    particles.forEach(p => {
+      const alpha = 1 - p.age / p.life;
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 150));
+  // Mobile browsers resize the visual viewport when the address bar hides/shows
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize);
+  }
+  resize();
+  refreshOpponentUi();
+  resetGame();
+  requestAnimationFrame(step);
+  // iOS Safari can report stale/zero layout on first paint; re-measure shortly after.
+  setTimeout(resize, 60);
+  setTimeout(resize, 400);
+  window.addEventListener('load', resize);
+})();
+</script>
+</body>
+</html>
