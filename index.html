@@ -121,10 +121,27 @@
     color: var(--text-main);
     margin-bottom: 2px;
   }
-  #wind-row { display: flex; align-items: center; gap: 6px; }
+  #wind-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
   #wind-arrow {
     display: inline-block;
-    font-size: 16px;
+    font-size: 20px;
+    font-weight: bold;
+    line-height: 1;
+    transition: color 0.3s ease;
+  }
+  #wind-val {
+    font-weight: bold;
+    min-width: 18px;
+    text-align: right;
     transition: color 0.3s ease;
   }
 
@@ -462,7 +479,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v13</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v14</span></div>
     </div>
   </div>
 </div>
@@ -494,7 +511,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v13';
+  const BUILD = 'v14';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -665,8 +682,21 @@
   let theme = THEMES[0];
   let decorItems = []; // clouds / stars / embers positions for the current theme
 
+  // Relative luminance, so wind streaks can pick a colour that shows up
+  // against this theme's sky instead of vanishing into a pale one.
+  function hexLum(hex) {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.slice(0, 2), 16) / 255;
+    const g = parseInt(h.slice(2, 4), 16) / 255;
+    const b = parseInt(h.slice(4, 6), 16) / 255;
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  let streakRGB = '255,255,255';
+
   function applyTheme(t) {
     theme = t;
+    streakRGB = hexLum(t.skyTop) > 0.5 ? '40,34,30' : '255,255,255';
     const root = document.documentElement;
     if (root && root.style) {
       root.style.setProperty('--sky-top', t.skyTop);
@@ -805,6 +835,7 @@
   }
 
   let wind = 0; // px/s^2 lateral accel
+  let windPulse = 0; // 1 -> 0 flash right after the wind changes
   let currentPlayer = 0;
   let state = 'AIMING'; // AIMING | FIRING | EXPLODING | GAMEOVER
   let projectile = null;
@@ -844,11 +875,23 @@
     });
   }
 
+  const WIND_MAX = 60;
+  function windStrength() { return Math.min(1, Math.abs(wind) / WIND_MAX); }
+  function windColor() {
+    const s = windStrength();
+    if (s > 0.58) return '#ff6b6b';
+    if (s > 0.28) return '#ffc44d';
+    return '#8fe3a8';
+  }
+
   function setWind() {
-    wind = (Math.random() * 2 - 1) * 60; // -60..60
+    wind = (Math.random() * 2 - 1) * WIND_MAX;
+    const col = windColor();
     windVal.textContent = Math.abs(wind).toFixed(0);
     windArrow.textContent = wind >= 0 ? '→' : '←';
-    windArrow.style.color = Math.abs(wind) > 35 ? 'var(--danger)' : 'var(--text-main)';
+    windArrow.style.color = col;
+    windVal.style.color = col;
+    windPulse = 1; // flash the on-canvas gauge so a new wind isn't missed
   }
 
   function resetGame() {
@@ -1246,6 +1289,7 @@
       p.y += p.vy * dt;
     });
     particles = particles.filter(p => p.age < p.life);
+    windPulse = Math.max(0, windPulse - dt * 1.6);
 
     render();
     requestAnimationFrame(step);
@@ -1304,6 +1348,105 @@
     }
   }
 
+  // ---------- Wind indicators ----------
+  // Sky streaks drift with the wind so its direction and force are readable
+  // at a glance from the playfield, not just from the number in the HUD.
+  const windStreaks = [];
+  for (let i = 0; i < 22; i++) {
+    windStreaks.push({
+      x: Math.random(),
+      y: 0.04 + Math.random() * 0.6,
+      len: 0.025 + Math.random() * 0.06,
+      sp: 0.7 + Math.random() * 0.9,
+      a: 0.25 + Math.random() * 0.45
+    });
+  }
+
+  function drawWindStreaks() {
+    const s = windStrength();
+    if (s < 0.06) return; // dead calm — nothing to show
+    const dir = wind >= 0 ? 1 : -1;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 1.5;
+    for (const k of windStreaks) {
+      k.x += (wind * 1.7 * 0.016) / W * k.sp;
+      if (k.x > 1.2) k.x = -0.2;
+      if (k.x < -0.2) k.x = 1.2;
+      const len = k.len * W * (0.35 + s * 0.9);
+      ctx.strokeStyle = `rgba(${streakRGB},${(k.a * s * 0.6).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(k.x * W, k.y * H);
+      ctx.lineTo(k.x * W - dir * len, k.y * H);
+      ctx.stroke();
+    }
+  }
+
+  function pillPath(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // A dark pill keeps the gauge legible over both the bright and dark skies.
+  function drawWindGauge() {
+    const s = windStrength();
+    const col = windColor();
+    const PW = Math.min(250, W - 24);
+    const PH = 30;
+    const px = (W - PW) / 2;
+    const py = 10;
+    const midY = py + PH / 2;
+
+    ctx.save();
+    pillPath(px, py, PW, PH, 6);
+    ctx.fillStyle = 'rgba(12,11,16,0.62)';
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = `rgba(255,255,255,${(0.16 + windPulse * 0.55).toFixed(3)})`;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(236,231,225,0.6)';
+    ctx.fillText('WIND', px + 10, midY);
+
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.fillStyle = col;
+    ctx.fillText(String(Math.round(Math.abs(wind))), px + PW - 10, midY);
+
+    // Track with a centre tick, so the arrow reads as "how far from calm".
+    const g0 = px + 48, g1 = px + PW - 36;
+    const gc = (g0 + g1) / 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(g0, midY); ctx.lineTo(g1, midY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(gc, midY - 5); ctx.lineTo(gc, midY + 5); ctx.stroke();
+
+    if (s > 0.02) {
+      const dir = wind >= 0 ? 1 : -1;
+      const len = Math.max(10, s * ((g1 - g0) / 2 - 6));
+      const ex = gc + dir * len;
+      ctx.strokeStyle = col;
+      ctx.fillStyle = col;
+      ctx.lineWidth = 3 + windPulse * 1.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(gc, midY); ctx.lineTo(ex - dir * 5, midY); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ex, midY);
+      ctx.lineTo(ex - dir * 9, midY - 6);
+      ctx.lineTo(ex - dir * 9, midY + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function render() {
     ctx.clearRect(0, 0, W, H);
 
@@ -1315,6 +1458,7 @@
     ctx.fillRect(0, 0, W, H);
 
     drawDecor();
+    drawWindStreaks();
 
     // terrain
     ctx.beginPath();
@@ -1394,6 +1538,8 @@
       ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
       ctx.globalAlpha = 1;
     });
+
+    drawWindGauge(); // last, so it stays readable over everything
   }
 
   window.addEventListener('resize', resize);
