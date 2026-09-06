@@ -237,6 +237,28 @@
   }
   input[type=range]:disabled { opacity: 0.45; cursor: not-allowed; }
 
+  /* Arrow buttons flanking each slider, for single-step aiming */
+  .slider-row { display: flex; align-items: center; gap: 8px; }
+  .slider-row input[type=range] { flex: 1 1 auto; min-width: 0; }
+  .nudge {
+    flex: 0 0 auto;
+    width: 28px; height: 28px;
+    padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #12111a;
+    color: var(--text-main);
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    font-size: 11px;
+    line-height: 1;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation; /* no double-tap zoom on repeated presses */
+  }
+  .nudge:hover:not(:disabled) { background: #1e1c29; border-color: #55526a; }
+  .nudge:active:not(:disabled) { background: #2a2739; transform: scale(0.94); }
+  .nudge:disabled { opacity: 0.4; cursor: not-allowed; }
+
   /* Fingers need a bigger target than a mouse pointer does */
   @media (pointer: coarse) {
     input[type=range] { height: 42px; }
@@ -244,6 +266,7 @@
       width: 28px; height: 28px; margin-top: -11px;
     }
     input[type=range]::-moz-range-thumb { width: 28px; height: 28px; }
+    .nudge { width: 34px; height: 34px; font-size: 13px; }
   }
   select#weapon-select {
     background: #12111a;
@@ -421,6 +444,9 @@
       width: 24px; height: 24px; margin-top: -9px;
     }
     input[type=range]::-moz-range-thumb { width: 24px; height: 24px; }
+    /* the rail is only ~158px wide, so the arrows have to give some back */
+    .slider-row { gap: 6px; }
+    .nudge { width: 30px; height: 30px; }
     #fire-btn {
       width: 100%;
       grid-column: auto;
@@ -487,11 +513,19 @@
   <div id="controls">
     <div class="ctrl-group">
       <div class="ctrl-label">ANGLE <span class="val" id="angle-val">45°</span></div>
-      <input type="range" id="angle-slider" min="0" max="180" value="45">
+      <div class="slider-row">
+        <button type="button" class="nudge" id="angle-dec" aria-label="Angle down one degree">◀</button>
+        <input type="range" id="angle-slider" min="0" max="180" value="45">
+        <button type="button" class="nudge" id="angle-inc" aria-label="Angle up one degree">▶</button>
+      </div>
     </div>
     <div class="ctrl-group">
       <div class="ctrl-label">POWER <span class="val" id="power-val">50</span></div>
-      <input type="range" id="power-slider" min="0" max="100" value="50">
+      <div class="slider-row">
+        <button type="button" class="nudge" id="power-dec" aria-label="Power down one">◀</button>
+        <input type="range" id="power-slider" min="0" max="100" value="50">
+        <button type="button" class="nudge" id="power-inc" aria-label="Power up one">▶</button>
+      </div>
     </div>
     <div class="ctrl-group">
       <div class="ctrl-label">WEAPON</div>
@@ -529,7 +563,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v19</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v20</span></div>
     </div>
   </div>
 </div>
@@ -561,7 +595,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v19';
+  const BUILD = 'v20';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -1045,6 +1079,7 @@
     fireBtn.disabled = (state !== 'AIMING') || isAiTurn;
     angleSlider.disabled = isAiTurn;
     powerSlider.disabled = isAiTurn;
+    nudgeBtns.forEach(b => { b.disabled = isAiTurn; });
     syncWeaponOptions(t);
   }
 
@@ -1073,6 +1108,48 @@
     tanks[currentPlayer].power = parseInt(powerSlider.value, 10);
     powerVal.textContent = powerSlider.value;
   });
+
+  // Arrow buttons either side of each slider: a slider alone can't reliably
+  // pick one degree out of 180, especially with a fingertip.
+  function nudge(which, delta) {
+    if (isAi(currentPlayer)) return; // same condition that gates the sliders
+    const t = tanks[currentPlayer];
+    if (which === 'angle') t.angle = Math.max(0, Math.min(180, t.angle + delta));
+    else t.power = Math.max(0, Math.min(100, t.power + delta));
+    syncControlsFromTank();
+  }
+
+  const nudgeBtns = [], nudgeStops = [];
+  function bindNudge(id, which, delta) {
+    const btn = document.getElementById(id);
+    nudgeBtns.push(btn);
+    let holdTimer = null, repeatTimer = null;
+    const stop = () => {
+      clearTimeout(holdTimer);
+      clearInterval(repeatTimer);
+      holdTimer = repeatTimer = null;
+    };
+    nudgeStops.push(stop);
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); // don't let a touch turn into a scroll or a zoom
+      nudge(which, delta);
+      holdTimer = setTimeout(() => {
+        repeatTimer = setInterval(() => nudge(which, delta), 55);
+      }, 380);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+      btn.addEventListener(ev, stop);
+    }
+    // detail === 0 means the click came from the keyboard, which fires no
+    // pointer events at all; without this the buttons would be pointer-only.
+    btn.addEventListener('click', (e) => { if (e.detail === 0) nudge(which, delta); });
+  }
+  bindNudge('angle-dec', 'angle', -1);
+  bindNudge('angle-inc', 'angle', 1);
+  bindNudge('power-dec', 'power', -1);
+  bindNudge('power-inc', 'power', 1);
+  // a press held while the tab loses focus would otherwise repeat forever
+  window.addEventListener('blur', () => nudgeStops.forEach(fn => fn()));
 
   window.addEventListener('keydown', (e) => {
     if (state !== 'AIMING' || isAi(currentPlayer)) return;
