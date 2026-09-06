@@ -140,7 +140,7 @@
   }
   #wind-val {
     font-weight: bold;
-    min-width: 26px;
+    min-width: 36px;
     text-align: right;
     transition: color 0.3s ease;
   }
@@ -185,21 +185,65 @@
     color: var(--text-main);
     font-weight: bold;
   }
+  /* The element itself is the hit area, so it gets a real height and the
+     visible rail is drawn on the track pseudo-element. It used to be 4px
+     tall, which meant aiming at a hairline with a mouse or a fingertip. */
   input[type=range] {
     -webkit-appearance: none;
+    appearance: none;
     width: 100%;
-    height: 4px;
-    border-radius: 2px;
-    background: #444;
+    height: 30px;
+    margin: 0;
+    background: transparent;
     outline: none;
+    cursor: pointer;
+    touch-action: none; /* drag the thumb without the page taking the gesture */
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 3px;
+    background: #444;
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 16px; height: 16px;
+    appearance: none;
+    width: 22px; height: 22px;
+    margin-top: -8px; /* centre the thumb on the 6px track */
     border-radius: 50%;
     background: var(--text-main);
-    cursor: pointer;
     border: 2px solid #000;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+  input[type=range]::-moz-range-track {
+    height: 6px;
+    border-radius: 3px;
+    background: #444;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--text-main);
+    border: 2px solid #000;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+  input[type=range]:active::-webkit-slider-thumb {
+    box-shadow: 0 0 0 7px rgba(236,231,225,0.16);
+  }
+  input[type=range]:active::-moz-range-thumb {
+    box-shadow: 0 0 0 7px rgba(236,231,225,0.16);
+  }
+  input[type=range]:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px rgba(236,231,225,0.45);
+  }
+  input[type=range]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Fingers need a bigger target than a mouse pointer does */
+  @media (pointer: coarse) {
+    input[type=range] { height: 42px; }
+    input[type=range]::-webkit-slider-thumb {
+      width: 28px; height: 28px; margin-top: -11px;
+    }
+    input[type=range]::-moz-range-thumb { width: 28px; height: 28px; }
   }
   select#weapon-select {
     background: #12111a;
@@ -371,6 +415,12 @@
     }
     .ctrl-group { min-width: 0; width: 100%; }
     #controls select { width: 100%; }
+    /* the side rail is height-constrained, so trim the touch target a little */
+    input[type=range] { height: 32px; }
+    input[type=range]::-webkit-slider-thumb {
+      width: 24px; height: 24px; margin-top: -9px;
+    }
+    input[type=range]::-moz-range-thumb { width: 24px; height: 24px; }
     #fire-btn {
       width: 100%;
       grid-column: auto;
@@ -479,7 +529,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v16</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v17</span></div>
     </div>
   </div>
 </div>
@@ -511,7 +561,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v16';
+  const BUILD = 'v17';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -902,6 +952,9 @@
   // made wind something you could ignore. 120 makes it worth aiming off.
   const WIND_MAX = 120;
   function windStrength() { return Math.min(1, Math.abs(wind) / WIND_MAX); }
+  // px/s^2 is an internal unit and only means anything next to GRAVITY, so it
+  // is never shown. Players get a 0-10 force instead; 0 reads as calm.
+  function windForce() { return Math.round(windStrength() * 10); }
   function windColor() {
     const s = windStrength();
     if (s > 0.58) return '#ff6b6b';
@@ -912,7 +965,7 @@
   function setWind() {
     wind = (Math.random() * 2 - 1) * WIND_MAX;
     const col = windColor();
-    windVal.textContent = Math.abs(wind).toFixed(0);
+    windVal.textContent = windForce() + '/10';
     windArrow.textContent = wind >= 0 ? '→' : '←';
     windArrow.style.color = col;
     windVal.style.color = col;
@@ -1446,10 +1499,10 @@
     ctx.textAlign = 'right';
     ctx.font = 'bold 13px "Courier New", monospace';
     ctx.fillStyle = col;
-    ctx.fillText(String(Math.round(Math.abs(wind))), px + PW - 10, midY);
+    ctx.fillText(windForce() + '/10', px + PW - 10, midY);
 
     // Track with a centre tick, so the arrow reads as "how far from calm".
-    const g0 = px + 48, g1 = px + PW - 36;
+    const g0 = px + 48, g1 = px + PW - 52;
     const gc = (g0 + g1) / 2;
     ctx.strokeStyle = 'rgba(255,255,255,0.16)';
     ctx.lineWidth = 1;
