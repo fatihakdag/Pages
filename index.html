@@ -140,7 +140,7 @@
   }
   #wind-val {
     font-weight: bold;
-    min-width: 18px;
+    min-width: 26px;
     text-align: right;
     transition: color 0.3s ease;
   }
@@ -479,7 +479,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v14</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v15</span></div>
     </div>
   </div>
 </div>
@@ -511,7 +511,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v14';
+  const BUILD = 'v15';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -875,7 +875,11 @@
     });
   }
 
-  const WIND_MAX = 60;
+  // Lateral accel, against GRAVITY of 340. Drift over a shot works out to
+  // (wind / GRAVITY) * tan(angle) * range, so at 60 even a max-wind 45° shot
+  // moved the shell barely two tank widths — less than the blast radius, which
+  // made wind something you could ignore. 120 makes it worth aiming off.
+  const WIND_MAX = 120;
   function windStrength() { return Math.min(1, Math.abs(wind) / WIND_MAX); }
   function windColor() {
     const s = windStrength();
@@ -1257,6 +1261,7 @@
             let vx = c.vx, vy = c.vy;
             let t = 0;
             while (y < groundHeightAt(x) && t < 2) {
+              vx += wind * 0.05; // bomblets drift like any other shell
               vy += GRAVITY * 0.05;
               x += vx * 0.05;
               y += vy * 0.05;
@@ -1368,8 +1373,10 @@
     const dir = wind >= 0 ? 1 : -1;
     ctx.lineCap = 'round';
     ctx.lineWidth = 1.5;
+    // Speed off normalized strength, so retuning WIND_MAX doesn't change the pace.
+    const drift = (wind >= 0 ? s : -s) * 190 * 0.016;
     for (const k of windStreaks) {
-      k.x += (wind * 1.7 * 0.016) / W * k.sp;
+      k.x += drift / W * k.sp;
       if (k.x > 1.2) k.x = -0.2;
       if (k.x < -0.2) k.x = 1.2;
       const len = k.len * W * (0.35 + s * 0.9);
