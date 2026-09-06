@@ -18,6 +18,8 @@
     --panel-line: #3a3844;
     --accent-p1: #ff7a45;
     --accent-p2: #4dc0ff;
+    --accent-p3: #8ee06a;
+    --accent-p4: #d98cff;
     --text-main: #ece7e1;
     --text-dim: #8d8a99;
     --danger: #e14b4b;
@@ -56,25 +58,42 @@
     flex: 0 0 auto;
     z-index: 5;
   }
+  #players-row {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
   .player-card {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    min-width: 140px;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 190px;
   }
+  /* A class selector would otherwise beat the UA rule for [hidden] */
+  .player-card[hidden] { display: none; }
   .player-card.active {
     outline: 1px dashed currentColor;
     outline-offset: 4px;
   }
+  .player-card.dead { opacity: 0.38; }
   .player-name {
     font-size: 12px;
     letter-spacing: 0.5px;
     font-weight: bold;
+    white-space: nowrap;
   }
+  .pn-abbr { display: none; }
   .p1 { color: var(--accent-p1); }
   .p2 { color: var(--accent-p2); }
+  .p3 { color: var(--accent-p3); }
+  .p4 { color: var(--accent-p4); }
   .health-bar-track {
-    width: 130px;
+    width: 100%;
+    max-width: 150px;
     height: 10px;
     background: #000;
     border: 1px solid var(--panel-line);
@@ -102,10 +121,27 @@
     color: var(--text-main);
     margin-bottom: 2px;
   }
-  #wind-row { display: flex; align-items: center; gap: 6px; }
+  #wind-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
   #wind-arrow {
     display: inline-block;
-    font-size: 16px;
+    font-size: 20px;
+    font-weight: bold;
+    line-height: 1;
+    transition: color 0.3s ease;
+  }
+  #wind-val {
+    font-weight: bold;
+    min-width: 36px;
+    text-align: right;
     transition: color 0.3s ease;
   }
 
@@ -149,21 +185,65 @@
     color: var(--text-main);
     font-weight: bold;
   }
+  /* The element itself is the hit area, so it gets a real height and the
+     visible rail is drawn on the track pseudo-element. It used to be 4px
+     tall, which meant aiming at a hairline with a mouse or a fingertip. */
   input[type=range] {
     -webkit-appearance: none;
+    appearance: none;
     width: 100%;
-    height: 4px;
-    border-radius: 2px;
-    background: #444;
+    height: 30px;
+    margin: 0;
+    background: transparent;
     outline: none;
+    cursor: pointer;
+    touch-action: none; /* drag the thumb without the page taking the gesture */
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 3px;
+    background: #444;
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 16px; height: 16px;
+    appearance: none;
+    width: 22px; height: 22px;
+    margin-top: -8px; /* centre the thumb on the 6px track */
     border-radius: 50%;
     background: var(--text-main);
-    cursor: pointer;
     border: 2px solid #000;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+  input[type=range]::-moz-range-track {
+    height: 6px;
+    border-radius: 3px;
+    background: #444;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--text-main);
+    border: 2px solid #000;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+  input[type=range]:active::-webkit-slider-thumb {
+    box-shadow: 0 0 0 7px rgba(236,231,225,0.16);
+  }
+  input[type=range]:active::-moz-range-thumb {
+    box-shadow: 0 0 0 7px rgba(236,231,225,0.16);
+  }
+  input[type=range]:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px rgba(236,231,225,0.45);
+  }
+  input[type=range]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Fingers need a bigger target than a mouse pointer does */
+  @media (pointer: coarse) {
+    input[type=range] { height: 42px; }
+    input[type=range]::-webkit-slider-thumb {
+      width: 28px; height: 28px; margin-top: -11px;
+    }
+    input[type=range]::-moz-range-thumb { width: 28px; height: 28px; }
   }
   select#weapon-select {
     background: #12111a;
@@ -229,7 +309,7 @@
     border-radius: 3px;
     font-size: 13px;
   }
-  #ai-badge {
+  .ai-badge {
     font-size: 9px;
     color: var(--text-dim);
     border: 1px solid var(--panel-line);
@@ -241,13 +321,17 @@
   /* ---- Narrow / portrait screens ---- */
   @media (max-width: 720px) and (orientation: portrait) {
     #hud { padding: 5px 8px; gap: 6px; }
-    .player-card { min-width: 0; flex: 1 1 0; gap: 2px; }
+    #players-row { gap: 6px; }
+    .player-card { gap: 2px; }
     .player-name { font-size: 10px; }
-    .health-bar-track { width: 100%; max-width: 110px; height: 8px; }
-    .health-text { font-size: 9px; }
+    .pn-full { display: none; }
+    .pn-abbr { display: inline; }
+    .health-bar-track { max-width: 110px; height: 8px; }
+    /* four cards on a phone leave ~50px each — keep "100 / 100" on one line */
+    .health-text { font-size: 8px; white-space: nowrap; }
     #center-info { min-width: 0; flex: 0 0 auto; font-size: 10px; }
     #turn-banner { font-size: 10px; }
-    #ai-badge { font-size: 8px; margin-left: 3px; }
+    .ai-badge { font-size: 8px; margin-left: 3px; padding: 0 3px; }
 
     #controls {
       display: grid;
@@ -258,7 +342,7 @@
     }
     .ctrl-group { min-width: 0; }
     .ctrl-label { font-size: 9px; }
-    select#weapon-select, select#difficulty-select {
+    #controls select {
       width: 100%;
       font-size: 11px;
       padding: 5px 6px;
@@ -302,9 +386,9 @@
       padding: 8px;
       gap: 10px;
     }
-    .player-card { align-items: stretch !important; flex: 0 0 auto; }
-    .health-bar-track { width: 100% !important; max-width: none; }
-    .health-bar-fill { margin-left: 0 !important; }
+    #players-row { flex-direction: column; flex: 0 0 auto; gap: 8px; }
+    .player-card { flex: 0 0 auto; max-width: none; }
+    .health-bar-track { max-width: none; }
     #center-info {
       align-items: flex-start;
       text-align: left;
@@ -331,6 +415,12 @@
     }
     .ctrl-group { min-width: 0; width: 100%; }
     #controls select { width: 100%; }
+    /* the side rail is height-constrained, so trim the touch target a little */
+    input[type=range] { height: 32px; }
+    input[type=range]::-webkit-slider-thumb {
+      width: 24px; height: 24px; margin-top: -9px;
+    }
+    input[type=range]::-moz-range-thumb { width: 24px; height: 24px; }
     #fire-btn {
       width: 100%;
       grid-column: auto;
@@ -355,22 +445,33 @@
 <body>
 <div id="app">
   <div id="hud">
-    <div class="player-card p1" id="card-p1">
-      <div class="player-name">PLAYER 1</div>
-      <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div></div>
-      <div class="health-text" id="hp-text-1">100 / 100</div>
+    <div id="players-row">
+      <div class="player-card p1" id="card-p1">
+        <div class="player-name"><span class="pn-full">PLAYER 1</span><span class="pn-abbr">P1</span> <span class="ai-badge" id="ai-badge-1">CPU</span></div>
+        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div></div>
+        <div class="health-text" id="hp-text-1">100 / 100</div>
+      </div>
+      <div class="player-card p2" id="card-p2">
+        <div class="player-name"><span class="pn-full">PLAYER 2</span><span class="pn-abbr">P2</span> <span class="ai-badge" id="ai-badge-2">CPU</span></div>
+        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%;"></div></div>
+        <div class="health-text" id="hp-text-2">100 / 100</div>
+      </div>
+      <div class="player-card p3" id="card-p3" hidden>
+        <div class="player-name"><span class="pn-full">PLAYER 3</span><span class="pn-abbr">P3</span> <span class="ai-badge" id="ai-badge-3">CPU</span></div>
+        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-3" style="background:var(--accent-p3); width:100%;"></div></div>
+        <div class="health-text" id="hp-text-3">100 / 100</div>
+      </div>
+      <div class="player-card p4" id="card-p4" hidden>
+        <div class="player-name"><span class="pn-full">PLAYER 4</span><span class="pn-abbr">P4</span> <span class="ai-badge" id="ai-badge-4">CPU</span></div>
+        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-4" style="background:var(--accent-p4); width:100%;"></div></div>
+        <div class="health-text" id="hp-text-4">100 / 100</div>
+      </div>
     </div>
 
     <div id="center-info">
       <div id="turn-banner">—</div>
       <div id="level-info" style="font-size:10px; color:var(--text-dim); margin-bottom:2px;">—</div>
       <div id="wind-row">WIND <span id="wind-arrow">→</span> <span id="wind-val">0</span></div>
-    </div>
-
-    <div class="player-card p2" id="card-p2" style="align-items:flex-end;">
-      <div class="player-name">PLAYER 2 <span id="ai-badge">CPU</span></div>
-      <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%; margin-left:auto;"></div></div>
-      <div class="health-text" id="hp-text-2">100 / 100</div>
     </div>
   </div>
 
@@ -402,10 +503,18 @@
       <div class="ctrl-label" id="ammo-readout" style="margin-top:2px;"></div>
     </div>
     <div class="ctrl-group">
-      <div class="ctrl-label">OPPONENT</div>
+      <div class="ctrl-label">TANKS</div>
+      <select id="count-select">
+        <option value="2" selected>2 Players</option>
+        <option value="3">3 Players</option>
+        <option value="4">4 Players</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">OPPONENTS</div>
       <select id="mode-select">
         <option value="cpu" selected>vs CPU</option>
-        <option value="human">2 Players</option>
+        <option value="human">All Human</option>
       </select>
     </div>
     <div class="ctrl-group" id="difficulty-group">
@@ -420,7 +529,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v12</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v17</span></div>
     </div>
   </div>
 </div>
@@ -452,7 +561,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v12';
+  const BUILD = 'v17';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -473,37 +582,51 @@
   const overlayTitle = document.getElementById('overlay-title');
   const overlaySub = document.getElementById('overlay-sub');
   const restartBtn = document.getElementById('restart-btn');
-  const aiBadge = document.getElementById('ai-badge');
   const difficultySelect = document.getElementById('difficulty-select');
   const modeSelect = document.getElementById('mode-select');
+  const countSelect = document.getElementById('count-select');
   const difficultyGroup = document.getElementById('difficulty-group');
 
-  const hpFill = [document.getElementById('hp-fill-1'), document.getElementById('hp-fill-2')];
-  const hpText = [document.getElementById('hp-text-1'), document.getElementById('hp-text-2')];
-  const cards = [document.getElementById('card-p1'), document.getElementById('card-p2')];
+  const MAX_PLAYERS = 4;
+  const PLAYER_VARS = ['--accent-p1', '--accent-p2', '--accent-p3', '--accent-p4'];
+  const hpFill = [], hpText = [], cards = [], aiBadges = [];
+  for (let i = 1; i <= MAX_PLAYERS; i++) {
+    hpFill.push(document.getElementById('hp-fill-' + i));
+    hpText.push(document.getElementById('hp-text-' + i));
+    cards.push(document.getElementById('card-p' + i));
+    aiBadges.push(document.getElementById('ai-badge-' + i));
+  }
 
-  let AI_ENABLED = modeSelect.value === 'cpu'; // false = Tank 2 is a second human
-  let aiDifficulty = difficultySelect.value;   // 'easy' | 'medium' | 'hard' | 'brutal'
+  let cpuMode = modeSelect.value === 'cpu'; // false = every tank is a local human
+  let playerCount = parseInt(countSelect.value, 10);
+  let aiDifficulty = difficultySelect.value; // 'easy' | 'medium' | 'hard' | 'brutal'
+
+  // Player 1 is always the local human; every other seat is a CPU when enabled.
+  function isAi(i) { return cpuMode && i > 0; }
+  function playerName(i) { return (isAi(i) ? 'CPU ' : 'Player ') + (i + 1); }
 
   function refreshOpponentUi() {
-    aiBadge.style.display = AI_ENABLED ? 'inline-block' : 'none';
-    aiBadge.textContent = 'CPU · ' + aiDifficulty.toUpperCase();
     // CPU level only matters when playing against the computer
-    difficultyGroup.style.display = AI_ENABLED ? '' : 'none';
+    difficultyGroup.style.display = cpuMode ? '' : 'none';
   }
 
   modeSelect.addEventListener('change', () => {
-    AI_ENABLED = modeSelect.value === 'cpu';
+    cpuMode = modeSelect.value === 'cpu';
     refreshOpponentUi();
     updateHUD();
     syncControlsFromTank();
-    // if we just switched to CPU mid-way through tank 2's turn, let it play
+    // if we just switched to CPU mid-way through a CPU seat's turn, let it play
     maybeAiTurn();
+  });
+
+  // Changing the roster mid-round has no sane continuation — start a fresh round.
+  countSelect.addEventListener('change', () => {
+    playerCount = parseInt(countSelect.value, 10);
+    resetGame();
   });
 
   difficultySelect.addEventListener('change', () => {
     aiDifficulty = difficultySelect.value;
-    refreshOpponentUi();
   });
   weaponSelect.addEventListener('change', () => {
     const remaining = tanks[currentPlayer].ammo[weaponSelect.value];
@@ -511,6 +634,18 @@
   });
 
   let W = 0, H = 0, DPR = 1;
+
+  // Tanks are placed at fractions of the width, but the physics below is in
+  // absolute pixels, so without this a shot's range would be a fixed pixel
+  // distance on every canvas: the same power crosses 72% of a phone screen and
+  // 11% of an ultrawide, and past ~1900px the enemy is out of reach at full
+  // power. Scaling every length-per-time and length-per-time^2 quantity by the
+  // canvas width makes trajectories geometrically similar at any size — the
+  // same angle and power always land on the same *relative* spot, and flight
+  // times stay put. W_REF is the width the tuning above is expressed in.
+  const W_REF = 1000;
+  let physScale = 1;
+
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = gameWrap.clientWidth;
@@ -529,6 +664,15 @@
     canvas.style.width = W + 'px';
     canvas.style.height = H + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const prevScale = physScale;
+    physScale = W / W_REF;
+    // A shell already in the air was launched under the old scale; rescale it
+    // so it keeps flying the arc it was aimed on.
+    if (projectile && prevScale > 0) {
+      const k = physScale / prevScale;
+      projectile.vx *= k;
+      projectile.vy *= k;
+    }
     if (terrain.length) {
       // Keep tanks at the same relative spot when the canvas changes size,
       // otherwise rotating the device leaves them stranded off-screen.
@@ -609,8 +753,21 @@
   let theme = THEMES[0];
   let decorItems = []; // clouds / stars / embers positions for the current theme
 
+  // Relative luminance, so wind streaks can pick a colour that shows up
+  // against this theme's sky instead of vanishing into a pale one.
+  function hexLum(hex) {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.slice(0, 2), 16) / 255;
+    const g = parseInt(h.slice(2, 4), 16) / 255;
+    const b = parseInt(h.slice(4, 6), 16) / 255;
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  let streakRGB = '255,255,255';
+
   function applyTheme(t) {
     theme = t;
+    streakRGB = hexLum(t.skyTop) > 0.5 ? '40,34,30' : '255,255,255';
     const root = document.documentElement;
     if (root && root.style) {
       root.style.setProperty('--sky-top', t.skyTop);
@@ -742,16 +899,14 @@
   const TANK_W = 26, TANK_H = 14;
   const MAX_HP = 100;
 
-  let tanks = [
-    { x: 0, hp: MAX_HP, color: getVar('--accent-p1'), alive: true, angle: 45, power: 50, ammo: null },
-    { x: 0, hp: MAX_HP, color: getVar('--accent-p2'), alive: true, angle: 135, power: 50, ammo: null }
-  ];
+  let tanks = [];
 
   function getVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
   let wind = 0; // px/s^2 lateral accel
+  let windPulse = 0; // 1 -> 0 flash right after the wind changes
   let currentPlayer = 0;
   let state = 'AIMING'; // AIMING | FIRING | EXPLODING | GAMEOVER
   let projectile = null;
@@ -772,30 +927,60 @@
     return a;
   }
 
+  function buildTanks() {
+    tanks = [];
+    for (let i = 0; i < playerCount; i++) {
+      tanks.push({ x: 0, hp: MAX_HP, color: getVar(PLAYER_VARS[i]), alive: true, angle: 45, power: 50, ammo: freshAmmo() });
+    }
+  }
+
+  // One slot per tank across the width, jittered inside it, so 2, 3 or 4 tanks
+  // all start well spaced instead of piling up at the edges.
   function placeTanks() {
-    const margin = 0.12;
-    const x1 = W * (margin + Math.random() * 0.12);
-    const x2 = W * (1 - margin - Math.random() * 0.12);
-    tanks[0].x = x1;
-    tanks[1].x = x2;
+    const slot = 1 / tanks.length;
+    tanks.forEach((t, i) => {
+      const frac = (i + 0.2 + Math.random() * 0.6) * slot;
+      t.x = Math.max(24, Math.min(W - 24, W * frac));
+      t.angle = t.x < W / 2 ? 45 : 135; // start aimed toward the middle of the map
+      t.power = 50;
+    });
+  }
+
+  // Lateral accel, against GRAVITY of 340. Drift over a shot works out to
+  // (wind / GRAVITY) * tan(angle) * range, so at 60 even a max-wind 45° shot
+  // moved the shell barely two tank widths — less than the blast radius, which
+  // made wind something you could ignore. 120 makes it worth aiming off.
+  const WIND_MAX = 120;
+  function windStrength() { return Math.min(1, Math.abs(wind) / WIND_MAX); }
+  // px/s^2 is an internal unit and only means anything next to GRAVITY, so it
+  // is never shown. Players get a 0-10 force instead; 0 reads as calm.
+  function windForce() { return Math.round(windStrength() * 10); }
+  function windColor() {
+    const s = windStrength();
+    if (s > 0.58) return '#ff6b6b';
+    if (s > 0.28) return '#ffc44d';
+    return '#8fe3a8';
   }
 
   function setWind() {
-    wind = (Math.random() * 2 - 1) * 60; // -60..60
-    windVal.textContent = Math.abs(wind).toFixed(0);
+    wind = (Math.random() * 2 - 1) * WIND_MAX;
+    const col = windColor();
+    windVal.textContent = windForce() + '/10';
     windArrow.textContent = wind >= 0 ? '→' : '←';
-    windArrow.style.color = Math.abs(wind) > 35 ? 'var(--danger)' : 'var(--text-main)';
+    windArrow.style.color = col;
+    windVal.style.color = col;
+    windPulse = 1; // flash the on-canvas gauge so a new wind isn't missed
   }
 
   function resetGame() {
-    tanks[0].hp = MAX_HP; tanks[0].alive = true; tanks[0].ammo = freshAmmo();
-    tanks[1].hp = MAX_HP; tanks[1].alive = true; tanks[1].ammo = freshAmmo();
+    buildTanks();
     currentPlayer = 0;
     state = 'AIMING';
     projectile = null;
     trail = [];
     explosions = [];
     particles = [];
+    clusterQueue = [];
     nextTheme();
     newTerrain();
     placeTanks();
@@ -807,20 +992,25 @@
   }
 
   function updateHUD() {
-    for (let i = 0; i < 2; i++) {
-      const pct = Math.max(0, tanks[i].hp / MAX_HP * 100);
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+      const t = tanks[i];
+      cards[i].hidden = !t;
+      if (!t) continue;
+      const pct = Math.max(0, t.hp / MAX_HP * 100);
       hpFill[i].style.width = pct + '%';
-      hpText[i].textContent = `${Math.max(0, Math.round(tanks[i].hp))} / ${MAX_HP}`;
+      hpText[i].textContent = `${Math.max(0, Math.round(t.hp))} / ${MAX_HP}`;
       cards[i].classList.toggle('active', currentPlayer === i && state === 'AIMING');
+      cards[i].classList.toggle('dead', !t.alive);
+      aiBadges[i].style.display = isAi(i) ? 'inline-block' : 'none';
     }
     if (state === 'GAMEOVER') {
       turnBanner.textContent = 'ROUND OVER';
     } else if (state !== 'AIMING') {
       turnBanner.textContent = 'IN FLIGHT…';
-    } else if (currentPlayer === 1 && AI_ENABLED) {
-      turnBanner.textContent = 'CPU THINKING…';
+    } else if (isAi(currentPlayer)) {
+      turnBanner.textContent = `${playerName(currentPlayer).toUpperCase()} THINKING…`;
     } else {
-      turnBanner.textContent = `PLAYER ${currentPlayer + 1} — AIM & FIRE`;
+      turnBanner.textContent = `${playerName(currentPlayer).toUpperCase()} — AIM & FIRE`;
     }
     levelInfo.textContent = `LEVEL ${level} · ${theme.name} · ${BUILD}`;
   }
@@ -831,7 +1021,7 @@
     powerSlider.value = t.power;
     angleVal.textContent = t.angle + '°';
     powerVal.textContent = t.power;
-    const isAiTurn = AI_ENABLED && currentPlayer === 1;
+    const isAiTurn = isAi(currentPlayer);
     fireBtn.disabled = (state !== 'AIMING') || isAiTurn;
     angleSlider.disabled = isAiTurn;
     powerSlider.disabled = isAiTurn;
@@ -865,7 +1055,7 @@
   });
 
   window.addEventListener('keydown', (e) => {
-    if (state !== 'AIMING' || (AI_ENABLED && currentPlayer === 1)) return;
+    if (state !== 'AIMING' || isAi(currentPlayer)) return;
     const t = tanks[currentPlayer];
     if (e.key === 'ArrowLeft') { t.angle = Math.max(0, t.angle - 1); syncControlsFromTank(); e.preventDefault(); }
     else if (e.key === 'ArrowRight') { t.angle = Math.min(180, t.angle + 1); syncControlsFromTank(); e.preventDefault(); }
@@ -884,14 +1074,13 @@
     if (shooter.ammo[weaponKey] <= 0) weaponKey = 'standard'; // safety fallback, shouldn't normally trigger
     shooter.ammo[weaponKey] -= 1;
     const angleRad = shooter.angle * Math.PI / 180;
-    // player 0 shoots rightward-biased angle convention, player 1 mirrors
-    const dir = currentPlayer === 0 ? 1 : -1;
-    const speed = shooter.power * 6.2;
-    const vx = Math.cos(angleRad) * speed * dir;
+    // Angles are in world space for every tank: 0° = due right, 180° = due left.
+    const speed = shooter.power * 6.2 * physScale;
+    const vx = Math.cos(angleRad) * speed;
     const vy = -Math.sin(angleRad) * speed;
     const barrelLen = 20;
     projectile = {
-      x: shooter.x + dir * barrelLen * Math.cos(angleRad),
+      x: shooter.x + barrelLen * Math.cos(angleRad),
       y: groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad),
       vx, vy,
       weapon: weaponKey,
@@ -946,9 +1135,10 @@
     const alive = tanks.filter(t => t.alive);
     if (alive.length <= 1) {
       state = 'GAMEOVER';
-      const winnerIdx = tanks[0].alive ? 0 : 1;
-      const winnerName = (winnerIdx === 1 && AI_ENABLED) ? 'CPU' : `Player ${winnerIdx + 1}`;
-      overlayTitle.textContent = `${winnerName} wins!`;
+      const winnerIdx = tanks.findIndex(t => t.alive);
+      overlayTitle.textContent = winnerIdx === -1
+        ? 'Everybody loses!'
+        : `${playerName(winnerIdx)} wins!`;
       overlaySub.textContent = 'Tap Play Again for a new terrain and rematch.';
       overlay.classList.add('show');
       updateHUD();
@@ -959,7 +1149,9 @@
 
   function nextTurn() {
     if (endTurnCheckWin()) return;
-    currentPlayer = 1 - currentPlayer;
+    // at least two tanks are alive here, so this always lands on someone else
+    do { currentPlayer = (currentPlayer + 1) % tanks.length; }
+    while (!tanks[currentPlayer].alive);
     setWind();
     state = 'AIMING';
     updateHUD();
@@ -978,15 +1170,15 @@
   // Simulates a shot with the same physics as the real game and returns
   // where it would land (x coordinate), so the AI can search for the
   // angle/power combo that actually lands on the target.
-  function predictLandingX(x0, y0, angleDeg, power, windAccel, dir) {
+  function predictLandingX(x0, y0, angleDeg, power, windAccel) {
     const angleRad = angleDeg * Math.PI / 180;
-    let vx = Math.cos(angleRad) * power * 6.2 * dir;
-    let vy = -Math.sin(angleRad) * power * 6.2;
+    let vx = Math.cos(angleRad) * power * 6.2 * physScale;
+    let vy = -Math.sin(angleRad) * power * 6.2 * physScale;
     let x = x0, y = y0, t = 0;
     const dt = 0.03;
     while (t < 12) {
-      vx += windAccel * dt;
-      vy += GRAVITY * dt;
+      vx += windAccel * physScale * dt;
+      vy += GRAVITY * physScale * dt;
       x += vx * dt;
       y += vy * dt;
       t += dt;
@@ -998,18 +1190,22 @@
 
   function chooseAiShot(difficulty) {
     const cfg = DIFFICULTY_SETTINGS[difficulty] || DIFFICULTY_SETTINGS.medium;
-    const shooter = tanks[1];
-    const target = tanks[0];
-    const dir = -1; // tank 2 always fires leftward
+    const shooter = tanks[currentPlayer];
+    const targets = tanks.filter((t, i) => t.alive && i !== currentPlayer);
     const barrelLen = 20;
     let bestAngle = 45, bestPower = 55, bestErr = Infinity;
 
-    for (let angle = 12; angle <= 85; angle += cfg.angleStep) {
+    // Sweep the full 0-180 arc: with more than two tanks an enemy can be on
+    // either side. A landing spot is scored against whichever enemy it is
+    // closest to, so the AI naturally picks the target it can actually reach.
+    for (let angle = 8; angle <= 172; angle += cfg.angleStep) {
       const angleRad = angle * Math.PI / 180;
       const y0 = groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad);
       for (let power = 15; power <= 100; power += cfg.powerStep) {
-        const landX = predictLandingX(shooter.x, y0, angle, power, wind, dir);
-        const err = Math.abs(landX - target.x);
+        const landX = predictLandingX(shooter.x, y0, angle, power, wind);
+        if (Math.abs(landX - shooter.x) < TANK_W) continue; // don't shell yourself
+        let err = Infinity;
+        for (const t of targets) err = Math.min(err, Math.abs(landX - t.x));
         if (err < bestErr) {
           bestErr = err;
           bestAngle = angle;
@@ -1032,13 +1228,14 @@
   }
 
   function maybeAiTurn() {
-    if (!AI_ENABLED || currentPlayer !== 1 || state !== 'AIMING') return;
+    if (!isAi(currentPlayer) || state !== 'AIMING') return;
     updateHUD();
     const cfg = DIFFICULTY_SETTINGS[aiDifficulty] || DIFFICULTY_SETTINGS.medium;
+    const seat = currentPlayer;
     setTimeout(() => {
-      if (state !== 'AIMING' || currentPlayer !== 1) return;
+      if (state !== 'AIMING' || currentPlayer !== seat) return;
       const shot = chooseAiShot(aiDifficulty);
-      const shooter = tanks[1];
+      const shooter = tanks[seat];
       shooter.angle = shot.angle;
       shooter.power = shot.power;
       // Stronger CPU levels lean on the bigger/smarter weapons more often,
@@ -1070,8 +1267,8 @@
       const sub = 2;
       for (let s = 0; s < sub; s++) {
         const sdt = dt / sub;
-        projectile.vx += wind * sdt;
-        projectile.vy += GRAVITY * sdt;
+        projectile.vx += wind * physScale * sdt;
+        projectile.vy += GRAVITY * physScale * sdt;
         projectile.x += projectile.vx * sdt;
         projectile.y += projectile.vy * sdt;
       }
@@ -1108,9 +1305,9 @@
           applyDamageAndCrater(px, py, weaponKey);
           for (let i = 0; i < w.clusterCount; i++) {
             clusterQueue.push({
-              x: px + (Math.random() * 2 - 1) * 60,
-              vy: -(80 + Math.random() * 60),
-              vx: (Math.random() * 2 - 1) * 40,
+              x: px + (Math.random() * 2 - 1) * 60 * physScale,
+              vy: -(80 + Math.random() * 60) * physScale,
+              vx: (Math.random() * 2 - 1) * 40 * physScale,
               delay: i * 0.08
             });
           }
@@ -1134,11 +1331,12 @@
           c.delay -= dt;
           if (c.delay <= 0) {
             // simulate a short lob then explode
-            let x = c.x, y = groundHeightAt(c.x) - 200;
+            let x = c.x, y = groundHeightAt(c.x) - 200 * physScale;
             let vx = c.vx, vy = c.vy;
             let t = 0;
             while (y < groundHeightAt(x) && t < 2) {
-              vy += GRAVITY * 0.05;
+              vx += wind * physScale * 0.05; // bomblets drift like any other shell
+              vy += GRAVITY * physScale * 0.05;
               x += vx * 0.05;
               y += vy * 0.05;
               t += 0.05;
@@ -1170,6 +1368,7 @@
       p.y += p.vy * dt;
     });
     particles = particles.filter(p => p.age < p.life);
+    windPulse = Math.max(0, windPulse - dt * 1.6);
 
     render();
     requestAnimationFrame(step);
@@ -1228,6 +1427,107 @@
     }
   }
 
+  // ---------- Wind indicators ----------
+  // Sky streaks drift with the wind so its direction and force are readable
+  // at a glance from the playfield, not just from the number in the HUD.
+  const windStreaks = [];
+  for (let i = 0; i < 22; i++) {
+    windStreaks.push({
+      x: Math.random(),
+      y: 0.04 + Math.random() * 0.6,
+      len: 0.025 + Math.random() * 0.06,
+      sp: 0.7 + Math.random() * 0.9,
+      a: 0.25 + Math.random() * 0.45
+    });
+  }
+
+  function drawWindStreaks() {
+    const s = windStrength();
+    if (s < 0.06) return; // dead calm — nothing to show
+    const dir = wind >= 0 ? 1 : -1;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 1.5;
+    // Speed off normalized strength, so retuning WIND_MAX doesn't change the pace.
+    const drift = (wind >= 0 ? s : -s) * 190 * 0.016;
+    for (const k of windStreaks) {
+      k.x += drift / W * k.sp;
+      if (k.x > 1.2) k.x = -0.2;
+      if (k.x < -0.2) k.x = 1.2;
+      const len = k.len * W * (0.35 + s * 0.9);
+      ctx.strokeStyle = `rgba(${streakRGB},${(k.a * s * 0.6).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(k.x * W, k.y * H);
+      ctx.lineTo(k.x * W - dir * len, k.y * H);
+      ctx.stroke();
+    }
+  }
+
+  function pillPath(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // A dark pill keeps the gauge legible over both the bright and dark skies.
+  function drawWindGauge() {
+    const s = windStrength();
+    const col = windColor();
+    const PW = Math.min(250, W - 24);
+    const PH = 30;
+    const px = (W - PW) / 2;
+    const py = 10;
+    const midY = py + PH / 2;
+
+    ctx.save();
+    pillPath(px, py, PW, PH, 6);
+    ctx.fillStyle = 'rgba(12,11,16,0.62)';
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = `rgba(255,255,255,${(0.16 + windPulse * 0.55).toFixed(3)})`;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(236,231,225,0.6)';
+    ctx.fillText('WIND', px + 10, midY);
+
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.fillStyle = col;
+    ctx.fillText(windForce() + '/10', px + PW - 10, midY);
+
+    // Track with a centre tick, so the arrow reads as "how far from calm".
+    const g0 = px + 48, g1 = px + PW - 52;
+    const gc = (g0 + g1) / 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(g0, midY); ctx.lineTo(g1, midY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(gc, midY - 5); ctx.lineTo(gc, midY + 5); ctx.stroke();
+
+    if (s > 0.02) {
+      const dir = wind >= 0 ? 1 : -1;
+      const len = Math.max(10, s * ((g1 - g0) / 2 - 6));
+      const ex = gc + dir * len;
+      ctx.strokeStyle = col;
+      ctx.fillStyle = col;
+      ctx.lineWidth = 3 + windPulse * 1.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(gc, midY); ctx.lineTo(ex - dir * 5, midY); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ex, midY);
+      ctx.lineTo(ex - dir * 9, midY - 6);
+      ctx.lineTo(ex - dir * 9, midY + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function render() {
     ctx.clearRect(0, 0, W, H);
 
@@ -1239,6 +1539,7 @@
     ctx.fillRect(0, 0, W, H);
 
     drawDecor();
+    drawWindStreaks();
 
     // terrain
     ctx.beginPath();
@@ -1258,7 +1559,7 @@
     ctx.stroke();
 
     // tanks
-    tanks.forEach((t, i) => {
+    tanks.forEach(t => {
       if (!t.alive) return;
       const gy = groundHeightAt(t.x);
       ctx.save();
@@ -1270,13 +1571,12 @@
       ctx.fillStyle = 'rgba(0,0,0,0.35)';
       ctx.fillRect(-TANK_W / 2 - 2, -4, TANK_W + 4, 4);
       // barrel
-      const dir = i === 0 ? 1 : -1;
       const ang = t.angle * Math.PI / 180;
       ctx.strokeStyle = t.color;
       ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.moveTo(0, -TANK_H + 2);
-      ctx.lineTo(dir * 20 * Math.cos(ang), -TANK_H + 2 - 20 * Math.sin(ang));
+      ctx.lineTo(20 * Math.cos(ang), -TANK_H + 2 - 20 * Math.sin(ang));
       ctx.stroke();
       ctx.restore();
     });
@@ -1319,6 +1619,8 @@
       ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
       ctx.globalAlpha = 1;
     });
+
+    drawWindGauge(); // last, so it stays readable over everything
   }
 
   window.addEventListener('resize', resize);
