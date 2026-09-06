@@ -479,7 +479,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v15</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v16</span></div>
     </div>
   </div>
 </div>
@@ -511,7 +511,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v15';
+  const BUILD = 'v16';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -584,6 +584,18 @@
   });
 
   let W = 0, H = 0, DPR = 1;
+
+  // Tanks are placed at fractions of the width, but the physics below is in
+  // absolute pixels, so without this a shot's range would be a fixed pixel
+  // distance on every canvas: the same power crosses 72% of a phone screen and
+  // 11% of an ultrawide, and past ~1900px the enemy is out of reach at full
+  // power. Scaling every length-per-time and length-per-time^2 quantity by the
+  // canvas width makes trajectories geometrically similar at any size — the
+  // same angle and power always land on the same *relative* spot, and flight
+  // times stay put. W_REF is the width the tuning above is expressed in.
+  const W_REF = 1000;
+  let physScale = 1;
+
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = gameWrap.clientWidth;
@@ -602,6 +614,15 @@
     canvas.style.width = W + 'px';
     canvas.style.height = H + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const prevScale = physScale;
+    physScale = W / W_REF;
+    // A shell already in the air was launched under the old scale; rescale it
+    // so it keeps flying the arc it was aimed on.
+    if (projectile && prevScale > 0) {
+      const k = physScale / prevScale;
+      projectile.vx *= k;
+      projectile.vy *= k;
+    }
     if (terrain.length) {
       // Keep tanks at the same relative spot when the canvas changes size,
       // otherwise rotating the device leaves them stranded off-screen.
@@ -1001,7 +1022,7 @@
     shooter.ammo[weaponKey] -= 1;
     const angleRad = shooter.angle * Math.PI / 180;
     // Angles are in world space for every tank: 0° = due right, 180° = due left.
-    const speed = shooter.power * 6.2;
+    const speed = shooter.power * 6.2 * physScale;
     const vx = Math.cos(angleRad) * speed;
     const vy = -Math.sin(angleRad) * speed;
     const barrelLen = 20;
@@ -1098,13 +1119,13 @@
   // angle/power combo that actually lands on the target.
   function predictLandingX(x0, y0, angleDeg, power, windAccel) {
     const angleRad = angleDeg * Math.PI / 180;
-    let vx = Math.cos(angleRad) * power * 6.2;
-    let vy = -Math.sin(angleRad) * power * 6.2;
+    let vx = Math.cos(angleRad) * power * 6.2 * physScale;
+    let vy = -Math.sin(angleRad) * power * 6.2 * physScale;
     let x = x0, y = y0, t = 0;
     const dt = 0.03;
     while (t < 12) {
-      vx += windAccel * dt;
-      vy += GRAVITY * dt;
+      vx += windAccel * physScale * dt;
+      vy += GRAVITY * physScale * dt;
       x += vx * dt;
       y += vy * dt;
       t += dt;
@@ -1193,8 +1214,8 @@
       const sub = 2;
       for (let s = 0; s < sub; s++) {
         const sdt = dt / sub;
-        projectile.vx += wind * sdt;
-        projectile.vy += GRAVITY * sdt;
+        projectile.vx += wind * physScale * sdt;
+        projectile.vy += GRAVITY * physScale * sdt;
         projectile.x += projectile.vx * sdt;
         projectile.y += projectile.vy * sdt;
       }
@@ -1231,9 +1252,9 @@
           applyDamageAndCrater(px, py, weaponKey);
           for (let i = 0; i < w.clusterCount; i++) {
             clusterQueue.push({
-              x: px + (Math.random() * 2 - 1) * 60,
-              vy: -(80 + Math.random() * 60),
-              vx: (Math.random() * 2 - 1) * 40,
+              x: px + (Math.random() * 2 - 1) * 60 * physScale,
+              vy: -(80 + Math.random() * 60) * physScale,
+              vx: (Math.random() * 2 - 1) * 40 * physScale,
               delay: i * 0.08
             });
           }
@@ -1257,12 +1278,12 @@
           c.delay -= dt;
           if (c.delay <= 0) {
             // simulate a short lob then explode
-            let x = c.x, y = groundHeightAt(c.x) - 200;
+            let x = c.x, y = groundHeightAt(c.x) - 200 * physScale;
             let vx = c.vx, vy = c.vy;
             let t = 0;
             while (y < groundHeightAt(x) && t < 2) {
-              vx += wind * 0.05; // bomblets drift like any other shell
-              vy += GRAVITY * 0.05;
+              vx += wind * physScale * 0.05; // bomblets drift like any other shell
+              vy += GRAVITY * physScale * 0.05;
               x += vx * 0.05;
               y += vy * 0.05;
               t += 0.05;
