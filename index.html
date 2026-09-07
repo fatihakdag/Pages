@@ -140,7 +140,7 @@
     cursor: pointer;
     accent-color: var(--accent-p1);
   }
-  #wind-row {
+  .hud-pill {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -149,7 +149,17 @@
     padding: 2px 8px;
     font-size: 11px;
     letter-spacing: 0.5px;
+    white-space: nowrap;
   }
+  /* Wind lives in the middle of the bar only where there is room for it; below
+     that the on-canvas gauge is the single readout, so it is never shown twice. */
+  #wind-hud { display: none; flex: 0 0 auto; align-self: center; }
+  @media (min-width: 900px) {
+    #wind-hud { display: flex; }
+    #players-row { flex: 1 1 0; }
+    #center-info { flex: 1 1 0; align-items: flex-end; text-align: right; min-width: 0; }
+  }
+  #timer-val { font-weight: bold; color: var(--text-main); }
   #wind-arrow {
     display: inline-block;
     font-size: 20px;
@@ -441,7 +451,8 @@
       border-top: 1px solid var(--panel-line);
       padding-top: 8px;
     }
-    #wind-row { justify-content: flex-start; }
+    #wind-hud { display: none; }
+    .hud-pill { justify-content: flex-start; }
 
     #game-wrap { flex: 1 1 auto; height: 100%; min-height: 0; }
 
@@ -517,10 +528,12 @@
       </div>
     </div>
 
+    <div id="wind-hud" class="hud-pill"><span data-i18n="wind">WIND</span> <span id="wind-arrow">→</span> <span id="wind-val">0</span></div>
+
     <div id="center-info">
       <div id="turn-banner">—</div>
       <div id="level-info" style="font-size:10px; color:var(--text-dim); margin-bottom:2px;">—</div>
-      <div id="wind-row"><span data-i18n="wind">WIND</span> <span id="wind-arrow">→</span> <span id="wind-val">0</span></div>
+      <div id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></div>
       <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
     </div>
   </div>
@@ -587,7 +600,7 @@
     <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div id="keys-hint">
       <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
-      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v30</span></div>
+      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v31</span></div>
     </div>
   </div>
 </div>
@@ -622,7 +635,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v30';
+  const BUILD = 'v31';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -638,6 +651,8 @@
   const turnBanner = document.getElementById('turn-banner');
   const levelInfo = document.getElementById('level-info');
   const windArrow = document.getElementById('wind-arrow');
+  const windHud = document.getElementById('wind-hud');
+  const timerVal = document.getElementById('timer-val');
   const windVal = document.getElementById('wind-val');
   const overlay = document.getElementById('overlay');
   const overlayTitle = document.getElementById('overlay-title');
@@ -655,7 +670,8 @@
     en: {
       wind: 'WIND', angle: 'ANGLE', power: 'POWER', weapon: 'WEAPON',
       tanks: 'TANKS', opponents: 'OPPONENTS', cpuLevel: 'CPU LEVEL',
-      fire: 'FIRE', playAgain: 'Play Again', build: 'build',
+      fire: 'FIRE', playAgain: 'Play Again', build: 'build', time: 'TIME',
+      timerMs: '{m}m {s}s', timerS: '{s}s',
       cpuBadge: 'CPU', cpuBadgeShort: 'CPU',
       keysHint: '← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire',
       playerFull: 'PLAYER {n}', playerAbbr: 'P{n}',
@@ -679,7 +695,8 @@
     tr: {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
       tanks: 'TANKLAR', opponents: 'RAKİPLER', cpuLevel: 'BİLGİSAYAR SEVİYESİ',
-      fire: 'ATEŞ', playAgain: 'Tekrar Oyna', build: 'sürüm',
+      fire: 'ATEŞ', playAgain: 'Tekrar Oyna', build: 'sürüm', time: 'SÜRE',
+      timerMs: '{m}d {s}sn', timerS: '{s}sn',
       cpuBadge: 'BİLGİSAYAR', cpuBadgeShort: 'BİL',
       keysHint: '← → nişan &nbsp;|&nbsp; ↑ ↓ güç &nbsp;|&nbsp; BOŞLUK ateş',
       playerFull: 'OYUNCU {n}', playerAbbr: 'O{n}',
@@ -767,6 +784,7 @@
     const aria = { 'angle-dec': 'angleDown', 'angle-inc': 'angleUp',
                    'power-dec': 'powerDown', 'power-inc': 'powerUp' };
     for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
+    lastTimerText = ''; // force the clock to redraw in the new language
     // the weapon <option> labels and ammo readout are rebuilt from here
     if (tanks.length) { updateHUD(); syncControlsFromTank(); }
     refreshOverlayText();
@@ -869,8 +887,10 @@
       levelTankPads(); // the rebuild above regenerates terrain from the seed shape
     }
     prevW = W;
+    hudWindVisible = windHud.offsetParent !== null;
   }
   let prevW = 0;
+  let hudWindVisible = false;
 
   // ---------- Environments ----------
   // Each level gets a distinct sky, ground palette, and terrain personality.
@@ -1091,6 +1111,7 @@
 
   let wind = 0; // px/s^2 lateral accel
   let windPulse = 0; // 1 -> 0 flash right after the wind changes
+  let roundStart = 0, lastTimerText = '';
   let currentPlayer = 0;
   let state = 'AIMING'; // AIMING | FIRING | EXPLODING | GAMEOVER
   let projectile = null;
@@ -1167,6 +1188,17 @@
     return '#8fe3a8';
   }
 
+  // Round clock. Frozen once the round is over so it reads as how long it took,
+  // and only written when the displayed second actually changes.
+  function updateTimer() {
+    if (state === 'GAMEOVER') return;
+    const secs = Math.floor((performance.now() - roundStart) / 1000);
+    const s = secs >= 60
+      ? txt('timerMs', { m: Math.floor(secs / 60), s: secs % 60 })
+      : txt('timerS', { s: secs });
+    if (s !== lastTimerText) { lastTimerText = s; timerVal.textContent = s; }
+  }
+
   function setWind() {
     wind = (Math.random() * 2 - 1) * WIND_MAX;
     const col = windColor();
@@ -1179,6 +1211,8 @@
 
   function resetGame() {
     turnToken++;
+    roundStart = performance.now();
+    lastTimerText = '';
     buildTanks();
     currentPlayer = 0;
     state = 'AIMING';
@@ -1738,6 +1772,7 @@
     particles = particles.filter(p => p.age < p.life);
     windPulse = Math.max(0, windPulse - dt * 1.6);
     updateHeli(dt);
+    updateTimer();
 
     render();
     requestAnimationFrame(step);
@@ -2276,7 +2311,8 @@
       ctx.globalAlpha = 1;
     });
 
-    drawWindGauge(); // last, so it stays readable over everything
+    // Only one wind readout at a time: the bar's pill where it fits, this otherwise.
+    if (!hudWindVisible) drawWindGauge();
   }
 
   window.addEventListener('resize', resize);
