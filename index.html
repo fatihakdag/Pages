@@ -237,6 +237,28 @@
   }
   input[type=range]:disabled { opacity: 0.45; cursor: not-allowed; }
 
+  /* Arrow buttons flanking each slider, for single-step aiming */
+  .slider-row { display: flex; align-items: center; gap: 8px; }
+  .slider-row input[type=range] { flex: 1 1 auto; min-width: 0; }
+  .nudge {
+    flex: 0 0 auto;
+    width: 28px; height: 28px;
+    padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #12111a;
+    color: var(--text-main);
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    font-size: 11px;
+    line-height: 1;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation; /* no double-tap zoom on repeated presses */
+  }
+  .nudge:hover:not(:disabled) { background: #1e1c29; border-color: #55526a; }
+  .nudge:active:not(:disabled) { background: #2a2739; transform: scale(0.94); }
+  .nudge:disabled { opacity: 0.4; cursor: not-allowed; }
+
   /* Fingers need a bigger target than a mouse pointer does */
   @media (pointer: coarse) {
     input[type=range] { height: 42px; }
@@ -244,6 +266,7 @@
       width: 28px; height: 28px; margin-top: -11px;
     }
     input[type=range]::-moz-range-thumb { width: 28px; height: 28px; }
+    .nudge { width: 34px; height: 34px; font-size: 13px; }
   }
   select#weapon-select {
     background: #12111a;
@@ -421,6 +444,9 @@
       width: 24px; height: 24px; margin-top: -9px;
     }
     input[type=range]::-moz-range-thumb { width: 24px; height: 24px; }
+    /* the rail is only ~158px wide, so the arrows have to give some back */
+    .slider-row { gap: 6px; }
+    .nudge { width: 30px; height: 30px; }
     #fire-btn {
       width: 100%;
       grid-column: auto;
@@ -487,11 +513,19 @@
   <div id="controls">
     <div class="ctrl-group">
       <div class="ctrl-label">ANGLE <span class="val" id="angle-val">45°</span></div>
-      <input type="range" id="angle-slider" min="0" max="180" value="45">
+      <div class="slider-row">
+        <button type="button" class="nudge" id="angle-dec" aria-label="Angle down one degree">◀</button>
+        <input type="range" id="angle-slider" min="0" max="180" value="45">
+        <button type="button" class="nudge" id="angle-inc" aria-label="Angle up one degree">▶</button>
+      </div>
     </div>
     <div class="ctrl-group">
       <div class="ctrl-label">POWER <span class="val" id="power-val">50</span></div>
-      <input type="range" id="power-slider" min="0" max="100" value="50">
+      <div class="slider-row">
+        <button type="button" class="nudge" id="power-dec" aria-label="Power down one">◀</button>
+        <input type="range" id="power-slider" min="0" max="100" value="50">
+        <button type="button" class="nudge" id="power-inc" aria-label="Power up one">▶</button>
+      </div>
     </div>
     <div class="ctrl-group">
       <div class="ctrl-label">WEAPON</div>
@@ -529,7 +563,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v17</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v23</span></div>
     </div>
   </div>
 </div>
@@ -561,7 +595,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v17';
+  const BUILD = 'v23';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -683,6 +717,7 @@
           t.x = Math.max(20, Math.min(W - 20, fracs[i] * W));
         }
       });
+      levelTankPads(); // the rebuild above regenerates terrain from the seed shape
     }
     prevW = W;
   }
@@ -697,7 +732,7 @@
       ground1: '#4a3728', ground2: '#2e2118',
       rim: 'rgba(255,200,150,0.20)',
       decor: 'stars', decorColor: 'rgba(255,255,255,0.25)',
-      roughness: 0.28, falloff: 0.55, points: 160, baseLo: 0.45, baseHi: 0.65
+      roughness: 0.56, falloff: 0.62, points: 160, baseLo: 0.33, baseHi: 0.77
     },
     {
       name: 'Salt Flats',
@@ -705,7 +740,7 @@
       ground1: '#d9c9a3', ground2: '#8a7a5c',
       rim: 'rgba(255,255,255,0.35)',
       decor: 'clouds', decorColor: 'rgba(255,255,255,0.5)',
-      roughness: 0.10, falloff: 0.45, points: 200, baseLo: 0.55, baseHi: 0.68
+      roughness: 0.22, falloff: 0.52, points: 200, baseLo: 0.47, baseHi: 0.76
     },
     {
       name: 'Ash Peaks',
@@ -713,7 +748,7 @@
       ground1: '#5c4038', ground2: '#241a19',
       rim: 'rgba(255,120,60,0.30)',
       decor: 'embers', decorColor: 'rgba(255,140,60,0.45)',
-      roughness: 0.40, falloff: 0.60, points: 140, baseLo: 0.40, baseHi: 0.60
+      roughness: 0.70, falloff: 0.67, points: 140, baseLo: 0.28, baseHi: 0.72
     },
     {
       name: 'Glacier',
@@ -721,7 +756,7 @@
       ground1: '#cfe4ee', ground2: '#6d8ba0',
       rim: 'rgba(255,255,255,0.55)',
       decor: 'snow', decorColor: 'rgba(255,255,255,0.6)',
-      roughness: 0.34, falloff: 0.58, points: 150, baseLo: 0.42, baseHi: 0.62
+      roughness: 0.66, falloff: 0.65, points: 150, baseLo: 0.30, baseHi: 0.74
     },
     {
       name: 'Verdant Hills',
@@ -729,7 +764,7 @@
       ground1: '#5c8a3c', ground2: '#2c4520',
       rim: 'rgba(200,255,170,0.30)',
       decor: 'clouds', decorColor: 'rgba(255,255,255,0.55)',
-      roughness: 0.18, falloff: 0.50, points: 180, baseLo: 0.50, baseHi: 0.66
+      roughness: 0.36, falloff: 0.57, points: 180, baseLo: 0.40, baseHi: 0.76
     },
     {
       name: 'Night Crater',
@@ -737,7 +772,7 @@
       ground1: '#3b3550', ground2: '#161327',
       rim: 'rgba(160,150,255,0.30)',
       decor: 'stars', decorColor: 'rgba(220,220,255,0.45)',
-      roughness: 0.32, falloff: 0.56, points: 150, baseLo: 0.44, baseHi: 0.64
+      roughness: 0.62, falloff: 0.63, points: 150, baseLo: 0.32, baseHi: 0.76
     },
     {
       name: 'Rust Canyon',
@@ -745,7 +780,7 @@
       ground1: '#a85a35', ground2: '#4a2418',
       rim: 'rgba(255,180,120,0.30)',
       decor: 'dust', decorColor: 'rgba(255,200,150,0.35)',
-      roughness: 0.44, falloff: 0.62, points: 130, baseLo: 0.38, baseHi: 0.58
+      roughness: 0.74, falloff: 0.69, points: 130, baseLo: 0.26, baseHi: 0.70
     }
   ];
 
@@ -944,13 +979,34 @@
       t.angle = t.x < W / 2 ? 45 : 135; // start aimed toward the middle of the map
       t.power = 50;
     });
+    levelTankPads();
+  }
+
+  // A tank is drawn as a flat rectangle, so on the steeper terrain it now sits
+  // on it would bury one end in the hillside. Ease a short level pad under each
+  // one; the quadratic falloff blends it into the surrounding slope.
+  function levelTankPads() {
+    if (!terrain.length) return;
+    const pad = TANK_W;
+    for (const t of tanks) {
+      const y = groundHeightAt(t.x);
+      const x0 = Math.max(0, Math.round(t.x - pad));
+      const x1 = Math.min(terrain.length - 1, Math.round(t.x + pad));
+      for (let x = x0; x <= x1; x++) {
+        const d = Math.min(1, Math.abs(x - t.x) / pad);
+        const w = 1 - d * d;
+        terrain[x] = terrain[x] * (1 - w) + y * w;
+      }
+    }
   }
 
   // Lateral accel, against GRAVITY of 340. Drift over a shot works out to
-  // (wind / GRAVITY) * tan(angle) * range, so at 60 even a max-wind 45° shot
-  // moved the shell barely two tank widths — less than the blast radius, which
-  // made wind something you could ignore. 120 makes it worth aiming off.
-  const WIND_MAX = 120;
+  // (wind / GRAVITY) * tan(angle) * range. At 60 a max-wind 45° shot moved the
+  // shell under two tank widths — inside the blast radius, so wind was
+  // ignorable. 120 overshot the other way and made every round a fight against
+  // the weather. 80 puts a typical shot's drift at ~1.3 tank widths and a
+  // worst case at ~2.6: worth aiming off for, not worth dreading.
+  const WIND_MAX = 80;
   function windStrength() { return Math.min(1, Math.abs(wind) / WIND_MAX); }
   // px/s^2 is an internal unit and only means anything next to GRAVITY, so it
   // is never shown. Players get a 0-10 force instead; 0 reads as calm.
@@ -981,6 +1037,7 @@
     explosions = [];
     particles = [];
     clusterQueue = [];
+    heli = null;
     nextTheme();
     newTerrain();
     placeTanks();
@@ -1025,6 +1082,7 @@
     fireBtn.disabled = (state !== 'AIMING') || isAiTurn;
     angleSlider.disabled = isAiTurn;
     powerSlider.disabled = isAiTurn;
+    nudgeBtns.forEach(b => { b.disabled = isAiTurn; });
     syncWeaponOptions(t);
   }
 
@@ -1053,6 +1111,48 @@
     tanks[currentPlayer].power = parseInt(powerSlider.value, 10);
     powerVal.textContent = powerSlider.value;
   });
+
+  // Arrow buttons either side of each slider: a slider alone can't reliably
+  // pick one degree out of 180, especially with a fingertip.
+  function nudge(which, delta) {
+    if (isAi(currentPlayer)) return; // same condition that gates the sliders
+    const t = tanks[currentPlayer];
+    if (which === 'angle') t.angle = Math.max(0, Math.min(180, t.angle + delta));
+    else t.power = Math.max(0, Math.min(100, t.power + delta));
+    syncControlsFromTank();
+  }
+
+  const nudgeBtns = [], nudgeStops = [];
+  function bindNudge(id, which, delta) {
+    const btn = document.getElementById(id);
+    nudgeBtns.push(btn);
+    let holdTimer = null, repeatTimer = null;
+    const stop = () => {
+      clearTimeout(holdTimer);
+      clearInterval(repeatTimer);
+      holdTimer = repeatTimer = null;
+    };
+    nudgeStops.push(stop);
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); // don't let a touch turn into a scroll or a zoom
+      nudge(which, delta);
+      holdTimer = setTimeout(() => {
+        repeatTimer = setInterval(() => nudge(which, delta), 55);
+      }, 380);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+      btn.addEventListener(ev, stop);
+    }
+    // detail === 0 means the click came from the keyboard, which fires no
+    // pointer events at all; without this the buttons would be pointer-only.
+    btn.addEventListener('click', (e) => { if (e.detail === 0) nudge(which, delta); });
+  }
+  bindNudge('angle-dec', 'angle', -1);
+  bindNudge('angle-inc', 'angle', 1);
+  bindNudge('power-dec', 'power', -1);
+  bindNudge('power-inc', 'power', 1);
+  // a press held while the tab loses focus would otherwise repeat forever
+  window.addEventListener('blur', () => nudgeStops.forEach(fn => fn()));
 
   window.addEventListener('keydown', (e) => {
     if (state !== 'AIMING' || isAi(currentPlayer)) return;
@@ -1152,6 +1252,7 @@
     // at least two tanks are alive here, so this always lands on someone else
     do { currentPlayer = (currentPlayer + 1) % tanks.length; }
     while (!tanks[currentPlayer].alive);
+    if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
     setWind();
     state = 'AIMING';
     updateHUD();
@@ -1187,6 +1288,34 @@
     }
     return x;
   }
+
+  // Brutal is very hard to out-shoot, so at that level both sides get to see
+  // the arc before it is fired. This traces with the same integrator step()
+  // uses — sub-stepped at a 60fps dt rather than predictLandingX's coarser
+  // single step — so the drawn line matches where the shell actually goes.
+  function traceShot(x0, y0, angleDeg, power, windAccel) {
+    const a = angleDeg * Math.PI / 180;
+    const speed = power * 6.2 * physScale;
+    let vx = Math.cos(a) * speed, vy = -Math.sin(a) * speed;
+    let x = x0, y = y0;
+    const pts = [[x, y]];
+    const dt = 1 / 60, sub = 2;
+    for (let i = 0; i < 900; i++) {
+      for (let s = 0; s < sub; s++) {
+        const sdt = dt / sub;
+        vx += windAccel * physScale * sdt;
+        vy += GRAVITY * physScale * sdt;
+        x += vx * sdt;
+        y += vy * sdt;
+      }
+      pts.push([x, y]);
+      if (x < -20 || x > W + 20 || y > H + 60) break;
+      if (y >= groundHeightAt(x)) break;
+    }
+    return pts;
+  }
+
+  function aimPreviewOn() { return cpuMode && aiDifficulty === 'brutal'; }
 
   function chooseAiShot(difficulty) {
     const cfg = DIFFICULTY_SETTINGS[difficulty] || DIFFICULTY_SETTINGS.medium;
@@ -1227,8 +1356,13 @@
     return { angle: Math.round(finalAngle), power: Math.round(finalPower) };
   }
 
+  // A CPU seat has no meaningful aim until it has solved its shot, so the
+  // preview stays hidden while it is still "thinking".
+  let cpuAimReady = false;
+
   function maybeAiTurn() {
     if (!isAi(currentPlayer) || state !== 'AIMING') return;
+    cpuAimReady = false;
     updateHUD();
     const cfg = DIFFICULTY_SETTINGS[aiDifficulty] || DIFFICULTY_SETTINGS.medium;
     const seat = currentPlayer;
@@ -1251,7 +1385,9 @@
       }
       weaponSelect.value = shooter.ammo[preferred] > 0 ? preferred : 'standard';
       syncControlsFromTank();
-      setTimeout(fire, 350);
+      cpuAimReady = true;
+      // hold a beat longer when the arc is on screen, so it can be read
+      setTimeout(fire, aimPreviewOn() ? 900 : 350);
     }, cfg.thinkMs);
   }
 
@@ -1277,8 +1413,11 @@
 
       let hit = false;
       let outOfBounds = false;
+      let shotHeli = false;
       if (projectile.x < -20 || projectile.x > W + 20 || projectile.y > H + 60) {
         outOfBounds = true;
+      } else if (heliHitBy(projectile.x, projectile.y)) {
+        shotHeli = true;
       } else if (projectile.y >= groundHeightAt(projectile.x)) {
         hit = true;
       } else {
@@ -1293,7 +1432,16 @@
         }
       }
 
-      if (outOfBounds) {
+      if (shotHeli) {
+        // the shell bursts on the airframe; the wreck falls on its own from here
+        spawnExplosionFx(projectile.x, projectile.y, 32, '#ffd27a');
+        heli.falling = true;
+        heli.vy = 20;
+        projectile = null;
+        trail = [];
+        state = 'EXPLODING';
+        explodeTimer = 0;
+      } else if (outOfBounds) {
         projectile = null;
         trail = [];
         state = 'RESOLVED'; // shot missed entirely, move straight to next turn
@@ -1369,6 +1517,7 @@
     });
     particles = particles.filter(p => p.age < p.life);
     windPulse = Math.max(0, windPulse - dt * 1.6);
+    updateHeli(dt);
 
     render();
     requestAnimationFrame(step);
@@ -1425,6 +1574,172 @@
       ctx.arc(p.x * W, p.y * H, p.r, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  // ---------- Helicopter ----------
+  // An occasional fly-by, high above the peaks. Shoot it and it comes down;
+  // whatever it lands on is finished, which makes it a gamble worth taking.
+  let heli = null;
+  let rotorAngle = 0;
+  // the first one comes sooner so it gets discovered; after that it's rare
+  let heliTimer = 60 + Math.random() * 50;
+
+  function heliSize() { return Math.max(30, Math.min(58, W * 0.04)); }
+
+  // It turns back at the edges rather than leaving on the first pass, so the
+  // fly-by isn't a lottery won by whoever happens to be up when it appears.
+  // It always makes at least one return trip: with two players both may have
+  // technically "had a turn" during a single crossing, while the one who was
+  // mid-shot barely saw it. The upper bound stops it loitering through a slow
+  // round.
+  const HELI_MIN_LEGS = 2, HELI_MAX_LEGS = 6;
+
+  function spawnHeli() {
+    const fromLeft = Math.random() < 0.5;
+    const w = heliSize();
+    heli = {
+      x: fromLeft ? -w : W + w,
+      y: H * (0.07 + Math.random() * 0.09), // clear of the tallest terrain
+      dir: fromLeft ? 1 : -1,
+      speed: W / (9 + Math.random() * 5),   // ~9-14s to cross, whatever the width
+      vy: 0,
+      falling: false,
+      spin: 0,
+      legs: 0,
+      // whoever is aiming right now can already shoot at it; anyone mid-shot
+      // cannot, and gets counted when their next turn starts
+      seen: new Set(state === 'AIMING' ? [currentPlayer] : [])
+    };
+  }
+
+  function heliHitBy(px, py) {
+    if (!heli || heli.falling) return false;
+    const w = heliSize();
+    return Math.abs(px - heli.x) < w * 0.55 && Math.abs(py - heli.y) < w * 0.30;
+  }
+
+  // Landing on a tank destroys it outright; everything close by takes a big
+  // blast. This is deliberately harsher than any shell in the game.
+  function heliCrash(x, y) {
+    const CRUSH = 26, BLAST = 74, BLAST_DMG = 80;
+    for (const t of tanks) {
+      if (!t.alive) continue;
+      if (Math.abs(t.x - x) < CRUSH) { t.hp = 0; t.alive = false; continue; }
+      const tankTopY = groundHeightAt(t.x) - TANK_H;
+      const dist = Math.sqrt((t.x - x) * (t.x - x) + (tankTopY - y) * (tankTopY - y));
+      if (dist < BLAST) {
+        t.hp -= BLAST_DMG * (1 - dist / BLAST);
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+      }
+    }
+    craterAt(x, y, BLAST * 0.7);
+    spawnExplosionFx(x, y, BLAST, '#ffb03a');
+    for (let i = 0; i < 36; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 60 + Math.random() * 200;
+      particles.push({
+        x, y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 90,
+        life: 0.6 + Math.random() * 0.7, age: 0,
+        color: Math.random() < 0.5 ? '#ffb03a' : '#6d7684'
+      });
+    }
+    updateHUD();
+    // A crash can kill between turns, so the round may need resolving here.
+    if (state === 'AIMING') {
+      if (endTurnCheckWin()) return;
+      if (!tanks[currentPlayer].alive) nextTurn();
+    }
+  }
+
+  function updateHeli(dt) {
+    rotorAngle += dt * 26;
+    if (!heli) {
+      if (state !== 'GAMEOVER') {
+        heliTimer -= dt;
+        if (heliTimer <= 0) { spawnHeli(); heliTimer = 120 + Math.random() * 60; }
+      }
+      return;
+    }
+    const w = heliSize();
+    if (!heli.falling) {
+      heli.x += heli.dir * heli.speed * dt;
+      if (heli.x < -w * 1.5 || heli.x > W + w * 1.5) {
+        heli.legs++;
+        const allHadATurn = tanks.every((t, i) => !t.alive || heli.seen.has(i));
+        if ((allHadATurn && heli.legs >= HELI_MIN_LEGS) || heli.legs >= HELI_MAX_LEGS) {
+          heli = null;
+        } else {
+          // Come back in over the edge it just left, rather than reappearing on
+          // the far side, at a slightly different altitude each time.
+          const leftOverRight = heli.x > W;
+          heli.dir = leftOverRight ? -1 : 1;
+          heli.x = leftOverRight ? W + w * 1.5 : -w * 1.5;
+          heli.y = Math.max(H * 0.05, Math.min(H * 0.17,
+            heli.y + (Math.random() * 2 - 1) * H * 0.02));
+        }
+      }
+      return;
+    }
+    heli.vy += GRAVITY * physScale * dt * 0.75;
+    heli.x += heli.dir * heli.speed * 0.35 * dt;
+    heli.y += heli.vy * dt;
+    heli.spin += dt * (4 + heli.vy * 0.004);
+    if (Math.random() < 0.6) {
+      particles.push({
+        x: heli.x + (Math.random() * 2 - 1) * 8, y: heli.y,
+        vx: (Math.random() * 2 - 1) * 20, vy: -20 - Math.random() * 30,
+        life: 0.6 + Math.random() * 0.6, age: 0,
+        color: Math.random() < 0.5 ? '#59606b' : '#ff7a45'
+      });
+    }
+    if (heli.x < -60 || heli.x > W + 60) { heli = null; return; } // fell off the map
+    if (heli.y >= groundHeightAt(heli.x) - 4) {
+      const cx = Math.max(0, Math.min(W - 1, heli.x));
+      const cy = groundHeightAt(cx);
+      heli = null;
+      heliCrash(cx, cy);
+    }
+  }
+
+  function drawHeli() {
+    if (!heli) return;
+    const w = heliSize(), h = w * 0.34;
+    ctx.save();
+    ctx.translate(heli.x, heli.y);
+    if (heli.falling) ctx.rotate(heli.spin);
+    ctx.scale(heli.dir, 1);
+
+    ctx.fillStyle = heli.falling ? '#6b4a34' : '#46525f';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, w * 0.30, h * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-w * 0.56, -h * 0.10, w * 0.34, h * 0.20); // tail boom
+    ctx.fillRect(-w * 0.60, -h * 0.60, w * 0.07, h * 0.60); // tail fin
+
+    ctx.fillStyle = 'rgba(185,222,255,0.78)';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.14, -h * 0.05, w * 0.10, h * 0.30, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#2b333d';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.18, h * 0.66); ctx.lineTo(w * 0.20, h * 0.66);
+    ctx.stroke();
+
+    // rotors, drawn as a blade seen edge-on so they read as spinning
+    ctx.strokeStyle = 'rgba(232,238,247,0.9)';
+    ctx.lineWidth = 2;
+    const blade = Math.cos(rotorAngle) * w * 0.48;
+    ctx.beginPath();
+    ctx.moveTo(-blade, -h * 0.78); ctx.lineTo(blade, -h * 0.78);
+    ctx.moveTo(0, -h * 0.78); ctx.lineTo(0, -h * 0.5);
+    ctx.stroke();
+    const tail = Math.cos(rotorAngle * 1.7) * h * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.58, -h * 0.30 - tail); ctx.lineTo(-w * 0.58, -h * 0.30 + tail);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ---------- Wind indicators ----------
@@ -1528,6 +1843,41 @@
     ctx.restore();
   }
 
+  // Dashed arc from the active tank's barrel, in that player's colour, ending
+  // in a ring at the predicted impact point.
+  function drawAimPreview() {
+    if (state !== 'AIMING' || !aimPreviewOn()) return;
+    const t = tanks[currentPlayer];
+    if (!t || !t.alive) return;
+    if (isAi(currentPlayer) && !cpuAimReady) return;
+
+    const a = t.angle * Math.PI / 180;
+    const barrelLen = 20;
+    const x0 = t.x + barrelLen * Math.cos(a);
+    const y0 = groundHeightAt(t.x) - TANK_H - barrelLen * Math.sin(a);
+    const pts = traceShot(x0, y0, t.angle, t.power, wind);
+    if (pts.length < 2) return;
+
+    ctx.save();
+    ctx.strokeStyle = t.color;
+    ctx.lineWidth = 1.6;
+    ctx.globalAlpha = 0.5;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const end = pts[pts.length - 1];
+    ctx.globalAlpha = 0.85;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(end[0], end[1], 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function render() {
     ctx.clearRect(0, 0, W, H);
 
@@ -1580,6 +1930,9 @@
       ctx.stroke();
       ctx.restore();
     });
+
+    drawHeli();
+    drawAimPreview();
 
     // trail
     if (trail.length > 1) {
