@@ -563,7 +563,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v22</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v23</span></div>
     </div>
   </div>
 </div>
@@ -595,7 +595,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v22';
+  const BUILD = 'v23';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -1252,6 +1252,7 @@
     // at least two tanks are alive here, so this always lands on someone else
     do { currentPlayer = (currentPlayer + 1) % tanks.length; }
     while (!tanks[currentPlayer].alive);
+    if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
     setWind();
     state = 'AIMING';
     updateHUD();
@@ -1585,6 +1586,14 @@
 
   function heliSize() { return Math.max(30, Math.min(58, W * 0.04)); }
 
+  // It turns back at the edges rather than leaving on the first pass, so the
+  // fly-by isn't a lottery won by whoever happens to be up when it appears.
+  // It always makes at least one return trip: with two players both may have
+  // technically "had a turn" during a single crossing, while the one who was
+  // mid-shot barely saw it. The upper bound stops it loitering through a slow
+  // round.
+  const HELI_MIN_LEGS = 2, HELI_MAX_LEGS = 6;
+
   function spawnHeli() {
     const fromLeft = Math.random() < 0.5;
     const w = heliSize();
@@ -1595,7 +1604,11 @@
       speed: W / (9 + Math.random() * 5),   // ~9-14s to cross, whatever the width
       vy: 0,
       falling: false,
-      spin: 0
+      spin: 0,
+      legs: 0,
+      // whoever is aiming right now can already shoot at it; anyone mid-shot
+      // cannot, and gets counted when their next turn starts
+      seen: new Set(state === 'AIMING' ? [currentPlayer] : [])
     };
   }
 
@@ -1650,7 +1663,21 @@
     const w = heliSize();
     if (!heli.falling) {
       heli.x += heli.dir * heli.speed * dt;
-      if (heli.x < -w * 2 || heli.x > W + w * 2) heli = null;
+      if (heli.x < -w * 1.5 || heli.x > W + w * 1.5) {
+        heli.legs++;
+        const allHadATurn = tanks.every((t, i) => !t.alive || heli.seen.has(i));
+        if ((allHadATurn && heli.legs >= HELI_MIN_LEGS) || heli.legs >= HELI_MAX_LEGS) {
+          heli = null;
+        } else {
+          // Come back in over the edge it just left, rather than reappearing on
+          // the far side, at a slightly different altitude each time.
+          const leftOverRight = heli.x > W;
+          heli.dir = leftOverRight ? -1 : 1;
+          heli.x = leftOverRight ? W + w * 1.5 : -w * 1.5;
+          heli.y = Math.max(H * 0.05, Math.min(H * 0.17,
+            heli.y + (Math.random() * 2 - 1) * H * 0.02));
+        }
+      }
       return;
     }
     heli.vy += GRAVITY * physScale * dt * 0.75;
