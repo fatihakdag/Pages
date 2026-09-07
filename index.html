@@ -80,6 +80,13 @@
     outline-offset: 4px;
   }
   .player-card.dead { opacity: 0.38; }
+  /* Bar and HP share the second line. Pairing the HP with the *name* instead
+     would need the sum of name + badge + HP on one line, which overflows once
+     the badge reads BİLGİSAYAR; this way the row only needs the wider of the
+     two, and the bar simply takes what is left. */
+  .player-bar-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .player-bar-row .health-bar-track { flex: 1 1 auto; }
+  .player-bar-row .health-text { flex: 0 0 auto; }
   .player-name {
     font-size: 12px;
     letter-spacing: 0.5px;
@@ -88,6 +95,8 @@
   }
   .pn-abbr { display: none; }
   .cb-abbr { display: none; }
+  #players-row[data-count="4"] .cb-full { display: none; }
+  #players-row[data-count="4"] .cb-abbr { display: inline; }
   .p1 { color: var(--accent-p1); }
   .p2 { color: var(--accent-p2); }
   .p3 { color: var(--accent-p3); }
@@ -122,11 +131,18 @@
     color: var(--text-main);
     margin-bottom: 2px;
   }
+  #info-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+  #level-info { font-size: 10px; color: var(--text-dim); }
   #lang-toggle {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-top: 5px;
     font-size: 10px;
     letter-spacing: 0.5px;
     color: var(--text-dim);
@@ -393,6 +409,10 @@
     .player-name { font-size: 10px; }
     .pn-full { display: none; }
     .pn-abbr { display: inline; }
+    .player-bar-row { display: block; } /* ~46px cards: no room to pair */
+    /* center-info is sized by its own content here, so any horizontal pairing
+       widens it and steals width from the cards. Keep it stacked. */
+    #info-row { flex-direction: column; align-items: flex-end; gap: 2px; }
     .cb-full { display: none; }
     .cb-abbr { display: inline; }
     .health-bar-track { max-width: 110px; height: 8px; }
@@ -523,23 +543,31 @@
     <div id="players-row">
       <div class="player-card p1" id="card-p1">
         <div class="player-name"><span class="pn-full">PLAYER 1</span><span class="pn-abbr">P1</span> <span class="ai-badge" id="ai-badge-1"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
-        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div></div>
-        <div class="health-text" id="hp-text-1">100 / 100</div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-1">100 / 100</div>
+        </div>
       </div>
       <div class="player-card p2" id="card-p2">
         <div class="player-name"><span class="pn-full">PLAYER 2</span><span class="pn-abbr">P2</span> <span class="ai-badge" id="ai-badge-2"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
-        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%;"></div></div>
-        <div class="health-text" id="hp-text-2">100 / 100</div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-2">100 / 100</div>
+        </div>
       </div>
       <div class="player-card p3" id="card-p3" hidden>
         <div class="player-name"><span class="pn-full">PLAYER 3</span><span class="pn-abbr">P3</span> <span class="ai-badge" id="ai-badge-3"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
-        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-3" style="background:var(--accent-p3); width:100%;"></div></div>
-        <div class="health-text" id="hp-text-3">100 / 100</div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-3" style="background:var(--accent-p3); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-3">100 / 100</div>
+        </div>
       </div>
       <div class="player-card p4" id="card-p4" hidden>
         <div class="player-name"><span class="pn-full">PLAYER 4</span><span class="pn-abbr">P4</span> <span class="ai-badge" id="ai-badge-4"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
-        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-4" style="background:var(--accent-p4); width:100%;"></div></div>
-        <div class="health-text" id="hp-text-4">100 / 100</div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-4" style="background:var(--accent-p4); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-4">100 / 100</div>
+        </div>
       </div>
     </div>
 
@@ -547,9 +575,11 @@
 
     <div id="center-info">
       <div id="turn-banner">—</div>
-      <div id="level-info" style="font-size:10px; color:var(--text-dim); margin-bottom:2px;">—</div>
-      <div id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></div>
-      <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
+      <div id="info-row">
+        <span id="level-info">—</span>
+        <span id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
+        <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
+      </div>
     </div>
   </div>
 
@@ -615,7 +645,7 @@
     <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div id="keys-hint">
       <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
-      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v32</span></div>
+      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v33</span></div>
     </div>
   </div>
 </div>
@@ -650,7 +680,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v32';
+  const BUILD = 'v33';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -667,6 +697,7 @@
   const levelInfo = document.getElementById('level-info');
   const windArrow = document.getElementById('wind-arrow');
   const windHud = document.getElementById('wind-hud');
+  const playersRow = document.getElementById('players-row');
   const timerVal = document.getElementById('timer-val');
   const windVal = document.getElementById('wind-val');
   const overlay = document.getElementById('overlay');
@@ -1248,6 +1279,7 @@
   }
 
   function updateHUD() {
+    playersRow.dataset.count = tanks.length;
     for (let i = 0; i < MAX_PLAYERS; i++) {
       const t = tanks[i];
       cards[i].hidden = !t;
