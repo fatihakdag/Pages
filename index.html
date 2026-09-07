@@ -563,7 +563,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v20</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v21</span></div>
     </div>
   </div>
 </div>
@@ -595,7 +595,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v20';
+  const BUILD = 'v21';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -1001,10 +1001,12 @@
   }
 
   // Lateral accel, against GRAVITY of 340. Drift over a shot works out to
-  // (wind / GRAVITY) * tan(angle) * range, so at 60 even a max-wind 45° shot
-  // moved the shell barely two tank widths — less than the blast radius, which
-  // made wind something you could ignore. 120 makes it worth aiming off.
-  const WIND_MAX = 120;
+  // (wind / GRAVITY) * tan(angle) * range. At 60 a max-wind 45° shot moved the
+  // shell under two tank widths — inside the blast radius, so wind was
+  // ignorable. 120 overshot the other way and made every round a fight against
+  // the weather. 80 puts a typical shot's drift at ~1.3 tank widths and a
+  // worst case at ~2.6: worth aiming off for, not worth dreading.
+  const WIND_MAX = 80;
   function windStrength() { return Math.min(1, Math.abs(wind) / WIND_MAX); }
   // px/s^2 is an internal unit and only means anything next to GRAVITY, so it
   // is never shown. Players get a 0-10 force instead; 0 reads as calm.
