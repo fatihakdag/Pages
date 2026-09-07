@@ -563,7 +563,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v26</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v27</span></div>
     </div>
   </div>
 </div>
@@ -595,7 +595,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v26';
+  const BUILD = 'v27';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -1268,13 +1268,13 @@
   //                this small and moving
   const DIFFICULTY_SETTINGS = {
     easy:    { angleStep: 6, powerStep: 6,  angleJitter: 16, powerJitter: 22, missChance: 0.30, thinkMs: 900,
-               heliChance: 0.35, heliPatience: 0.15, heliAngleJitter: 14,  heliPowerJitter: 18 },
+               heliChance: 0.30, heliPatience: 0.15, heliAngleJitter: 14, heliPowerJitter: 18 },
     medium:  { angleStep: 3, powerStep: 3,  angleJitter: 7,  powerJitter: 10, missChance: 0.12, thinkMs: 750,
-               heliChance: 0.32, heliPatience: 0.40, heliAngleJitter: 10,  heliPowerJitter: 13 },
+               heliChance: 0.30, heliPatience: 0.40, heliAngleJitter: 10, heliPowerJitter: 13 },
     hard:    { angleStep: 1.5, powerStep: 1.5, angleJitter: 3,  powerJitter: 4,  missChance: 0.04, thinkMs: 600,
-               heliChance: 0.30, heliPatience: 0.65, heliAngleJitter: 7,   heliPowerJitter: 9 },
+               heliChance: 0.30, heliPatience: 0.65, heliAngleJitter: 7,  heliPowerJitter: 9 },
     brutal:  { angleStep: 1, powerStep: 1,  angleJitter: 0.5, powerJitter: 1,  missChance: 0,    thinkMs: 450,
-               heliChance: 0.28, heliPatience: 0.85, heliAngleJitter: 4.5, heliPowerJitter: 6 }
+               heliChance: 0.30, heliPatience: 0.85, heliAngleJitter: 3,  heliPowerJitter: 4 }
   };
 
   // Simulates a shot with the same physics as the real game and returns
