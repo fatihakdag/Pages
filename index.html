@@ -563,7 +563,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v21</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v22</span></div>
     </div>
   </div>
 </div>
@@ -595,7 +595,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v21';
+  const BUILD = 'v22';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -1037,6 +1037,7 @@
     explosions = [];
     particles = [];
     clusterQueue = [];
+    heli = null;
     nextTheme();
     newTerrain();
     placeTanks();
@@ -1411,8 +1412,11 @@
 
       let hit = false;
       let outOfBounds = false;
+      let shotHeli = false;
       if (projectile.x < -20 || projectile.x > W + 20 || projectile.y > H + 60) {
         outOfBounds = true;
+      } else if (heliHitBy(projectile.x, projectile.y)) {
+        shotHeli = true;
       } else if (projectile.y >= groundHeightAt(projectile.x)) {
         hit = true;
       } else {
@@ -1427,7 +1431,16 @@
         }
       }
 
-      if (outOfBounds) {
+      if (shotHeli) {
+        // the shell bursts on the airframe; the wreck falls on its own from here
+        spawnExplosionFx(projectile.x, projectile.y, 32, '#ffd27a');
+        heli.falling = true;
+        heli.vy = 20;
+        projectile = null;
+        trail = [];
+        state = 'EXPLODING';
+        explodeTimer = 0;
+      } else if (outOfBounds) {
         projectile = null;
         trail = [];
         state = 'RESOLVED'; // shot missed entirely, move straight to next turn
@@ -1503,6 +1516,7 @@
     });
     particles = particles.filter(p => p.age < p.life);
     windPulse = Math.max(0, windPulse - dt * 1.6);
+    updateHeli(dt);
 
     render();
     requestAnimationFrame(step);
@@ -1559,6 +1573,146 @@
       ctx.arc(p.x * W, p.y * H, p.r, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  // ---------- Helicopter ----------
+  // An occasional fly-by, high above the peaks. Shoot it and it comes down;
+  // whatever it lands on is finished, which makes it a gamble worth taking.
+  let heli = null;
+  let rotorAngle = 0;
+  // the first one comes sooner so it gets discovered; after that it's rare
+  let heliTimer = 60 + Math.random() * 50;
+
+  function heliSize() { return Math.max(30, Math.min(58, W * 0.04)); }
+
+  function spawnHeli() {
+    const fromLeft = Math.random() < 0.5;
+    const w = heliSize();
+    heli = {
+      x: fromLeft ? -w : W + w,
+      y: H * (0.07 + Math.random() * 0.09), // clear of the tallest terrain
+      dir: fromLeft ? 1 : -1,
+      speed: W / (9 + Math.random() * 5),   // ~9-14s to cross, whatever the width
+      vy: 0,
+      falling: false,
+      spin: 0
+    };
+  }
+
+  function heliHitBy(px, py) {
+    if (!heli || heli.falling) return false;
+    const w = heliSize();
+    return Math.abs(px - heli.x) < w * 0.55 && Math.abs(py - heli.y) < w * 0.30;
+  }
+
+  // Landing on a tank destroys it outright; everything close by takes a big
+  // blast. This is deliberately harsher than any shell in the game.
+  function heliCrash(x, y) {
+    const CRUSH = 26, BLAST = 74, BLAST_DMG = 80;
+    for (const t of tanks) {
+      if (!t.alive) continue;
+      if (Math.abs(t.x - x) < CRUSH) { t.hp = 0; t.alive = false; continue; }
+      const tankTopY = groundHeightAt(t.x) - TANK_H;
+      const dist = Math.sqrt((t.x - x) * (t.x - x) + (tankTopY - y) * (tankTopY - y));
+      if (dist < BLAST) {
+        t.hp -= BLAST_DMG * (1 - dist / BLAST);
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+      }
+    }
+    craterAt(x, y, BLAST * 0.7);
+    spawnExplosionFx(x, y, BLAST, '#ffb03a');
+    for (let i = 0; i < 36; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 60 + Math.random() * 200;
+      particles.push({
+        x, y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 90,
+        life: 0.6 + Math.random() * 0.7, age: 0,
+        color: Math.random() < 0.5 ? '#ffb03a' : '#6d7684'
+      });
+    }
+    updateHUD();
+    // A crash can kill between turns, so the round may need resolving here.
+    if (state === 'AIMING') {
+      if (endTurnCheckWin()) return;
+      if (!tanks[currentPlayer].alive) nextTurn();
+    }
+  }
+
+  function updateHeli(dt) {
+    rotorAngle += dt * 26;
+    if (!heli) {
+      if (state !== 'GAMEOVER') {
+        heliTimer -= dt;
+        if (heliTimer <= 0) { spawnHeli(); heliTimer = 120 + Math.random() * 60; }
+      }
+      return;
+    }
+    const w = heliSize();
+    if (!heli.falling) {
+      heli.x += heli.dir * heli.speed * dt;
+      if (heli.x < -w * 2 || heli.x > W + w * 2) heli = null;
+      return;
+    }
+    heli.vy += GRAVITY * physScale * dt * 0.75;
+    heli.x += heli.dir * heli.speed * 0.35 * dt;
+    heli.y += heli.vy * dt;
+    heli.spin += dt * (4 + heli.vy * 0.004);
+    if (Math.random() < 0.6) {
+      particles.push({
+        x: heli.x + (Math.random() * 2 - 1) * 8, y: heli.y,
+        vx: (Math.random() * 2 - 1) * 20, vy: -20 - Math.random() * 30,
+        life: 0.6 + Math.random() * 0.6, age: 0,
+        color: Math.random() < 0.5 ? '#59606b' : '#ff7a45'
+      });
+    }
+    if (heli.x < -60 || heli.x > W + 60) { heli = null; return; } // fell off the map
+    if (heli.y >= groundHeightAt(heli.x) - 4) {
+      const cx = Math.max(0, Math.min(W - 1, heli.x));
+      const cy = groundHeightAt(cx);
+      heli = null;
+      heliCrash(cx, cy);
+    }
+  }
+
+  function drawHeli() {
+    if (!heli) return;
+    const w = heliSize(), h = w * 0.34;
+    ctx.save();
+    ctx.translate(heli.x, heli.y);
+    if (heli.falling) ctx.rotate(heli.spin);
+    ctx.scale(heli.dir, 1);
+
+    ctx.fillStyle = heli.falling ? '#6b4a34' : '#46525f';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, w * 0.30, h * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-w * 0.56, -h * 0.10, w * 0.34, h * 0.20); // tail boom
+    ctx.fillRect(-w * 0.60, -h * 0.60, w * 0.07, h * 0.60); // tail fin
+
+    ctx.fillStyle = 'rgba(185,222,255,0.78)';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.14, -h * 0.05, w * 0.10, h * 0.30, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#2b333d';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.18, h * 0.66); ctx.lineTo(w * 0.20, h * 0.66);
+    ctx.stroke();
+
+    // rotors, drawn as a blade seen edge-on so they read as spinning
+    ctx.strokeStyle = 'rgba(232,238,247,0.9)';
+    ctx.lineWidth = 2;
+    const blade = Math.cos(rotorAngle) * w * 0.48;
+    ctx.beginPath();
+    ctx.moveTo(-blade, -h * 0.78); ctx.lineTo(blade, -h * 0.78);
+    ctx.moveTo(0, -h * 0.78); ctx.lineTo(0, -h * 0.5);
+    ctx.stroke();
+    const tail = Math.cos(rotorAngle * 1.7) * h * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.58, -h * 0.30 - tail); ctx.lineTo(-w * 0.58, -h * 0.30 + tail);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ---------- Wind indicators ----------
@@ -1750,6 +1904,7 @@
       ctx.restore();
     });
 
+    drawHeli();
     drawAimPreview();
 
     // trail
