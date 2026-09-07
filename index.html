@@ -587,7 +587,7 @@
     <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div id="keys-hint">
       <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
-      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v29</span></div>
+      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v30</span></div>
     </div>
   </div>
 </div>
@@ -622,7 +622,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v29';
+  const BUILD = 'v30';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -794,6 +794,7 @@
 
   modeSelect.addEventListener('change', () => {
     cpuMode = modeSelect.value === 'cpu';
+    turnToken++; // seats changed hands; drop anything the AI had queued
     refreshOpponentUi();
     updateHUD();
     syncControlsFromTank();
@@ -1177,6 +1178,7 @@
   }
 
   function resetGame() {
+    turnToken++;
     buildTanks();
     currentPlayer = 0;
     state = 'AIMING';
@@ -1396,6 +1398,7 @@
     // at least two tanks are alive here, so this always lands on someone else
     do { currentPlayer = (currentPlayer + 1) % tanks.length; }
     while (!tanks[currentPlayer].alive);
+    turnToken++;
     if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
     setWind();
     state = 'AIMING';
@@ -1566,14 +1569,25 @@
   // preview stays hidden while it is still "thinking".
   let cpuAimReady = false;
 
+  // Bumped whenever the active seat changes, a round restarts, or the opponent
+  // mode changes. The AI defers both its aim and its shot on timers, and a
+  // helicopter crash can end a turn from outside the normal shot resolution, so
+  // a deferred shot could otherwise land after the turn had moved on - and
+  // fire() shoots for whoever is current, which meant the human's tank firing
+  // by itself.
+  let turnToken = 0;
+
   function maybeAiTurn() {
     if (!isAi(currentPlayer) || state !== 'AIMING') return;
     cpuAimReady = false;
     updateHUD();
     const cfg = DIFFICULTY_SETTINGS[aiDifficulty] || DIFFICULTY_SETTINGS.medium;
     const seat = currentPlayer;
+    const token = turnToken;
+    const stillOurTurn = () =>
+      turnToken === token && state === 'AIMING' && currentPlayer === seat;
     setTimeout(() => {
-      if (state !== 'AIMING' || currentPlayer !== seat) return;
+      if (!stillOurTurn()) return;
       const shot = chooseAiShot(aiDifficulty);
       const shooter = tanks[seat];
       shooter.angle = shot.angle;
@@ -1593,7 +1607,7 @@
       syncControlsFromTank();
       cpuAimReady = true;
       // hold a beat longer when the arc is on screen, so it can be read
-      setTimeout(fire, aiFireDelayMs());
+      setTimeout(() => { if (stillOurTurn()) fire(); }, aiFireDelayMs());
     }, cfg.thinkMs);
   }
 
