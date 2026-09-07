@@ -207,7 +207,11 @@
     border-top: 2px solid var(--panel-line);
     padding: 10px 16px 14px;
     display: flex;
-    align-items: center;
+    /* Top-aligned, not centred: the weapon group carries an ammo readout under
+       its select, so centring made that group taller and lifted its select
+       clear of the other three. Aligning tops lines every label and control up
+       and lets the readout hang below. */
+    align-items: flex-start;
     gap: 22px;
     flex-wrap: wrap;
     flex: 0 0 auto;
@@ -341,6 +345,7 @@
     cursor: pointer;
   }
   #fire-btn {
+    align-self: center; /* the row top-aligns; the button shouldn't */
     background: var(--danger);
     color: #fff;
     border: none;
@@ -358,6 +363,7 @@
     cursor: not-allowed;
   }
   #keys-hint {
+    align-self: center;
     font-size: 10px;
     color: var(--text-dim);
     line-height: 1.5;
@@ -427,7 +433,7 @@
       grid-template-columns: 1fr 1fr;
       gap: 8px 12px;
       padding: 8px 10px 10px;
-      align-items: end;
+      align-items: start;
     }
     .ctrl-group { min-width: 0; }
     .ctrl-label { font-size: 9px; }
@@ -645,7 +651,7 @@
     <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div id="keys-hint">
       <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
-      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v33</span></div>
+      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v34</span></div>
     </div>
   </div>
 </div>
@@ -680,7 +686,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v33';
+  const BUILD = 'v34';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -1967,6 +1973,23 @@
     }
   }
 
+  // Hidden: double-click the wind readout to call one in. Wherever the readout
+  // happens to be - the bar's pill above 900px, the canvas gauge below it.
+  function summonHeli() {
+    if (heli || state === 'GAMEOVER' || !terrain.length) return;
+    spawnHeli();
+    heliTimer = 120 + Math.random() * 60; // don't let a scheduled one pile in behind it
+  }
+
+  windHud.addEventListener('dblclick', summonHeli);
+  canvas.addEventListener('dblclick', (e) => {
+    if (hudWindVisible) return; // the gauge isn't drawn when the pill is up
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const box = windGaugeRect();
+    if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) summonHeli();
+  });
+
   function updateHeli(dt) {
     rotorAngle += dt * 26;
     if (!heli) {
@@ -2174,13 +2197,16 @@
   }
 
   // A dark pill keeps the gauge legible over both the bright and dark skies.
+  function windGaugeRect() {
+    const w = Math.min(250, W - 24);
+    return { x: (W - w) / 2, y: 10, w: w, h: 30 };
+  }
+
   function drawWindGauge() {
     const s = windStrength();
     const col = windColor();
-    const PW = Math.min(250, W - 24);
-    const PH = 30;
-    const px = (W - PW) / 2;
-    const py = 10;
+    const box = windGaugeRect();
+    const PW = box.w, PH = box.h, px = box.x, py = box.y;
     const midY = py + PH / 2;
 
     ctx.save();
