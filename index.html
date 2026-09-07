@@ -563,7 +563,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v25</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v26</span></div>
     </div>
   </div>
 </div>
@@ -595,7 +595,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v25';
+  const BUILD = 'v26';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -1261,28 +1261,57 @@
   }
 
   // ---------- AI: trajectory-solving aim, scaled by difficulty ----------
+  // heliChance   - how often it goes for the helicopter at all when one is up
+  // heliPatience - how often it holds fire unless the wreck would land on someone
+  // heli*Jitter  - absolute aim error for that shot, deliberately far wider than
+  //                the tank jitter above, so even Brutal mostly misses a target
+  //                this small and moving
   const DIFFICULTY_SETTINGS = {
-    easy:    { angleStep: 6, powerStep: 6,  angleJitter: 16, powerJitter: 22, missChance: 0.30, thinkMs: 900 },
-    medium:  { angleStep: 3, powerStep: 3,  angleJitter: 7,  powerJitter: 10, missChance: 0.12, thinkMs: 750 },
-    hard:    { angleStep: 1.5, powerStep: 1.5, angleJitter: 3,  powerJitter: 4,  missChance: 0.04, thinkMs: 600 },
-    brutal:  { angleStep: 1, powerStep: 1,  angleJitter: 0.5, powerJitter: 1,  missChance: 0,    thinkMs: 450 }
+    easy:    { angleStep: 6, powerStep: 6,  angleJitter: 16, powerJitter: 22, missChance: 0.30, thinkMs: 900,
+               heliChance: 0.35, heliPatience: 0.15, heliAngleJitter: 14,  heliPowerJitter: 18 },
+    medium:  { angleStep: 3, powerStep: 3,  angleJitter: 7,  powerJitter: 10, missChance: 0.12, thinkMs: 750,
+               heliChance: 0.32, heliPatience: 0.40, heliAngleJitter: 10,  heliPowerJitter: 13 },
+    hard:    { angleStep: 1.5, powerStep: 1.5, angleJitter: 3,  powerJitter: 4,  missChance: 0.04, thinkMs: 600,
+               heliChance: 0.30, heliPatience: 0.65, heliAngleJitter: 7,   heliPowerJitter: 9 },
+    brutal:  { angleStep: 1, powerStep: 1,  angleJitter: 0.5, powerJitter: 1,  missChance: 0,    thinkMs: 450,
+               heliChance: 0.28, heliPatience: 0.85, heliAngleJitter: 4.5, heliPowerJitter: 6 }
   };
 
   // Simulates a shot with the same physics as the real game and returns
   // where it would land (x coordinate), so the AI can search for the
   // angle/power combo that actually lands on the target.
+  // Set by the last predictLandingX call: the shot stopped on the helicopter
+  // rather than on the ground. A module-level flag rather than a returned
+  // object because this runs thousands of times per turn.
+  let predictHitHeli = false;
+
   function predictLandingX(x0, y0, angleDeg, power, windAccel) {
     const angleRad = angleDeg * Math.PI / 180;
     let vx = Math.cos(angleRad) * power * 6.2 * physScale;
     let vy = -Math.sin(angleRad) * power * 6.2 * physScale;
     let x = x0, y = y0, t = 0;
     const dt = 0.03;
+    predictHitHeli = false;
+    // The real shot stops on the airframe, so a prediction that flies straight
+    // through it would have the AI picking shots that get intercepted. Bounds
+    // are hoisted out of the loop; this is the hottest code in the game.
+    const live = heli && !heli.falling;
+    const hx = live ? heli.x : 0, hy = live ? heli.y : 0;
+    const hw = live ? heliSize() * 0.55 : 0, hh = live ? heliSize() * 0.30 : 0;
+    // Lead the target. The shell lands one to three seconds after launch, and
+    // the AI fires a further fraction of a second after solving, by which time
+    // the helicopter has moved several times its own width. Checking against
+    // where it is now rather than where it will be made hitting it impossible
+    // and left the difficulty knobs doing nothing at all.
+    const hVel = live ? heli.dir * heli.speed : 0;
+    const hLead = live ? aiFireDelaySec() : 0;
     while (t < 12) {
       vx += windAccel * physScale * dt;
       vy += GRAVITY * physScale * dt;
       x += vx * dt;
       y += vy * dt;
       t += dt;
+      if (live && Math.abs(x - (hx + hVel * (hLead + t))) < hw && Math.abs(y - hy) < hh) { predictHitHeli = true; break; }
       if (x < -80 || x > W + 80) break;
       if (y >= groundHeightAt(Math.max(0, Math.min(terrain.length - 1, x)))) break;
     }
@@ -1317,12 +1346,18 @@
 
   function aimPreviewOn() { return cpuMode && aiDifficulty === 'brutal'; }
 
+  // Gap between the AI solving its shot and actually firing. Shared so the
+  // lead used when aiming can't drift away from the real delay.
+  function aiFireDelayMs() { return aimPreviewOn() ? 900 : 350; }
+  function aiFireDelaySec() { return aiFireDelayMs() / 1000; }
+
   function chooseAiShot(difficulty) {
     const cfg = DIFFICULTY_SETTINGS[difficulty] || DIFFICULTY_SETTINGS.medium;
     const shooter = tanks[currentPlayer];
     const targets = tanks.filter((t, i) => t.alive && i !== currentPlayer);
     const barrelLen = 20;
     let bestAngle = 45, bestPower = 55, bestErr = Infinity;
+    let bestHeliAngle = 45, bestHeliPower = 55, bestHeliErr = Infinity;
 
     // Sweep the full 0-180 arc: with more than two tanks an enemy can be on
     // either side. A landing spot is scored against whichever enemy it is
@@ -1333,6 +1368,19 @@
       for (let power = 15; power <= 100; power += cfg.powerStep) {
         const landX = predictLandingX(shooter.x, y0, angle, power, wind);
         if (Math.abs(landX - shooter.x) < TANK_W) continue; // don't shell yourself
+        if (predictHitHeli) {
+          // This shot is stopped by the airframe, so it can never reach a tank:
+          // keep it out of the tank scoring (that alone is the dodge), and hold
+          // on to the best one in case we decide to go hunting below.
+          let herr = Infinity;
+          for (const t of targets) herr = Math.min(herr, Math.abs(landX - t.x));
+          if (herr < bestHeliErr) {
+            bestHeliErr = herr;
+            bestHeliAngle = angle;
+            bestHeliPower = power;
+          }
+          continue;
+        }
         let err = Infinity;
         for (const t of targets) err = Math.min(err, Math.abs(landX - t.x));
         if (err < bestErr) {
@@ -1346,6 +1394,20 @@
     // Difficulty-scaled human-like imprecision on top of the solved shot.
     let jitterAngle = cfg.angleJitter;
     let jitterPower = cfg.powerJitter;
+
+    // Sometimes go for the helicopter instead, and go for it badly: a much
+    // wider aim error than any tank shot, and at the lower levels it will take
+    // the shot even when the wreck would come down nowhere near anybody.
+    if (heli && !heli.falling && bestHeliErr < Infinity && Math.random() < cfg.heliChance) {
+      const overSomeone = bestHeliErr < 70; // wreck would come down on someone
+      if (overSomeone || Math.random() > cfg.heliPatience) {
+        bestAngle = bestHeliAngle;
+        bestPower = bestHeliPower;
+        jitterAngle = cfg.heliAngleJitter;
+        jitterPower = cfg.heliPowerJitter;
+      }
+    }
+
     if (Math.random() < cfg.missChance) {
       // occasional bigger miss, more likely at lower difficulty
       jitterAngle *= 2.5;
@@ -1387,7 +1449,7 @@
       syncControlsFromTank();
       cpuAimReady = true;
       // hold a beat longer when the arc is on screen, so it can be read
-      setTimeout(fire, aimPreviewOn() ? 900 : 350);
+      setTimeout(fire, aiFireDelayMs());
     }, cfg.thinkMs);
   }
 
