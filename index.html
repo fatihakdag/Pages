@@ -563,7 +563,7 @@
     <button id="fire-btn">FIRE</button>
     <div id="keys-hint">
       ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v24</span></div>
+      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v25</span></div>
     </div>
   </div>
 </div>
@@ -595,7 +595,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v24';
+  const BUILD = 'v25';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -1586,6 +1586,20 @@
 
   function heliSize() { return Math.max(30, Math.min(58, W * 0.04)); }
 
+  // Cruise just clear of the tallest peak rather than at a fixed height near
+  // the top of the canvas. On a low or flat map a fixed altitude left the
+  // helicopter miles above every barrel and simply unreachable; anchoring to
+  // the terrain keeps the shot on the table whatever the map looks like, while
+  // still passing over every hill. Craters only ever lower ground, so as a
+  // round chews the map down the fly-by drifts down with it.
+  function heliCruiseY() {
+    let peak = H * 0.5;
+    for (let x = 0; x < terrain.length; x++) if (terrain[x] < peak) peak = terrain[x];
+    // clearance comfortably exceeds TANK_H, so it clears a tank sat on the peak
+    const clearance = Math.max(34, H * 0.075) + Math.random() * H * 0.03;
+    return Math.max(H * 0.05, peak - clearance);
+  }
+
   // It turns back at the edges rather than leaving on the first pass, so the
   // fly-by isn't a lottery won by whoever happens to be up when it appears.
   // It always makes at least one return trip: with two players both may have
@@ -1599,7 +1613,7 @@
     const w = heliSize();
     heli = {
       x: fromLeft ? -w : W + w,
-      y: H * (0.07 + Math.random() * 0.09), // clear of the tallest terrain
+      y: heliCruiseY(),
       dir: fromLeft ? 1 : -1,
       speed: W / (9 + Math.random() * 5),   // ~9-14s to cross, whatever the width
       vy: 0,
@@ -1674,8 +1688,7 @@
           const leftOverRight = heli.x > W;
           heli.dir = leftOverRight ? -1 : 1;
           heli.x = leftOverRight ? W + w * 1.5 : -w * 1.5;
-          heli.y = Math.max(H * 0.05, Math.min(H * 0.17,
-            heli.y + (Math.random() * 2 - 1) * H * 0.02));
+          heli.y = heliCruiseY();
         }
       }
       return;
