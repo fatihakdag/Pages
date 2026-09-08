@@ -82,6 +82,7 @@ function makeElement(id, opts = {}) {
     classList: new ClassList(),
     options: opts.options || [],
     children: [],
+    attributes: {},
     offsetParent: null, // nothing is laid out, so the HUD wind pill reads as hidden
     listeners,
     addEventListener(type, fn) {
@@ -98,8 +99,8 @@ function makeElement(id, opts = {}) {
       for (const fn of listeners.get(type) || []) fn({ preventDefault() {}, ...event });
     },
     appendChild(c) { el.children.push(c); return c; },
-    setAttribute() {},
-    getAttribute() { return null; },
+    setAttribute(name, value) { el.attributes[name] = String(value); },
+    getAttribute(name) { return name in el.attributes ? el.attributes[name] : null; },
     querySelector: () => makeElement(id + '-child'),
     querySelectorAll: () => [],
     getBoundingClientRect: () => ({ ...opts.rect }),
@@ -202,13 +203,24 @@ export function load(opts = {}) {
 
   let random = mulberry32(seed);
 
+  // Window listeners are recorded rather than dropped: the aim keys are bound
+  // on the window, so tests need a way to press them.
+  const windowListeners = new Map();
+
   const windowStub = {
     devicePixelRatio: 1,
     innerWidth: width,
     innerHeight: height,
     visualViewport: null,
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, fn) {
+      if (!windowListeners.has(type)) windowListeners.set(type, []);
+      windowListeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const l = windowListeners.get(type) || [];
+      const i = l.indexOf(fn);
+      if (i >= 0) l.splice(i, 1);
+    },
     getComputedStyle: () => ({ getPropertyValue: () => '#ff7a45' }),
     matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
     localStorage: {
@@ -316,7 +328,22 @@ export function load(opts = {}) {
       return predicate();
     },
 
-    el(id) { return document.getElementById(id); }
+    el(id) { return document.getElementById(id); },
+
+    /** Press a key, the way the window-level handlers see it. */
+    key(key, event = {}) {
+      for (const fn of windowListeners.get('keydown') || []) {
+        fn({ key, code: key, preventDefault() {}, ...event });
+      }
+    },
+
+    /** Move the angle slider to a screen position and let the game react. */
+    setAngleSlider(value) {
+      const slider = document.getElementById('angle-slider');
+      slider.value = String(value);
+      slider.dispatch('input');
+      return slider;
+    }
   };
 
   // The game kicks off a render loop and two deferred resizes at boot; run them
