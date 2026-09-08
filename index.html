@@ -686,7 +686,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v41';
+  const BUILD = 'v42';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1397,6 +1397,14 @@
     // CPU seat the select is showing that seat's choice, so leaving it live let
     // a player reach in and change what the computer was about to fire.
     weaponSelect.disabled = isAiTurn;
+    // The three game settings freeze while a CPU seat is actually playing, but
+    // not once the round is over — the round may well have ended on a CPU seat,
+    // and the roster and difficulty are exactly what you want to change before
+    // hitting Play Again.
+    const aiHoldsTurn = isAiTurn && state !== 'GAMEOVER';
+    countSelect.disabled = aiHoldsTurn;
+    modeSelect.disabled = aiHoldsTurn;
+    difficultySelect.disabled = aiHoldsTurn;
     syncWeaponOptions(t);
   }
 
@@ -1568,6 +1576,7 @@
       refreshOverlayText();
       overlay.classList.add('show');
       updateHUD();
+      syncControlsFromTank(); // releases the settings the CPU seat was holding
       return true;
     }
     return false;
