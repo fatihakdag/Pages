@@ -686,7 +686,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v39';
+  const BUILD = 'v40';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -905,7 +905,10 @@
     aiDifficulty = difficultySelect.value;
   });
   weaponSelect.addEventListener('change', () => {
-    const remaining = tanks[currentPlayer].ammo[weaponSelect.value];
+    const t = tanks[currentPlayer];
+    if (!t) return;
+    t.weapon = weaponSelect.value; // the choice belongs to this tank, not the control
+    const remaining = t.ammo[t.weapon];
     ammoReadout.textContent = remaining === Infinity ? txt('unlimited') : txt('nLeft', { n: remaining });
   });
 
@@ -1236,6 +1239,11 @@
     return !!w && w.enabled !== false;
   }
 
+  // Switched on, and this tank still has rounds for it.
+  function weaponAvailable(t, key) {
+    return weaponEnabled(key) && t.ammo[key] > 0;
+  }
+
   function freshAmmo() {
     const a = {};
     for (const key in WEAPONS) if (weaponEnabled(key)) a[key] = WEAPONS[key].startAmmo;
@@ -1253,7 +1261,8 @@
   function buildTanks() {
     tanks = [];
     for (let i = 0; i < playerCount; i++) {
-      tanks.push({ x: 0, hp: MAX_HP, color: getVar(PLAYER_VARS[i]), alive: true, angle: 45, power: 50, ammo: freshAmmo() });
+      tanks.push({ x: 0, hp: MAX_HP, color: getVar(PLAYER_VARS[i]), alive: true,
+                   angle: 45, power: 50, weapon: 'standard', ammo: freshAmmo() });
     }
   }
 
@@ -1395,12 +1404,13 @@
       opt.textContent = remaining === Infinity ? `${label} (∞)` : `${label} (${remaining})`;
       opt.disabled = remaining <= 0;
     }
-    // if the currently selected weapon just ran dry, fall back to standard
-    if (t.ammo[weaponSelect.value] <= 0) {
-      weaponSelect.value = 'standard';
-    }
-    const cur = weaponSelect.value;
-    const curRemaining = t.ammo[cur];
+    // The select is one control shared by every seat, so it is restored from
+    // whoever is aiming rather than left holding the last player's pick — the
+    // same way the angle and power sliders are. A choice that has since run dry
+    // (or been switched off) falls back to the standard shell.
+    if (!weaponAvailable(t, t.weapon)) t.weapon = 'standard';
+    weaponSelect.value = t.weapon;
+    const curRemaining = t.ammo[t.weapon];
     ammoReadout.textContent = curRemaining === Infinity ? txt('unlimited') : txt('nLeft', { n: curRemaining });
   }
 
@@ -1471,9 +1481,12 @@
   function fire() {
     if (state !== 'AIMING') return;
     const shooter = tanks[currentPlayer];
-    let weaponKey = weaponSelect.value;
-    if (shooter.ammo[weaponKey] <= 0) weaponKey = 'standard'; // safety fallback, shouldn't normally trigger
+    let weaponKey = shooter.weapon;
+    if (!weaponAvailable(shooter, weaponKey)) weaponKey = 'standard'; // safety net; syncWeaponOptions gets there first
     shooter.ammo[weaponKey] -= 1;
+    // Spending the last round hands this tank back to the standard shell, so
+    // its next turn does not open on something it cannot fire.
+    if (!weaponAvailable(shooter, weaponKey)) shooter.weapon = 'standard';
     const angleRad = shooter.angle * Math.PI / 180;
     // Angles are in world space for every tank: 0° = due right, 180° = due left.
     const speed = shooter.power * 6.2 * physScale;
@@ -1779,8 +1792,8 @@
       } else {
         preferred = pick(r, [[0.38, 'standard'], [0.56, 'big'], [0.72, 'cluster'], [0.88, 'roller']], 'mirv');
       }
-      weaponSelect.value = shooter.ammo[preferred] > 0 ? preferred : 'standard';
-      syncControlsFromTank();
+      shooter.weapon = weaponAvailable(shooter, preferred) ? preferred : 'standard';
+      syncControlsFromTank(); // pushes the seat's choice into the shared select
       cpuAimReady = true;
       // hold a beat longer when the arc is on screen, so it can be read
       setTimeout(() => { if (stillOurTurn()) fire(); }, aiFireDelayMs());
@@ -2581,7 +2594,7 @@
     // traceShot integrates a plain parabola. A guided shell leaves that path at
     // apex, so the preview stops there rather than promising a landing spot it
     // has no intention of using.
-    const guided = WEAPONS[weaponSelect.value] && WEAPONS[weaponSelect.value].guides;
+    const guided = WEAPONS[t.weapon] && WEAPONS[t.weapon].guides;
     if (guided) {
       let apex = pts.length;
       for (let i = 1; i < pts.length; i++) {
