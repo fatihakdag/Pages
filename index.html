@@ -619,6 +619,7 @@
         <option value="standard">Standard Shell</option>
         <option value="big">Big Bomb</option>
         <option value="cluster">Cluster Bomb</option>
+        <option value="roller">Roller Mine</option>
       </select>
       <div class="ctrl-label" id="ammo-readout" style="margin-top:2px;"></div>
     </div>
@@ -730,6 +731,7 @@
       wins: '{name} wins!', everybodyLoses: 'Everybody loses!',
       playAgainHint: 'Tap Play Again for a new terrain and rematch.',
       w_standard: 'Standard Shell', w_big: 'Big Bomb', w_cluster: 'Cluster Bomb',
+      w_roller: 'Roller Mine',
       unlimited: 'unlimited', nLeft: '{n} left',
       tanks2: '2 Players', tanks3: '3 Players', tanks4: '4 Players',
       vsCpu: 'vs CPU', allHuman: 'All Human',
@@ -751,6 +753,7 @@
       wins: '{name} kazandı!', everybodyLoses: 'Herkes kaybetti!',
       playAgainHint: 'Yeni arazi ve rövanş için Tekrar Oyna\'ya dokun.',
       w_standard: 'Standart Mermi', w_big: 'Büyük Bomba', w_cluster: 'Misket Bombası',
+      w_roller: 'Yuvarlanan Mayın',
       unlimited: 'sınırsız', nLeft: '{n} kaldı',
       tanks2: '2 Oyuncu', tanks3: '3 Oyuncu', tanks4: '4 Oyuncu',
       vsCpu: 'Bilgisayara Karşı', allHuman: 'Hepsi İnsan',
@@ -1163,8 +1166,21 @@
   const WEAPONS = {
     standard: { radius: 26, damageMax: 34, color: '#ffcf5c', label: 'Standard Shell', startAmmo: Infinity },
     big:      { radius: 46, damageMax: 55, color: '#ff7a45', label: 'Big Bomb', startAmmo: 5 },
-    cluster:  { radius: 18, damageMax: 22, color: '#ff5c9c', label: 'Cluster Bomb', clusterCount: 5, startAmmo: 3 }
+    cluster:  { radius: 18, damageMax: 22, color: '#ff5c9c', label: 'Cluster Bomb', clusterCount: 5, startAmmo: 3 },
+    // Doesn't burst where it lands: it settles on the ground and rolls downhill
+    // until it reaches a tank, runs out of momentum or times out. Trades the
+    // direct-hit precision of a shell for the ability to reach a tank sitting
+    // in a valley or behind a ridge you can't clear cleanly.
+    roller:   { radius: 30, damageMax: 40, color: '#7ce0ff', label: 'Roller Mine', startAmmo: 3, rolls: true }
   };
+
+  // Roll tuning. ROLL_ACCEL is read against GRAVITY of 340: a 45° slope
+  // (gradient 1) accelerates the mine at close to a free fall, and friction
+  // caps it near 300 * gradient / 0.6 px/s, so shallow ground barely moves it.
+  const ROLL_ACCEL = 300;      // px/s^2 per unit of ground gradient
+  const ROLL_FRICTION = 0.55;  // fraction of speed kept per second
+  const ROLL_MAX_TIME = 3.5;   // s before it gives up and detonates where it is
+  const ROLL_MIN_SPEED = 18;   // px/s under which it has effectively stopped
 
   function freshAmmo() {
     const a = {};
@@ -1671,11 +1687,11 @@
       const r = Math.random();
       let preferred;
       if (aiDifficulty === 'easy') {
-        preferred = r < 0.8 ? 'standard' : (r < 0.9 ? 'big' : 'cluster');
+        preferred = r < 0.8 ? 'standard' : (r < 0.87 ? 'big' : (r < 0.94 ? 'cluster' : 'roller'));
       } else if (aiDifficulty === 'medium') {
-        preferred = r < 0.6 ? 'standard' : (r < 0.85 ? 'big' : 'cluster');
+        preferred = r < 0.6 ? 'standard' : (r < 0.78 ? 'big' : (r < 0.9 ? 'cluster' : 'roller'));
       } else {
-        preferred = r < 0.4 ? 'standard' : (r < 0.75 ? 'big' : 'cluster');
+        preferred = r < 0.4 ? 'standard' : (r < 0.62 ? 'big' : (r < 0.82 ? 'cluster' : 'roller'));
       }
       weaponSelect.value = shooter.ammo[preferred] > 0 ? preferred : 'standard';
       syncControlsFromTank();
@@ -1683,6 +1699,72 @@
       // hold a beat longer when the arc is on screen, so it can be read
       setTimeout(() => { if (stillOurTurn()) fire(); }, aiFireDelayMs());
     }, cfg.thinkMs);
+  }
+
+  // ---------- Roller mine ----------
+  // Ground gradient at x, sampled over a few pixels so single-pixel terrain
+  // noise doesn't shove the mine around. Canvas y grows downward, so a positive
+  // gradient means the ground falls away to the right.
+  function groundGradientAt(x) {
+    const d = 4 * physScale;
+    return (groundHeightAt(x + d) - groundHeightAt(x - d)) / (2 * d);
+  }
+
+  function spawnDust(x, y, color) {
+    for (let i = 0; i < 8; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() * 2 - 1) * 60,
+        vy: -Math.random() * 70,
+        life: 0.3 + Math.random() * 0.3,
+        age: 0,
+        color: Math.random() < 0.5 ? color : '#cbd5e1'
+      });
+    }
+  }
+
+  function detonateRoller() {
+    const px = projectile.x, py = groundHeightAt(px);
+    applyDamageAndCrater(px, py, projectile.weapon);
+    projectile = null;
+    trail = [];
+    state = 'EXPLODING';
+    explodeTimer = 0;
+  }
+
+  // The mine hugs the surface: gravity along the slope pushes it downhill,
+  // friction bleeds the speed off, and it detonates as soon as it reaches a
+  // tank, stalls, times out or falls off the map.
+  function stepRoller(dt) {
+    const p = projectile;
+    p.rollTime += dt;
+
+    const sub = 3;
+    for (let i = 0; i < sub; i++) {
+      const sdt = dt / sub;
+      p.vx += groundGradientAt(p.x) * ROLL_ACCEL * physScale * sdt;
+      p.vx *= Math.pow(ROLL_FRICTION, sdt);
+      p.x += p.vx * sdt;
+      p.y = groundHeightAt(p.x);
+    }
+
+    trail.push({ x: p.x, y: p.y });
+    if (trail.length > 60) trail.shift();
+
+    if (p.x < -20 || p.x > W + 20) {
+      projectile = null;
+      trail = [];
+      state = 'RESOLVED'; // rolled off the edge of the map
+      return;
+    }
+    for (const t of tanks) {
+      if (!t.alive) continue;
+      if (Math.abs(p.x - t.x) < TANK_W / 2 + 4) { detonateRoller(); return; } // yes, including the tank that fired it
+    }
+    if (p.rollTime > ROLL_MAX_TIME ||
+        (p.rollTime > 0.25 && Math.abs(p.vx) < ROLL_MIN_SPEED * physScale)) {
+      detonateRoller();
+    }
   }
 
   // ---------- Physics step ----------
@@ -1693,7 +1775,9 @@
     dt = Math.min(dt, 0.033);
     lastTime = ts;
 
-    if (state === 'FIRING' && projectile) {
+    if (state === 'FIRING' && projectile && projectile.rolling) {
+      stepRoller(dt);
+    } else if (state === 'FIRING' && projectile) {
       const sub = 2;
       for (let s = 0; s < sub; s++) {
         const sdt = dt / sub;
@@ -1706,6 +1790,7 @@
       if (trail.length > 60) trail.shift();
 
       let hit = false;
+      let hitGround = false;
       let outOfBounds = false;
       let shotHeli = false;
       if (projectile.x < -20 || projectile.x > W + 20 || projectile.y > H + 60) {
@@ -1714,6 +1799,7 @@
         shotHeli = true;
       } else if (projectile.y >= groundHeightAt(projectile.x)) {
         hit = true;
+        hitGround = true;
       } else {
         // direct tank hit check
         for (const t of tanks) {
@@ -1743,7 +1829,18 @@
         const weaponKey = projectile.weapon;
         const w = WEAPONS[weaponKey];
         const px = projectile.x, py = Math.min(projectile.y, groundHeightAt(projectile.x));
-        if (weaponKey === 'cluster') {
+        if (w.rolls && hitGround) {
+          // Landed on the ground rather than straight onto a tank: settle it on
+          // the surface and hand it to the roll phase instead of detonating.
+          projectile.rolling = true;
+          projectile.rollTime = 0;
+          projectile.x = px;
+          projectile.y = groundHeightAt(px);
+          projectile.vy = 0;
+          projectile.vx *= 0.45; // most of the impact energy goes into the dirt
+          trail = [];
+          spawnDust(projectile.x, projectile.y, w.color);
+        } else if (weaponKey === 'cluster') {
           applyDamageAndCrater(px, py, weaponKey);
           for (let i = 0; i < w.clusterCount; i++) {
             clusterQueue.push({
@@ -1757,10 +1854,12 @@
         } else {
           applyDamageAndCrater(px, py, weaponKey);
         }
-        projectile = null;
-        trail = [];
-        state = 'EXPLODING';
-        explodeTimer = 0;
+        if (!(projectile && projectile.rolling)) {
+          projectile = null;
+          trail = [];
+          state = 'EXPLODING';
+          explodeTimer = 0;
+        }
       }
     }
 
@@ -2343,10 +2442,31 @@
 
     // projectile
     if (projectile) {
-      ctx.fillStyle = WEAPONS[projectile.weapon].color;
-      ctx.beginPath();
-      ctx.arc(projectile.x, projectile.y, 4, 0, Math.PI * 2);
-      ctx.fill();
+      const pw = WEAPONS[projectile.weapon];
+      ctx.fillStyle = pw.color;
+      if (projectile.rolling) {
+        // A rolling mine reads as a spiked drum sitting on the ground, and the
+        // spin direction shows which way it is travelling.
+        const r = 6;
+        const cy = projectile.y - r;
+        const spin = projectile.x / r;
+        ctx.strokeStyle = pw.color;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 6; i++) {
+          const a = spin + i * Math.PI / 3;
+          ctx.beginPath();
+          ctx.moveTo(projectile.x + Math.cos(a) * r, cy + Math.sin(a) * r);
+          ctx.lineTo(projectile.x + Math.cos(a) * (r + 3), cy + Math.sin(a) * (r + 3));
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(projectile.x, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.arc(projectile.x, projectile.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // explosions
