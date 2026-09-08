@@ -138,7 +138,7 @@
     flex-wrap: wrap;
     gap: 4px 8px;
   }
-  #level-info { font-size: 10px; color: var(--text-dim); }
+  #build-info { font-size: 10px; color: var(--text-dim); }
   #lang-toggle {
     display: flex;
     align-items: center;
@@ -416,9 +416,7 @@
     .pn-full { display: none; }
     .pn-abbr { display: inline; }
     .player-bar-row { display: block; } /* ~46px cards: no room to pair */
-    /* center-info is sized by its own content here, so any horizontal pairing
-       widens it and steals width from the cards. Keep it stacked. */
-    #info-row { flex-direction: column; align-items: flex-end; gap: 2px; }
+    #info-row { gap: 3px 6px; }
     .cb-full { display: none; }
     .cb-abbr { display: inline; }
     .health-bar-track { max-width: 110px; height: 8px; }
@@ -582,7 +580,7 @@
     <div id="center-info">
       <div id="turn-banner">—</div>
       <div id="info-row">
-        <span id="level-info">—</span>
+        <span id="build-info">—</span>
         <span id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
         <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
       </div>
@@ -651,7 +649,6 @@
     <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div id="keys-hint">
       <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
-      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v34</span></div>
     </div>
   </div>
 </div>
@@ -686,7 +683,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v34';
+  const BUILD = 'v35';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -700,7 +697,7 @@
   const ammoReadout = document.getElementById('ammo-readout');
   const fireBtn = document.getElementById('fire-btn');
   const turnBanner = document.getElementById('turn-banner');
-  const levelInfo = document.getElementById('level-info');
+  const buildInfo = document.getElementById('build-info');
   const windArrow = document.getElementById('wind-arrow');
   const windHud = document.getElementById('wind-hud');
   const playersRow = document.getElementById('players-row');
@@ -722,7 +719,7 @@
     en: {
       wind: 'WIND', angle: 'ANGLE', power: 'POWER', weapon: 'WEAPON',
       tanks: 'TANKS', opponents: 'OPPONENTS', cpuLevel: 'CPU LEVEL',
-      fire: 'FIRE', playAgain: 'Play Again', build: 'build', time: 'TIME',
+      fire: 'FIRE', playAgain: 'Play Again', time: 'TIME',
       timerMs: '{m}m {s}s', timerS: '{s}s',
       cpuBadge: 'CPU', cpuBadgeShort: 'CPU',
       keysHint: '← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire',
@@ -730,7 +727,6 @@
       playerName: 'Player {n}', cpuName: 'CPU {n}',
       roundOver: 'ROUND OVER', inFlight: 'IN FLIGHT…',
       thinking: '{name} THINKING…', aimFire: '{name} — AIM & FIRE',
-      level: 'LEVEL {n}',
       wins: '{name} wins!', everybodyLoses: 'Everybody loses!',
       playAgainHint: 'Tap Play Again for a new terrain and rematch.',
       w_standard: 'Standard Shell', w_big: 'Big Bomb', w_cluster: 'Cluster Bomb',
@@ -740,14 +736,11 @@
       easy: 'Easy', medium: 'Medium', hard: 'Hard', brutal: 'Brutal',
       angleDown: 'Angle down one degree', angleUp: 'Angle up one degree',
       powerDown: 'Power down one', powerUp: 'Power up one',
-      'Dusk Ridge': 'Dusk Ridge', 'Salt Flats': 'Salt Flats', 'Ash Peaks': 'Ash Peaks',
-      'Glacier': 'Glacier', 'Verdant Hills': 'Verdant Hills',
-      'Night Crater': 'Night Crater', 'Rust Canyon': 'Rust Canyon'
     },
     tr: {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
       tanks: 'TANKLAR', opponents: 'RAKİPLER', cpuLevel: 'BİLGİSAYAR SEVİYESİ',
-      fire: 'ATEŞ', playAgain: 'Tekrar Oyna', build: 'sürüm', time: 'SÜRE',
+      fire: 'ATEŞ', playAgain: 'Tekrar Oyna', time: 'SÜRE',
       timerMs: '{m}d {s}sn', timerS: '{s}sn',
       cpuBadge: 'BİLGİSAYAR', cpuBadgeShort: 'BİL',
       keysHint: '← → nişan &nbsp;|&nbsp; ↑ ↓ güç &nbsp;|&nbsp; BOŞLUK ateş',
@@ -755,7 +748,6 @@
       playerName: 'Oyuncu {n}', cpuName: 'Bilgisayar {n}',
       roundOver: 'TUR BİTTİ', inFlight: 'HAVADA…',
       thinking: '{name} DÜŞÜNÜYOR…', aimFire: '{name} — NİŞAN AL & ATEŞ',
-      level: 'SEVİYE {n}',
       wins: '{name} kazandı!', everybodyLoses: 'Herkes kaybetti!',
       playAgainHint: 'Yeni arazi ve rövanş için Tekrar Oyna\'ya dokun.',
       w_standard: 'Standart Mermi', w_big: 'Büyük Bomba', w_cluster: 'Misket Bombası',
@@ -765,9 +757,6 @@
       easy: 'Kolay', medium: 'Orta', hard: 'Zor', brutal: 'Acımasız',
       angleDown: 'Açıyı bir derece azalt', angleUp: 'Açıyı bir derece artır',
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
-      'Dusk Ridge': 'Alacakaranlık Sırtı', 'Salt Flats': 'Tuz Düzlüğü',
-      'Ash Peaks': 'Kül Zirveleri', 'Glacier': 'Buzul',
-      'Verdant Hills': 'Yeşil Tepeler', 'Night Crater': 'Gece Krateri',
       'Rust Canyon': 'Pas Kanyonu'
     }
   };
@@ -1005,7 +994,6 @@
     }
   ];
 
-  let level = 1;
   let theme = THEMES[0];
   let decorItems = []; // clouds / stars / embers positions for the current theme
 
@@ -1305,7 +1293,6 @@
       const who = upper(playerName(currentPlayer));
       turnBanner.textContent = txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
     }
-    levelInfo.textContent = `${txt('level', { n: level })} · ${txt(theme.name)} · ${BUILD}`;
   }
 
   function syncControlsFromTank() {
@@ -1401,7 +1388,7 @@
   });
 
   fireBtn.addEventListener('click', fire);
-  restartBtn.addEventListener('click', () => { level++; resetGame(); });
+  restartBtn.addEventListener('click', resetGame);
 
   function fire() {
     if (state !== 'AIMING') return;
@@ -2395,6 +2382,7 @@
     window.visualViewport.addEventListener('resize', resize);
   }
   resize();
+  buildInfo.textContent = BUILD;
   initLanguage();
   refreshOpponentUi();
   resetGame();
