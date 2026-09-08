@@ -912,6 +912,7 @@
     ammoReadout.textContent = remaining === Infinity ? txt('unlimited') : txt('nLeft', { n: remaining });
   });
 
+  // ---------- Canvas sizing ----------
   let W = 0, H = 0, DPR = 1;
 
   // Tanks are placed at fractions of the width, but the physics below is in
@@ -2790,6 +2791,7 @@
     if (!hudWindVisible) drawWindGauge();
   }
 
+  // ---------- Boot ----------
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 150));
   // Mobile browsers resize the visual viewport when the address bar hides/shows
