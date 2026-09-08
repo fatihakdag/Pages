@@ -80,6 +80,13 @@
     outline-offset: 4px;
   }
   .player-card.dead { opacity: 0.38; }
+  /* Bar and HP share the second line. Pairing the HP with the *name* instead
+     would need the sum of name + badge + HP on one line, which overflows once
+     the badge reads BİLGİSAYAR; this way the row only needs the wider of the
+     two, and the bar simply takes what is left. */
+  .player-bar-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .player-bar-row .health-bar-track { flex: 1 1 auto; }
+  .player-bar-row .health-text { flex: 0 0 auto; }
   .player-name {
     font-size: 12px;
     letter-spacing: 0.5px;
@@ -87,6 +94,9 @@
     white-space: nowrap;
   }
   .pn-abbr { display: none; }
+  .cb-abbr { display: none; }
+  #players-row[data-count="4"] .cb-full { display: none; }
+  #players-row[data-count="4"] .cb-abbr { display: inline; }
   .p1 { color: var(--accent-p1); }
   .p2 { color: var(--accent-p2); }
   .p3 { color: var(--accent-p3); }
@@ -121,7 +131,32 @@
     color: var(--text-main);
     margin-bottom: 2px;
   }
-  #wind-row {
+  #info-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+  #level-info { font-size: 10px; color: var(--text-dim); }
+  #lang-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #lang-toggle input {
+    width: 12px; height: 12px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--accent-p1);
+  }
+  .hud-pill {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -130,7 +165,17 @@
     padding: 2px 8px;
     font-size: 11px;
     letter-spacing: 0.5px;
+    white-space: nowrap;
   }
+  /* Wind lives in the middle of the bar only where there is room for it; below
+     that the on-canvas gauge is the single readout, so it is never shown twice. */
+  #wind-hud { display: none; flex: 0 0 auto; align-self: center; }
+  @media (min-width: 900px) {
+    #wind-hud { display: flex; }
+    #players-row { flex: 1 1 0; }
+    #center-info { flex: 1 1 0; align-items: flex-end; text-align: right; min-width: 0; }
+  }
+  #timer-val { font-weight: bold; color: var(--text-main); }
   #wind-arrow {
     display: inline-block;
     font-size: 20px;
@@ -162,7 +207,11 @@
     border-top: 2px solid var(--panel-line);
     padding: 10px 16px 14px;
     display: flex;
-    align-items: center;
+    /* Top-aligned, not centred: the weapon group carries an ammo readout under
+       its select, so centring made that group taller and lifted its select
+       clear of the other three. Aligning tops lines every label and control up
+       and lets the readout hang below. */
+    align-items: flex-start;
     gap: 22px;
     flex-wrap: wrap;
     flex: 0 0 auto;
@@ -268,19 +317,35 @@
     input[type=range]::-moz-range-thumb { width: 28px; height: 28px; }
     .nudge { width: 34px; height: 34px; font-size: 13px; }
   }
-  select#weapon-select {
+  /* Was scoped to the weapon select by id, so the other three fell back to the
+     browser's default white control. */
+  #controls select {
     background: #12111a;
     color: var(--text-main);
     border: 1px solid var(--panel-line);
+    border-radius: 3px;
     padding: 6px 8px;
     font-family: inherit;
     font-size: 12px;
+    cursor: pointer;
+    /* also darkens the native dropdown list itself, not just the closed control */
+    color-scheme: dark;
   }
+  #controls select:hover { border-color: #55526a; }
+  #controls select:focus-visible {
+    outline: 2px solid rgba(236,231,225,0.45);
+    outline-offset: 1px;
+  }
+  #controls select:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* Firefox needs the options coloured explicitly */
+  #controls select option { background: #12111a; color: var(--text-main); }
+  #controls select option:disabled { color: var(--text-dim); }
   button {
     font-family: inherit;
     cursor: pointer;
   }
   #fire-btn {
+    align-self: center; /* the row top-aligns; the button shouldn't */
     background: var(--danger);
     color: #fff;
     border: none;
@@ -298,6 +363,7 @@
     cursor: not-allowed;
   }
   #keys-hint {
+    align-self: center;
     font-size: 10px;
     color: var(--text-dim);
     line-height: 1.5;
@@ -349,6 +415,12 @@
     .player-name { font-size: 10px; }
     .pn-full { display: none; }
     .pn-abbr { display: inline; }
+    .player-bar-row { display: block; } /* ~46px cards: no room to pair */
+    /* center-info is sized by its own content here, so any horizontal pairing
+       widens it and steals width from the cards. Keep it stacked. */
+    #info-row { flex-direction: column; align-items: flex-end; gap: 2px; }
+    .cb-full { display: none; }
+    .cb-abbr { display: inline; }
     .health-bar-track { max-width: 110px; height: 8px; }
     /* four cards on a phone leave ~50px each — keep "100 / 100" on one line */
     .health-text { font-size: 8px; white-space: nowrap; }
@@ -361,7 +433,7 @@
       grid-template-columns: 1fr 1fr;
       gap: 8px 12px;
       padding: 8px 10px 10px;
-      align-items: end;
+      align-items: start;
     }
     .ctrl-group { min-width: 0; }
     .ctrl-label { font-size: 9px; }
@@ -410,6 +482,8 @@
       gap: 10px;
     }
     #players-row { flex-direction: column; flex: 0 0 auto; gap: 8px; }
+    .cb-full { display: none; }
+    .cb-abbr { display: inline; }
     .player-card { flex: 0 0 auto; max-width: none; }
     .health-bar-track { max-width: none; }
     #center-info {
@@ -418,7 +492,8 @@
       border-top: 1px solid var(--panel-line);
       padding-top: 8px;
     }
-    #wind-row { justify-content: flex-start; }
+    #wind-hud { display: none; }
+    .hud-pill { justify-content: flex-start; }
 
     #game-wrap { flex: 1 1 auto; height: 100%; min-height: 0; }
 
@@ -473,31 +548,44 @@
   <div id="hud">
     <div id="players-row">
       <div class="player-card p1" id="card-p1">
-        <div class="player-name"><span class="pn-full">PLAYER 1</span><span class="pn-abbr">P1</span> <span class="ai-badge" id="ai-badge-1">CPU</span></div>
-        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div></div>
-        <div class="health-text" id="hp-text-1">100 / 100</div>
+        <div class="player-name"><span class="pn-full">PLAYER 1</span><span class="pn-abbr">P1</span> <span class="ai-badge" id="ai-badge-1"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-1">100 / 100</div>
+        </div>
       </div>
       <div class="player-card p2" id="card-p2">
-        <div class="player-name"><span class="pn-full">PLAYER 2</span><span class="pn-abbr">P2</span> <span class="ai-badge" id="ai-badge-2">CPU</span></div>
-        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%;"></div></div>
-        <div class="health-text" id="hp-text-2">100 / 100</div>
+        <div class="player-name"><span class="pn-full">PLAYER 2</span><span class="pn-abbr">P2</span> <span class="ai-badge" id="ai-badge-2"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-2">100 / 100</div>
+        </div>
       </div>
       <div class="player-card p3" id="card-p3" hidden>
-        <div class="player-name"><span class="pn-full">PLAYER 3</span><span class="pn-abbr">P3</span> <span class="ai-badge" id="ai-badge-3">CPU</span></div>
-        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-3" style="background:var(--accent-p3); width:100%;"></div></div>
-        <div class="health-text" id="hp-text-3">100 / 100</div>
+        <div class="player-name"><span class="pn-full">PLAYER 3</span><span class="pn-abbr">P3</span> <span class="ai-badge" id="ai-badge-3"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-3" style="background:var(--accent-p3); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-3">100 / 100</div>
+        </div>
       </div>
       <div class="player-card p4" id="card-p4" hidden>
-        <div class="player-name"><span class="pn-full">PLAYER 4</span><span class="pn-abbr">P4</span> <span class="ai-badge" id="ai-badge-4">CPU</span></div>
-        <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-4" style="background:var(--accent-p4); width:100%;"></div></div>
-        <div class="health-text" id="hp-text-4">100 / 100</div>
+        <div class="player-name"><span class="pn-full">PLAYER 4</span><span class="pn-abbr">P4</span> <span class="ai-badge" id="ai-badge-4"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-4" style="background:var(--accent-p4); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-4">100 / 100</div>
+        </div>
       </div>
     </div>
 
+    <div id="wind-hud" class="hud-pill"><span data-i18n="wind">WIND</span> <span id="wind-arrow">→</span> <span id="wind-val">0</span></div>
+
     <div id="center-info">
       <div id="turn-banner">—</div>
-      <div id="level-info" style="font-size:10px; color:var(--text-dim); margin-bottom:2px;">—</div>
-      <div id="wind-row">WIND <span id="wind-arrow">→</span> <span id="wind-val">0</span></div>
+      <div id="info-row">
+        <span id="level-info">—</span>
+        <span id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
+        <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
+      </div>
     </div>
   </div>
 
@@ -506,13 +594,13 @@
     <div id="overlay">
       <h1 id="overlay-title">Tank 1 wins!</h1>
       <p id="overlay-sub">Round over.</p>
-      <button id="restart-btn">Play Again</button>
+      <button id="restart-btn" data-i18n="playAgain">Play Again</button>
     </div>
   </div>
 
   <div id="controls">
     <div class="ctrl-group">
-      <div class="ctrl-label">ANGLE <span class="val" id="angle-val">45°</span></div>
+      <div class="ctrl-label"><span data-i18n="angle">ANGLE</span> <span class="val" id="angle-val">45°</span></div>
       <div class="slider-row">
         <button type="button" class="nudge" id="angle-dec" aria-label="Angle down one degree">◀</button>
         <input type="range" id="angle-slider" min="0" max="180" value="45">
@@ -520,7 +608,7 @@
       </div>
     </div>
     <div class="ctrl-group">
-      <div class="ctrl-label">POWER <span class="val" id="power-val">50</span></div>
+      <div class="ctrl-label"><span data-i18n="power">POWER</span> <span class="val" id="power-val">50</span></div>
       <div class="slider-row">
         <button type="button" class="nudge" id="power-dec" aria-label="Power down one">◀</button>
         <input type="range" id="power-slider" min="0" max="100" value="50">
@@ -528,7 +616,7 @@
       </div>
     </div>
     <div class="ctrl-group">
-      <div class="ctrl-label">WEAPON</div>
+      <div class="ctrl-label" data-i18n="weapon">WEAPON</div>
       <select id="weapon-select">
         <option value="standard">Standard Shell</option>
         <option value="big">Big Bomb</option>
@@ -537,7 +625,7 @@
       <div class="ctrl-label" id="ammo-readout" style="margin-top:2px;"></div>
     </div>
     <div class="ctrl-group">
-      <div class="ctrl-label">TANKS</div>
+      <div class="ctrl-label" data-i18n="tanks">TANKS</div>
       <select id="count-select">
         <option value="2" selected>2 Players</option>
         <option value="3">3 Players</option>
@@ -545,14 +633,14 @@
       </select>
     </div>
     <div class="ctrl-group">
-      <div class="ctrl-label">OPPONENTS</div>
+      <div class="ctrl-label" data-i18n="opponents">OPPONENTS</div>
       <select id="mode-select">
         <option value="cpu" selected>vs CPU</option>
         <option value="human">All Human</option>
       </select>
     </div>
     <div class="ctrl-group" id="difficulty-group">
-      <div class="ctrl-label">CPU LEVEL</div>
+      <div class="ctrl-label" data-i18n="cpuLevel">CPU LEVEL</div>
       <select id="difficulty-select">
         <option value="easy">Easy</option>
         <option value="medium" selected>Medium</option>
@@ -560,10 +648,10 @@
         <option value="brutal">Brutal</option>
       </select>
     </div>
-    <button id="fire-btn">FIRE</button>
+    <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div id="keys-hint">
-      ← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire
-      <div style="opacity:0.55; margin-top:3px;">build <span id="build-stamp">v27</span></div>
+      <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
+      <div style="opacity:0.55; margin-top:3px;"><span data-i18n="build">build</span> <span id="build-stamp">v34</span></div>
     </div>
   </div>
 </div>
@@ -575,7 +663,10 @@
     var d = document.createElement('div');
     d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#7a1420;color:#fff;' +
       'font:12px/1.45 monospace;padding:10px 12px;white-space:pre-wrap;max-height:45%;overflow:auto;';
-    d.textContent = 'Startup error: ' + msg;
+    // This block runs before the game's string table exists, so it does its
+    // own tiny language check rather than reaching for one.
+    var tr = (navigator.language || '').toLowerCase().indexOf('tr') === 0;
+    d.textContent = (tr ? 'Başlatma hatası: ' : 'Startup error: ') + msg;
     (document.body || document.documentElement).appendChild(d);
   }
   window.addEventListener('error', function (e) {
@@ -595,7 +686,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v27';
+  const BUILD = 'v34';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -611,6 +702,9 @@
   const turnBanner = document.getElementById('turn-banner');
   const levelInfo = document.getElementById('level-info');
   const windArrow = document.getElementById('wind-arrow');
+  const windHud = document.getElementById('wind-hud');
+  const playersRow = document.getElementById('players-row');
+  const timerVal = document.getElementById('timer-val');
   const windVal = document.getElementById('wind-val');
   const overlay = document.getElementById('overlay');
   const overlayTitle = document.getElementById('overlay-title');
@@ -620,6 +714,78 @@
   const modeSelect = document.getElementById('mode-select');
   const countSelect = document.getElementById('count-select');
   const difficultyGroup = document.getElementById('difficulty-group');
+
+  // ---------- Language ----------
+  // Theme names are keyed by their English name so the THEMES table stays the
+  // single place they are defined.
+  const STRINGS = {
+    en: {
+      wind: 'WIND', angle: 'ANGLE', power: 'POWER', weapon: 'WEAPON',
+      tanks: 'TANKS', opponents: 'OPPONENTS', cpuLevel: 'CPU LEVEL',
+      fire: 'FIRE', playAgain: 'Play Again', build: 'build', time: 'TIME',
+      timerMs: '{m}m {s}s', timerS: '{s}s',
+      cpuBadge: 'CPU', cpuBadgeShort: 'CPU',
+      keysHint: '← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire',
+      playerFull: 'PLAYER {n}', playerAbbr: 'P{n}',
+      playerName: 'Player {n}', cpuName: 'CPU {n}',
+      roundOver: 'ROUND OVER', inFlight: 'IN FLIGHT…',
+      thinking: '{name} THINKING…', aimFire: '{name} — AIM & FIRE',
+      level: 'LEVEL {n}',
+      wins: '{name} wins!', everybodyLoses: 'Everybody loses!',
+      playAgainHint: 'Tap Play Again for a new terrain and rematch.',
+      w_standard: 'Standard Shell', w_big: 'Big Bomb', w_cluster: 'Cluster Bomb',
+      unlimited: 'unlimited', nLeft: '{n} left',
+      tanks2: '2 Players', tanks3: '3 Players', tanks4: '4 Players',
+      vsCpu: 'vs CPU', allHuman: 'All Human',
+      easy: 'Easy', medium: 'Medium', hard: 'Hard', brutal: 'Brutal',
+      angleDown: 'Angle down one degree', angleUp: 'Angle up one degree',
+      powerDown: 'Power down one', powerUp: 'Power up one',
+      'Dusk Ridge': 'Dusk Ridge', 'Salt Flats': 'Salt Flats', 'Ash Peaks': 'Ash Peaks',
+      'Glacier': 'Glacier', 'Verdant Hills': 'Verdant Hills',
+      'Night Crater': 'Night Crater', 'Rust Canyon': 'Rust Canyon'
+    },
+    tr: {
+      wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
+      tanks: 'TANKLAR', opponents: 'RAKİPLER', cpuLevel: 'BİLGİSAYAR SEVİYESİ',
+      fire: 'ATEŞ', playAgain: 'Tekrar Oyna', build: 'sürüm', time: 'SÜRE',
+      timerMs: '{m}d {s}sn', timerS: '{s}sn',
+      cpuBadge: 'BİLGİSAYAR', cpuBadgeShort: 'BİL',
+      keysHint: '← → nişan &nbsp;|&nbsp; ↑ ↓ güç &nbsp;|&nbsp; BOŞLUK ateş',
+      playerFull: 'OYUNCU {n}', playerAbbr: 'O{n}',
+      playerName: 'Oyuncu {n}', cpuName: 'Bilgisayar {n}',
+      roundOver: 'TUR BİTTİ', inFlight: 'HAVADA…',
+      thinking: '{name} DÜŞÜNÜYOR…', aimFire: '{name} — NİŞAN AL & ATEŞ',
+      level: 'SEVİYE {n}',
+      wins: '{name} kazandı!', everybodyLoses: 'Herkes kaybetti!',
+      playAgainHint: 'Yeni arazi ve rövanş için Tekrar Oyna\'ya dokun.',
+      w_standard: 'Standart Mermi', w_big: 'Büyük Bomba', w_cluster: 'Misket Bombası',
+      unlimited: 'sınırsız', nLeft: '{n} kaldı',
+      tanks2: '2 Oyuncu', tanks3: '3 Oyuncu', tanks4: '4 Oyuncu',
+      vsCpu: 'Bilgisayara Karşı', allHuman: 'Hepsi İnsan',
+      easy: 'Kolay', medium: 'Orta', hard: 'Zor', brutal: 'Acımasız',
+      angleDown: 'Açıyı bir derece azalt', angleUp: 'Açıyı bir derece artır',
+      powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
+      'Dusk Ridge': 'Alacakaranlık Sırtı', 'Salt Flats': 'Tuz Düzlüğü',
+      'Ash Peaks': 'Kül Zirveleri', 'Glacier': 'Buzul',
+      'Verdant Hills': 'Yeşil Tepeler', 'Night Crater': 'Gece Krateri',
+      'Rust Canyon': 'Pas Kanyonu'
+    }
+  };
+
+  let lang = 'en';
+  // Named txt() rather than t(): `t` is the tank variable all over this file,
+  // and a lookup shadowed by a tank object would throw at runtime.
+  function txt(key, vars) {
+    let s = STRINGS[lang][key];
+    if (s === undefined) s = STRINGS.en[key];
+    if (s === undefined) return key;
+    if (vars) for (const k in vars) s = s.split('{' + k + '}').join(vars[k]);
+    return s;
+  }
+
+  // Turkish casing is not the default casing: toUpperCase() maps the dotted i
+  // to a dotless I, so "Bilgisayar" would come out "BILGISAYAR".
+  function upper(s) { return lang === 'tr' ? s.toLocaleUpperCase('tr-TR') : s.toUpperCase(); }
 
   const MAX_PLAYERS = 4;
   const PLAYER_VARS = ['--accent-p1', '--accent-p2', '--accent-p3', '--accent-p4'];
@@ -637,7 +803,59 @@
 
   // Player 1 is always the local human; every other seat is a CPU when enabled.
   function isAi(i) { return cpuMode && i > 0; }
-  function playerName(i) { return (isAi(i) ? 'CPU ' : 'Player ') + (i + 1); }
+  function playerName(i) { return txt(isAi(i) ? 'cpuName' : 'playerName', { n: i + 1 }); }
+
+  // Remembered so the win overlay can be re-rendered if the language changes
+  // while it is on screen.
+  let lastWinner = null;
+  function refreshOverlayText() {
+    if (lastWinner === null) return;
+    overlayTitle.textContent = lastWinner === -1
+      ? txt('everybodyLoses')
+      : txt('wins', { name: playerName(lastWinner) });
+    overlaySub.textContent = txt('playAgainHint');
+  }
+
+  const langCheckbox = document.getElementById('lang-tr');
+
+  function applyLanguage() {
+    document.documentElement.lang = lang;
+    for (const el of document.querySelectorAll('[data-i18n]')) {
+      el.innerHTML = txt(el.getAttribute('data-i18n'));
+    }
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+      cards[i].querySelector('.pn-full').textContent = txt('playerFull', { n: i + 1 });
+      cards[i].querySelector('.pn-abbr').textContent = txt('playerAbbr', { n: i + 1 });
+    }
+    const relabel = (sel, keys) => {
+      for (let i = 0; i < sel.options.length; i++) sel.options[i].textContent = txt(keys[i]);
+    };
+    relabel(countSelect, ['tanks2', 'tanks3', 'tanks4']);
+    relabel(modeSelect, ['vsCpu', 'allHuman']);
+    relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
+    const aria = { 'angle-dec': 'angleDown', 'angle-inc': 'angleUp',
+                   'power-dec': 'powerDown', 'power-inc': 'powerUp' };
+    for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
+    lastTimerText = ''; // force the clock to redraw in the new language
+    // the weapon <option> labels and ammo readout are rebuilt from here
+    if (tanks.length) { updateHUD(); syncControlsFromTank(); }
+    refreshOverlayText();
+  }
+
+  langCheckbox.addEventListener('change', () => {
+    lang = langCheckbox.checked ? 'tr' : 'en';
+    try { localStorage.setItem('barrage.lang', lang); } catch (e) { /* private mode */ }
+    applyLanguage();
+  });
+
+  function initLanguage() {
+    let stored = null;
+    try { stored = localStorage.getItem('barrage.lang'); } catch (e) { /* private mode */ }
+    const browserTr = (navigator.language || '').toLowerCase().indexOf('tr') === 0;
+    lang = (stored === 'tr' || stored === 'en') ? stored : (browserTr ? 'tr' : 'en');
+    langCheckbox.checked = lang === 'tr';
+    applyLanguage();
+  }
 
   function refreshOpponentUi() {
     // CPU level only matters when playing against the computer
@@ -646,6 +864,7 @@
 
   modeSelect.addEventListener('change', () => {
     cpuMode = modeSelect.value === 'cpu';
+    turnToken++; // seats changed hands; drop anything the AI had queued
     refreshOpponentUi();
     updateHUD();
     syncControlsFromTank();
@@ -664,7 +883,7 @@
   });
   weaponSelect.addEventListener('change', () => {
     const remaining = tanks[currentPlayer].ammo[weaponSelect.value];
-    ammoReadout.textContent = remaining === Infinity ? 'unlimited' : `${remaining} left`;
+    ammoReadout.textContent = remaining === Infinity ? txt('unlimited') : txt('nLeft', { n: remaining });
   });
 
   let W = 0, H = 0, DPR = 1;
@@ -720,8 +939,10 @@
       levelTankPads(); // the rebuild above regenerates terrain from the seed shape
     }
     prevW = W;
+    hudWindVisible = windHud.offsetParent !== null;
   }
   let prevW = 0;
+  let hudWindVisible = false;
 
   // ---------- Environments ----------
   // Each level gets a distinct sky, ground palette, and terrain personality.
@@ -942,6 +1163,7 @@
 
   let wind = 0; // px/s^2 lateral accel
   let windPulse = 0; // 1 -> 0 flash right after the wind changes
+  let roundStart = 0, lastTimerText = '';
   let currentPlayer = 0;
   let state = 'AIMING'; // AIMING | FIRING | EXPLODING | GAMEOVER
   let projectile = null;
@@ -1018,6 +1240,17 @@
     return '#8fe3a8';
   }
 
+  // Round clock. Frozen once the round is over so it reads as how long it took,
+  // and only written when the displayed second actually changes.
+  function updateTimer() {
+    if (state === 'GAMEOVER') return;
+    const secs = Math.floor((performance.now() - roundStart) / 1000);
+    const s = secs >= 60
+      ? txt('timerMs', { m: Math.floor(secs / 60), s: secs % 60 })
+      : txt('timerS', { s: secs });
+    if (s !== lastTimerText) { lastTimerText = s; timerVal.textContent = s; }
+  }
+
   function setWind() {
     wind = (Math.random() * 2 - 1) * WIND_MAX;
     const col = windColor();
@@ -1029,6 +1262,9 @@
   }
 
   function resetGame() {
+    turnToken++;
+    roundStart = performance.now();
+    lastTimerText = '';
     buildTanks();
     currentPlayer = 0;
     state = 'AIMING';
@@ -1049,6 +1285,7 @@
   }
 
   function updateHUD() {
+    playersRow.dataset.count = tanks.length;
     for (let i = 0; i < MAX_PLAYERS; i++) {
       const t = tanks[i];
       cards[i].hidden = !t;
@@ -1061,15 +1298,14 @@
       aiBadges[i].style.display = isAi(i) ? 'inline-block' : 'none';
     }
     if (state === 'GAMEOVER') {
-      turnBanner.textContent = 'ROUND OVER';
+      turnBanner.textContent = txt('roundOver');
     } else if (state !== 'AIMING') {
-      turnBanner.textContent = 'IN FLIGHT…';
-    } else if (isAi(currentPlayer)) {
-      turnBanner.textContent = `${playerName(currentPlayer).toUpperCase()} THINKING…`;
+      turnBanner.textContent = txt('inFlight');
     } else {
-      turnBanner.textContent = `${playerName(currentPlayer).toUpperCase()} — AIM & FIRE`;
+      const who = upper(playerName(currentPlayer));
+      turnBanner.textContent = txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
     }
-    levelInfo.textContent = `LEVEL ${level} · ${theme.name} · ${BUILD}`;
+    levelInfo.textContent = `${txt('level', { n: level })} · ${txt(theme.name)} · ${BUILD}`;
   }
 
   function syncControlsFromTank() {
@@ -1090,7 +1326,7 @@
     for (const opt of weaponSelect.options) {
       const key = opt.value;
       const remaining = t.ammo[key];
-      const label = WEAPONS[key].label;
+      const label = txt('w_' + key);
       opt.textContent = remaining === Infinity ? `${label} (∞)` : `${label} (${remaining})`;
       opt.disabled = remaining <= 0;
     }
@@ -1100,7 +1336,7 @@
     }
     const cur = weaponSelect.value;
     const curRemaining = t.ammo[cur];
-    ammoReadout.textContent = curRemaining === Infinity ? 'unlimited' : `${curRemaining} left`;
+    ammoReadout.textContent = curRemaining === Infinity ? txt('unlimited') : txt('nLeft', { n: curRemaining });
   }
 
   angleSlider.addEventListener('input', () => {
@@ -1235,11 +1471,8 @@
     const alive = tanks.filter(t => t.alive);
     if (alive.length <= 1) {
       state = 'GAMEOVER';
-      const winnerIdx = tanks.findIndex(t => t.alive);
-      overlayTitle.textContent = winnerIdx === -1
-        ? 'Everybody loses!'
-        : `${playerName(winnerIdx)} wins!`;
-      overlaySub.textContent = 'Tap Play Again for a new terrain and rematch.';
+      lastWinner = tanks.findIndex(tk => tk.alive);
+      refreshOverlayText();
       overlay.classList.add('show');
       updateHUD();
       return true;
@@ -1252,6 +1485,7 @@
     // at least two tanks are alive here, so this always lands on someone else
     do { currentPlayer = (currentPlayer + 1) % tanks.length; }
     while (!tanks[currentPlayer].alive);
+    turnToken++;
     if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
     setWind();
     state = 'AIMING';
@@ -1422,14 +1656,25 @@
   // preview stays hidden while it is still "thinking".
   let cpuAimReady = false;
 
+  // Bumped whenever the active seat changes, a round restarts, or the opponent
+  // mode changes. The AI defers both its aim and its shot on timers, and a
+  // helicopter crash can end a turn from outside the normal shot resolution, so
+  // a deferred shot could otherwise land after the turn had moved on - and
+  // fire() shoots for whoever is current, which meant the human's tank firing
+  // by itself.
+  let turnToken = 0;
+
   function maybeAiTurn() {
     if (!isAi(currentPlayer) || state !== 'AIMING') return;
     cpuAimReady = false;
     updateHUD();
     const cfg = DIFFICULTY_SETTINGS[aiDifficulty] || DIFFICULTY_SETTINGS.medium;
     const seat = currentPlayer;
+    const token = turnToken;
+    const stillOurTurn = () =>
+      turnToken === token && state === 'AIMING' && currentPlayer === seat;
     setTimeout(() => {
-      if (state !== 'AIMING' || currentPlayer !== seat) return;
+      if (!stillOurTurn()) return;
       const shot = chooseAiShot(aiDifficulty);
       const shooter = tanks[seat];
       shooter.angle = shot.angle;
@@ -1449,7 +1694,7 @@
       syncControlsFromTank();
       cpuAimReady = true;
       // hold a beat longer when the arc is on screen, so it can be read
-      setTimeout(fire, aiFireDelayMs());
+      setTimeout(() => { if (stillOurTurn()) fire(); }, aiFireDelayMs());
     }, cfg.thinkMs);
   }
 
@@ -1580,6 +1825,7 @@
     particles = particles.filter(p => p.age < p.life);
     windPulse = Math.max(0, windPulse - dt * 1.6);
     updateHeli(dt);
+    updateTimer();
 
     render();
     requestAnimationFrame(step);
@@ -1726,6 +1972,23 @@
       if (!tanks[currentPlayer].alive) nextTurn();
     }
   }
+
+  // Hidden: double-click the wind readout to call one in. Wherever the readout
+  // happens to be - the bar's pill above 900px, the canvas gauge below it.
+  function summonHeli() {
+    if (heli || state === 'GAMEOVER' || !terrain.length) return;
+    spawnHeli();
+    heliTimer = 120 + Math.random() * 60; // don't let a scheduled one pile in behind it
+  }
+
+  windHud.addEventListener('dblclick', summonHeli);
+  canvas.addEventListener('dblclick', (e) => {
+    if (hudWindVisible) return; // the gauge isn't drawn when the pill is up
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const box = windGaugeRect();
+    if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) summonHeli();
+  });
 
   function updateHeli(dt) {
     rotorAngle += dt * 26;
@@ -1934,13 +2197,16 @@
   }
 
   // A dark pill keeps the gauge legible over both the bright and dark skies.
+  function windGaugeRect() {
+    const w = Math.min(250, W - 24);
+    return { x: (W - w) / 2, y: 10, w: w, h: 30 };
+  }
+
   function drawWindGauge() {
     const s = windStrength();
     const col = windColor();
-    const PW = Math.min(250, W - 24);
-    const PH = 30;
-    const px = (W - PW) / 2;
-    const py = 10;
+    const box = windGaugeRect();
+    const PW = box.w, PH = box.h, px = box.x, py = box.y;
     const midY = py + PH / 2;
 
     ctx.save();
@@ -1955,7 +2221,7 @@
     ctx.font = 'bold 10px "Courier New", monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(236,231,225,0.6)';
-    ctx.fillText('WIND', px + 10, midY);
+    ctx.fillText(txt('wind'), px + 10, midY);
 
     ctx.textAlign = 'right';
     ctx.font = 'bold 13px "Courier New", monospace';
@@ -2118,7 +2384,8 @@
       ctx.globalAlpha = 1;
     });
 
-    drawWindGauge(); // last, so it stays readable over everything
+    // Only one wind readout at a time: the bar's pill where it fits, this otherwise.
+    if (!hudWindVisible) drawWindGauge();
   }
 
   window.addEventListener('resize', resize);
@@ -2128,6 +2395,7 @@
     window.visualViewport.addEventListener('resize', resize);
   }
   resize();
+  initLanguage();
   refreshOpponentUi();
   resetGame();
   requestAnimationFrame(step);
