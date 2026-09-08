@@ -686,7 +686,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v38';
+  const BUILD = 'v39';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -700,10 +700,10 @@
     armDelay: 0.3,      // s of ordinary flight before the motor can light, so a
                         // flat shot (angle 0 or 180, which has no apex) cannot
                         // nose over in the shooter's own lap
-    burn: 1.8,          // s the motor runs once lit. Burn x boostSpeed is the
-                        // chase range, and it wants to cover most of the map:
-                        // a missile that runs dry short of the helicopter is
-                        // just a worse shell
+    burn: 2.2,          // s the motor runs once lit. Burn x boostSpeed has to
+                        // cover both the cruise (below) and a helicopter chase
+                        // across most of the map; a missile that runs dry early
+                        // is just a worse shell
     boostSpeed: 380,    // px/s floor while under power: at apex a steep shot has
                         // almost no speed left, and would otherwise crawl
     turnRate: 260,      // deg/s the nose can swing while under power. Turn
@@ -1486,6 +1486,16 @@
       vx, vy,
       weapon: weaponKey,
       firedBy: currentPlayer,
+      // Where an ordinary shell of this angle and power would have come down.
+      // A missile cruises to this spot and drops on it, so the aim you have
+      // built up on every other shell carries over unchanged; only the angle of
+      // arrival differs. (predictLandingX also sets predictHitHeli, which only
+      // the AI solver reads, and only straight after its own call.)
+      aimX: WEAPONS[weaponKey].guides
+        ? predictLandingX(shooter.x + barrelLen * Math.cos(angleRad),
+                          groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad),
+                          shooter.angle, shooter.power, wind)
+        : 0,
       trail: []
     }];
     shotExploded = false;
@@ -1866,6 +1876,13 @@
   function armMissile(p) {
     p.armed = true;
     p.burnLeft = MISSILE.burn;
+    // Apex sits at half of a ballistic shot's range, so cruising the same
+    // horizontal distance again before tipping over lands the missile where an
+    // ordinary shell of the same angle and power would have landed. Measured
+    // rather than set as a constant: range scales with the square of power, so
+    // no fixed cruise time can hold across the power range or across screen
+    // sizes. This is what makes the weapon aimable on instinct.
+    p.armX = p.x;
     // Locked once, here: a helicopter that shows up later isn't chased, and one
     // that is shot down or leaves mid-burn drops the missile back into its dive.
     p.chase = !!(heli && !heli.falling);
@@ -1873,6 +1890,17 @@
     // rather than preserving what little is there.
     p.burnSpeed = Math.max(Math.hypot(p.vx, p.vy), MISSILE.boostSpeed * physScale);
     spawnDust(p.x, p.y, WEAPONS.missile.color);
+  }
+
+  // How much ground the dive still to come will cover: the geometry of the drop
+  // itself, plus the swing into it, which is not free at a capped turn rate.
+  // Cruising until this equals the distance left is what puts the missile on the
+  // aim point instead of well beyond it.
+  function diveRunFor(p) {
+    const gy = groundHeightAt(Math.max(0, Math.min(W - 1, p.aimX)));
+    const drop = Math.max(0, gy - p.y);
+    const turnIn = p.burnSpeed * (MISSILE.diveAngle / MISSILE.turnRate) * 0.5;
+    return drop / Math.tan(MISSILE.diveAngle * Math.PI / 180) + turnIn;
   }
 
   // Under power: no gravity, no wind (the motor overpowers both), constant
@@ -1884,10 +1912,20 @@
     if (target) {
       const lead = target.dir * target.speed * MISSILE.heliLead;
       want = Math.atan2(target.y - p.y, (target.x + lead) - p.x);
+    } else if (!p.diving && Math.abs(p.aimX - p.x) > diveRunFor(p)) {
+      // Cruise: hold altitude until the dive ahead will just reach the aim point.
+      want = p.vx >= 0 ? 0 : Math.PI;
     } else {
-      // Nose over into a steep dive, whichever way it is already travelling.
-      const d = MISSILE.diveAngle * Math.PI / 180;
-      want = p.vx >= 0 ? d : Math.PI - d;
+      // Committed. Steering at the aim point itself rather than holding a fixed
+      // angle lets the dive absorb the error in diveRunFor's estimate, which is
+      // only ever approximate — the swing into the dive is not free and the
+      // ground under the target is not flat. The trigger above is what makes
+      // this steep; this only decides where it ends up. Latched, because the
+      // dive carries it across the aim point and the distance test would
+      // otherwise go false on the far side and pull it out of the dive.
+      p.diving = true;
+      const gy = groundHeightAt(Math.max(0, Math.min(W - 1, p.aimX)));
+      want = Math.atan2(Math.max(1, gy - p.y), p.aimX - p.x);
     }
     let cur = Math.atan2(p.vy, p.vx);
     let diff = want - cur;
