@@ -686,7 +686,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v40';
+  const BUILD = 'v41';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1393,6 +1393,10 @@
     angleSlider.disabled = isAiTurn;
     powerSlider.disabled = isAiTurn;
     nudgeBtns.forEach(b => { b.disabled = isAiTurn; });
+    // The weapon is a turn control like the sliders, not a game setting: on a
+    // CPU seat the select is showing that seat's choice, so leaving it live let
+    // a player reach in and change what the computer was about to fire.
+    weaponSelect.disabled = isAiTurn;
     syncWeaponOptions(t);
   }
 
