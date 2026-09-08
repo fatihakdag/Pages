@@ -2794,6 +2794,45 @@
   setTimeout(resize, 60);
   setTimeout(resize, 400);
   window.addEventListener('load', resize);
+
+  // ---------- Test seam ----------
+  // The game is one IIFE inside one file (it ships as a single self-contained
+  // page), so tests/ reaches in through here to drive the physics, the AI and
+  // the turn machinery directly. Nothing in the game itself reads this object.
+  window.__BARRAGE_TEST__ = {
+    BUILD, WEAPONS, MISSILE, DIFFICULTY_SETTINGS, GRAVITY, TANK_W, TANK_H, MAX_HP,
+    WIND_MAX, MAX_PLAYERS, THEMES,
+    groundHeightAt, craterAt, bedrockY, newTerrain, rebuildTerrainToWidth,
+    placeTanks, levelTankPads, groundGradientAt, buildTanks,
+    freshAmmo, weaponEnabled, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
+    fire, applyDamageAndCrater, stepProjectile, stepRoller, detonateRoller, splitMirv,
+    armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
+    endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
+    setWind, windStrength, windForce, isAi, txt, upper, playerName,
+    syncControlsFromTank, updateHUD, nudge,
+    heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
+    el: {
+      weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
+      powerSlider, fireBtn, overlay, turnBanner, ammoReadout, nudgeBtns, cards,
+      hpText, langCheckbox
+    },
+    get tanks() { return tanks; }, set tanks(v) { tanks = v; },
+    get terrain() { return terrain; }, set terrain(v) { terrain = v; },
+    get wind() { return wind; }, set wind(v) { wind = v; },
+    get state() { return state; }, set state(v) { state = v; },
+    get currentPlayer() { return currentPlayer; }, set currentPlayer(v) { currentPlayer = v; },
+    get projectiles() { return projectiles; }, set projectiles(v) { projectiles = v; },
+    get clusterQueue() { return clusterQueue; }, set clusterQueue(v) { clusterQueue = v; },
+    get heli() { return heli; }, set heli(v) { heli = v; },
+    get cpuMode() { return cpuMode; }, set cpuMode(v) { cpuMode = v; },
+    get aiDifficulty() { return aiDifficulty; }, set aiDifficulty(v) { aiDifficulty = v; },
+    get playerCount() { return playerCount; }, set playerCount(v) { playerCount = v; },
+    get lang() { return lang; },
+    get W() { return W; }, get H() { return H; }, get physScale() { return physScale; },
+    get turnToken() { return turnToken; }, get lastWinner() { return lastWinner; },
+    get shotExploded() { return shotExploded; },
+    get explosions() { return explosions; }, get particles() { return particles; }
+  };
 })();
 </script>
 </body>

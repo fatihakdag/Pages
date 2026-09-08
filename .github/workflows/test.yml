@@ -1,0 +1,18 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      # No install step: the suite has no dependencies. It runs the game out of
+      # index.html against a stub DOM on Node's built-in test runner.
+      - run: node --test "tests/*.test.mjs"

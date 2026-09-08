@@ -1,7 +1,18 @@
-image: alpine:latest
+stages:
+  - test
+  - deploy
+
+test:
+  stage: test
+  image: node:22-alpine
+  script:
+    # No dependencies: the suite runs the game from index.html against a stub
+    # DOM on Node's built-in test runner.
+    - node --test "tests/*.test.mjs"
 
 pages:
   stage: deploy
+  image: alpine:latest
   script:
     - echo "Publishing static site"
   artifacts:
