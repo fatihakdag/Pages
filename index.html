@@ -619,6 +619,9 @@
         <option value="standard">Standard Shell</option>
         <option value="big">Big Bomb</option>
         <option value="cluster">Cluster Bomb</option>
+        <option value="roller">Roller Mine</option>
+        <option value="mirv">MIRV</option>
+        <option value="missile">Guided Missile</option>
       </select>
       <div class="ctrl-label" id="ammo-readout" style="margin-top:2px;"></div>
     </div>
@@ -683,8 +686,37 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v35';
+  const BUILD = 'v39';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
+
+  // ---------- Guided missile: one switch for the whole weapon ----------
+  // Set enabled to false and the missile leaves the dropdown, every tank's
+  // ammo and the CPU's choices; nothing else in the game changes. The rest of
+  // these are its tuning, all in real units so they mean the same thing on a
+  // phone and an ultrawide (the turn rate is angular and the times are
+  // seconds, so neither needs scaling).
+  const MISSILE = {
+    enabled: true,
+    armDelay: 0.3,      // s of ordinary flight before the motor can light, so a
+                        // flat shot (angle 0 or 180, which has no apex) cannot
+                        // nose over in the shooter's own lap
+    burn: 2.2,          // s the motor runs once lit. Burn x boostSpeed has to
+                        // cover both the cruise (below) and a helicopter chase
+                        // across most of the map; a missile that runs dry early
+                        // is just a worse shell
+    boostSpeed: 380,    // px/s floor while under power: at apex a steep shot has
+                        // almost no speed left, and would otherwise crawl
+    turnRate: 260,      // deg/s the nose can swing while under power. Turn
+                        // radius is speed/turnRate, so 380 px/s at 260 deg/s
+                        // loops in ~170px: enough to reverse onto a helicopter
+                        // that is behind it without flying into the ground
+    diveAngle: 78,      // deg below horizontal it pitches to with nothing to chase
+    heliLead: 0.15,     // s of lead when chasing the helicopter
+    fuze: 0.7           // proximity fuze radius, as a fraction of the airframe.
+                        // heliHitBy's box is only ~13px tall, and a tail chase
+                        // closes on a target asymptotically, so a missile that
+                        // is plainly going to hit slides underneath instead
+  };
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
   const gameWrap = document.getElementById('game-wrap');
@@ -730,6 +762,7 @@
       wins: '{name} wins!', everybodyLoses: 'Everybody loses!',
       playAgainHint: 'Tap Play Again for a new terrain and rematch.',
       w_standard: 'Standard Shell', w_big: 'Big Bomb', w_cluster: 'Cluster Bomb',
+      w_roller: 'Roller Mine', w_mirv: 'MIRV', w_missile: 'Guided Missile',
       unlimited: 'unlimited', nLeft: '{n} left',
       tanks2: '2 Players', tanks3: '3 Players', tanks4: '4 Players',
       vsCpu: 'vs CPU', allHuman: 'All Human',
@@ -751,6 +784,7 @@
       wins: '{name} kazandı!', everybodyLoses: 'Herkes kaybetti!',
       playAgainHint: 'Yeni arazi ve rövanş için Tekrar Oyna\'ya dokun.',
       w_standard: 'Standart Mermi', w_big: 'Büyük Bomba', w_cluster: 'Misket Bombası',
+      w_roller: 'Yuvarlanan Mayın', w_mirv: 'MIRV', w_missile: 'Güdümlü Füze',
       unlimited: 'sınırsız', nLeft: '{n} kaldı',
       tanks2: '2 Oyuncu', tanks3: '3 Oyuncu', tanks4: '4 Oyuncu',
       vsCpu: 'Bilgisayara Karşı', allHuman: 'Hepsi İnsan',
@@ -910,10 +944,9 @@
     physScale = W / W_REF;
     // A shell already in the air was launched under the old scale; rescale it
     // so it keeps flying the arc it was aimed on.
-    if (projectile && prevScale > 0) {
+    if (projectiles.length && prevScale > 0) {
       const k = physScale / prevScale;
-      projectile.vx *= k;
-      projectile.vy *= k;
+      for (const p of projectiles) { p.vx *= k; p.vy *= k; }
     }
     if (terrain.length) {
       // Keep tanks at the same relative spot when the canvas changes size,
@@ -1154,8 +1187,13 @@
   let roundStart = 0, lastTimerText = '';
   let currentPlayer = 0;
   let state = 'AIMING'; // AIMING | FIRING | EXPLODING | GAMEOVER
-  let projectile = null;
-  let trail = [];
+  // A list, not a single shell: a MIRV puts three warheads in the air at once,
+  // and everything below already treats them one at a time. Each carries its
+  // own trail so the split reads as three separate arcs.
+  let projectiles = [];
+  // Set when any shell of the current shot detonated, so the turn can tell an
+  // explosion apart from a shot that simply flew off the map.
+  let shotExploded = false;
   let explosions = []; // active explosion animations {x,y,r,maxR,t}
   let clusterQueue = []; // pending sub-explosions for cluster bomb
   let particles = [];
@@ -1163,13 +1201,53 @@
   const WEAPONS = {
     standard: { radius: 26, damageMax: 34, color: '#ffcf5c', label: 'Standard Shell', startAmmo: Infinity },
     big:      { radius: 46, damageMax: 55, color: '#ff7a45', label: 'Big Bomb', startAmmo: 5 },
-    cluster:  { radius: 18, damageMax: 22, color: '#ff5c9c', label: 'Cluster Bomb', clusterCount: 5, startAmmo: 3 }
+    cluster:  { radius: 18, damageMax: 22, color: '#ff5c9c', label: 'Cluster Bomb', clusterCount: 5, startAmmo: 3 },
+    // Doesn't burst where it lands: it settles on the ground and rolls downhill
+    // until it reaches a tank, runs out of momentum or times out. Trades the
+    // direct-hit precision of a shell for the ability to reach a tank sitting
+    // in a valley or behind a ridge you can't clear cleanly.
+    roller:   { radius: 30, damageMax: 40, color: '#7ce0ff', label: 'Roller Mine', startAmmo: 3, rolls: true },
+    // Splits at the top of its arc into independent warheads that finish the
+    // flight on their own paths — unlike the cluster bomb, which splits on
+    // impact. Each warhead is weak; the value is the width of the pattern,
+    // which covers a tank you can only place roughly.
+    mirv:     { radius: 22, damageMax: 26, color: '#b6ff7a', label: 'MIRV', startAmmo: 2,
+                mirvCount: 3, mirvSpread: 55 },
+    // Climbs on the arc you aimed, then lights its motor at the top and comes
+    // down almost vertically — so it drops behind a ridge onto a tank a flat
+    // parabola would sail over or bury itself short of. If a helicopter is up
+    // when the motor lights it chases that instead: the wreck is the most
+    // violent thing in the game, and this is the only reliable way to choose
+    // when it falls.
+    missile:  { radius: 24, damageMax: 28, color: '#ff4d5e', label: 'Guided Missile',
+                startAmmo: 2, guides: true, enabled: MISSILE.enabled }
   };
+
+  // Roll tuning. ROLL_ACCEL is read against GRAVITY of 340: a 45° slope
+  // (gradient 1) accelerates the mine at close to a free fall, and friction
+  // caps it near 300 * gradient / 0.6 px/s, so shallow ground barely moves it.
+  const ROLL_ACCEL = 300;      // px/s^2 per unit of ground gradient
+  const ROLL_FRICTION = 0.55;  // fraction of speed kept per second
+  const ROLL_MAX_TIME = 3.5;   // s before it gives up and detonates where it is
+  const ROLL_MIN_SPEED = 18;   // px/s under which it has effectively stopped
+
+  function weaponEnabled(key) {
+    const w = WEAPONS[key];
+    return !!w && w.enabled !== false;
+  }
 
   function freshAmmo() {
     const a = {};
-    for (const key in WEAPONS) a[key] = WEAPONS[key].startAmmo;
+    for (const key in WEAPONS) if (weaponEnabled(key)) a[key] = WEAPONS[key].startAmmo;
     return a;
+  }
+
+  // Drops the <option>s for weapons that are switched off, so the rest of the
+  // weapon plumbing — which walks the select — never sees them at all.
+  function pruneWeaponOptions() {
+    for (const opt of [...weaponSelect.options]) {
+      if (!weaponEnabled(opt.value)) opt.remove();
+    }
   }
 
   function buildTanks() {
@@ -1256,8 +1334,8 @@
     buildTanks();
     currentPlayer = 0;
     state = 'AIMING';
-    projectile = null;
-    trail = [];
+    projectiles = [];
+    shotExploded = false;
     explosions = [];
     particles = [];
     clusterQueue = [];
@@ -1402,14 +1480,25 @@
     const vx = Math.cos(angleRad) * speed;
     const vy = -Math.sin(angleRad) * speed;
     const barrelLen = 20;
-    projectile = {
+    projectiles = [{
       x: shooter.x + barrelLen * Math.cos(angleRad),
       y: groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad),
       vx, vy,
       weapon: weaponKey,
-      firedBy: currentPlayer
-    };
-    trail = [];
+      firedBy: currentPlayer,
+      // Where an ordinary shell of this angle and power would have come down.
+      // A missile cruises to this spot and drops on it, so the aim you have
+      // built up on every other shell carries over unchanged; only the angle of
+      // arrival differs. (predictLandingX also sets predictHitHeli, which only
+      // the AI solver reads, and only straight after its own call.)
+      aimX: WEAPONS[weaponKey].guides
+        ? predictLandingX(shooter.x + barrelLen * Math.cos(angleRad),
+                          groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad),
+                          shooter.angle, shooter.power, wind)
+        : 0,
+      trail: []
+    }];
+    shotExploded = false;
     state = 'FIRING';
     updateHUD();
   }
@@ -1651,6 +1740,12 @@
   // by itself.
   let turnToken = 0;
 
+  // First entry whose threshold r falls under, else the fallback.
+  function pick(r, table, fallback) {
+    for (const [threshold, key] of table) if (r < threshold) return key;
+    return fallback;
+  }
+
   function maybeAiTurn() {
     if (!isAi(currentPlayer) || state !== 'AIMING') return;
     cpuAimReady = false;
@@ -1670,12 +1765,19 @@
       // but only when it actually still has ammo for them.
       const r = Math.random();
       let preferred;
+      // Thresholds are cumulative: each level leans further from the plain
+      // shell toward the specials, and a MIRV forgives a rough solution, so
+      // the weaker levels get proportionally more use out of it.
+      // The guided missile is deliberately absent: chooseAiShot solves on
+      // predictLandingX, which integrates a plain parabola, and a missile
+      // stops travelling at apex — so the CPU would undershoot every one of
+      // them. Teaching the predictor about the burn is what it would take.
       if (aiDifficulty === 'easy') {
-        preferred = r < 0.8 ? 'standard' : (r < 0.9 ? 'big' : 'cluster');
+        preferred = pick(r, [[0.80, 'standard'], [0.86, 'big'], [0.91, 'cluster'], [0.95, 'roller']], 'mirv');
       } else if (aiDifficulty === 'medium') {
-        preferred = r < 0.6 ? 'standard' : (r < 0.85 ? 'big' : 'cluster');
+        preferred = pick(r, [[0.58, 'standard'], [0.72, 'big'], [0.83, 'cluster'], [0.92, 'roller']], 'mirv');
       } else {
-        preferred = r < 0.4 ? 'standard' : (r < 0.75 ? 'big' : 'cluster');
+        preferred = pick(r, [[0.38, 'standard'], [0.56, 'big'], [0.72, 'cluster'], [0.88, 'roller']], 'mirv');
       }
       weaponSelect.value = shooter.ammo[preferred] > 0 ? preferred : 'standard';
       syncControlsFromTank();
@@ -1683,6 +1785,279 @@
       // hold a beat longer when the arc is on screen, so it can be read
       setTimeout(() => { if (stillOurTurn()) fire(); }, aiFireDelayMs());
     }, cfg.thinkMs);
+  }
+
+  // ---------- Roller mine ----------
+  // Ground gradient at x, sampled over a few pixels so single-pixel terrain
+  // noise doesn't shove the mine around. Canvas y grows downward, so a positive
+  // gradient means the ground falls away to the right.
+  function groundGradientAt(x) {
+    const d = 4 * physScale;
+    return (groundHeightAt(x + d) - groundHeightAt(x - d)) / (2 * d);
+  }
+
+  function spawnDust(x, y, color) {
+    for (let i = 0; i < 8; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() * 2 - 1) * 60,
+        vy: -Math.random() * 70,
+        life: 0.3 + Math.random() * 0.3,
+        age: 0,
+        color: Math.random() < 0.5 ? color : '#cbd5e1'
+      });
+    }
+  }
+
+  function detonateRoller(p) {
+    applyDamageAndCrater(p.x, groundHeightAt(p.x), p.weapon);
+    p.dead = true;
+    shotExploded = true;
+    updateHUD();
+  }
+
+  // The mine hugs the surface: gravity along the slope pushes it downhill,
+  // friction bleeds the speed off, and it detonates as soon as it reaches a
+  // tank, stalls, times out or falls off the map.
+  function stepRoller(p, dt) {
+    p.rollTime += dt;
+
+    const sub = 3;
+    for (let i = 0; i < sub; i++) {
+      const sdt = dt / sub;
+      p.vx += groundGradientAt(p.x) * ROLL_ACCEL * physScale * sdt;
+      p.vx *= Math.pow(ROLL_FRICTION, sdt);
+      p.x += p.vx * sdt;
+      p.y = groundHeightAt(p.x);
+    }
+
+    pushTrail(p);
+
+    if (p.x < -20 || p.x > W + 20) {
+      p.dead = true; // rolled off the edge of the map
+      return;
+    }
+    for (const t of tanks) {
+      if (!t.alive) continue;
+      if (Math.abs(p.x - t.x) < TANK_W / 2 + 4) { detonateRoller(p); return; } // yes, including the tank that fired it
+    }
+    if (p.rollTime > ROLL_MAX_TIME ||
+        (p.rollTime > 0.25 && Math.abs(p.vx) < ROLL_MIN_SPEED * physScale)) {
+      detonateRoller(p);
+    }
+  }
+
+  // ---------- MIRV ----------
+  // Splits at the top of the arc — vy crossing zero — into evenly fanned
+  // warheads. They are ordinary shells from here on, marked so they can't
+  // split again, so wind bends each one on its own the rest of the way down.
+  function splitMirv(p) {
+    const w = WEAPONS.mirv;
+    p.dead = true;
+    for (let i = 0; i < w.mirvCount; i++) {
+      const offset = i - (w.mirvCount - 1) / 2; // -1, 0, +1 for three
+      spawnQueue.push({
+        x: p.x, y: p.y,
+        vx: p.vx + offset * w.mirvSpread * physScale,
+        // a touch of downward kick, so they separate vertically too
+        vy: p.vy + Math.abs(offset) * 18 * physScale,
+        weapon: 'mirv',
+        firedBy: p.firedBy,
+        split: true,
+        trail: []
+      });
+    }
+    spawnDust(p.x, p.y, w.color);
+  }
+
+  // ---------- Guided missile ----------
+  // The motor lights at the top of the arc — the same moment a MIRV splits —
+  // so the climb is whatever the player aimed and only the descent changes.
+  function armMissile(p) {
+    p.armed = true;
+    p.burnLeft = MISSILE.burn;
+    // Apex sits at half of a ballistic shot's range, so cruising the same
+    // horizontal distance again before tipping over lands the missile where an
+    // ordinary shell of the same angle and power would have landed. Measured
+    // rather than set as a constant: range scales with the square of power, so
+    // no fixed cruise time can hold across the power range or across screen
+    // sizes. This is what makes the weapon aimable on instinct.
+    p.armX = p.x;
+    // Locked once, here: a helicopter that shows up later isn't chased, and one
+    // that is shot down or leaves mid-burn drops the missile back into its dive.
+    p.chase = !!(heli && !heli.falling);
+    // At apex a steep shot has almost no speed left, so the motor sets a floor
+    // rather than preserving what little is there.
+    p.burnSpeed = Math.max(Math.hypot(p.vx, p.vy), MISSILE.boostSpeed * physScale);
+    spawnDust(p.x, p.y, WEAPONS.missile.color);
+  }
+
+  // How much ground the dive still to come will cover: the geometry of the drop
+  // itself, plus the swing into it, which is not free at a capped turn rate.
+  // Cruising until this equals the distance left is what puts the missile on the
+  // aim point instead of well beyond it.
+  function diveRunFor(p) {
+    const gy = groundHeightAt(Math.max(0, Math.min(W - 1, p.aimX)));
+    const drop = Math.max(0, gy - p.y);
+    const turnIn = p.burnSpeed * (MISSILE.diveAngle / MISSILE.turnRate) * 0.5;
+    return drop / Math.tan(MISSILE.diveAngle * Math.PI / 180) + turnIn;
+  }
+
+  // Under power: no gravity, no wind (the motor overpowers both), constant
+  // speed, and the nose swings toward what it wants at a capped rate.
+  function flyMissile(p, dt) {
+    p.burnLeft -= dt;
+    const target = (p.chase && heli && !heli.falling) ? heli : null;
+    let want;
+    if (target) {
+      const lead = target.dir * target.speed * MISSILE.heliLead;
+      want = Math.atan2(target.y - p.y, (target.x + lead) - p.x);
+    } else if (!p.diving && Math.abs(p.aimX - p.x) > diveRunFor(p)) {
+      // Cruise: hold altitude until the dive ahead will just reach the aim point.
+      want = p.vx >= 0 ? 0 : Math.PI;
+    } else {
+      // Committed. Steering at the aim point itself rather than holding a fixed
+      // angle lets the dive absorb the error in diveRunFor's estimate, which is
+      // only ever approximate — the swing into the dive is not free and the
+      // ground under the target is not flat. The trigger above is what makes
+      // this steep; this only decides where it ends up. Latched, because the
+      // dive carries it across the aim point and the distance test would
+      // otherwise go false on the far side and pull it out of the dive.
+      p.diving = true;
+      const gy = groundHeightAt(Math.max(0, Math.min(W - 1, p.aimX)));
+      want = Math.atan2(Math.max(1, gy - p.y), p.aimX - p.x);
+    }
+    let cur = Math.atan2(p.vy, p.vx);
+    let diff = want - cur;
+    while (diff > Math.PI) diff -= Math.PI * 2;   // turn the short way round
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    const step = MISSILE.turnRate * Math.PI / 180 * dt;
+    cur += Math.max(-step, Math.min(step, diff));
+    p.vx = Math.cos(cur) * p.burnSpeed;
+    p.vy = Math.sin(cur) * p.burnSpeed;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+
+    if (Math.random() < 0.8) {
+      particles.push({
+        x: p.x - Math.cos(cur) * 6, y: p.y - Math.sin(cur) * 6,
+        vx: (Math.random() * 2 - 1) * 26 - p.vx * 0.06,
+        vy: (Math.random() * 2 - 1) * 26 - p.vy * 0.06,
+        life: 0.25 + Math.random() * 0.35, age: 0,
+        color: Math.random() < 0.5 ? '#ffb03a' : '#8e8b99'
+      });
+    }
+  }
+
+  // A chasing missile goes off when it gets close enough, rather than having to
+  // thread the airframe's own hit box. Only a missile that locked on: everything
+  // else still has to actually hit.
+  function missileFuzed(p) {
+    if (!p.chase || !heli || heli.falling) return false;
+    const r = heliSize() * MISSILE.fuze;
+    return Math.hypot(p.x - heli.x, p.y - heli.y) < r;
+  }
+
+  // ---------- Per-shell flight ----------
+  // One shell for one frame: marks itself dead when it is spent, and leaves
+  // the turn's bookkeeping to the caller — there may be two more in the air.
+  let spawnQueue = []; // warheads spawned mid-frame, added once the walk is done
+
+  function pushTrail(p) {
+    p.trail.push({ x: p.x, y: p.y });
+    if (p.trail.length > 60) p.trail.shift();
+  }
+
+  function stepProjectile(p, dt) {
+    if (p.rolling) { stepRoller(p, dt); return; }
+
+    const w = WEAPONS[p.weapon];
+    p.age = (p.age || 0) + dt;
+    if (w.guides && p.burnLeft > 0) {
+      flyMissile(p, dt);
+    } else {
+      const sub = 2;
+      for (let s = 0; s < sub; s++) {
+        const sdt = dt / sub;
+        p.vx += wind * physScale * sdt;
+        p.vy += GRAVITY * physScale * sdt;
+        p.x += p.vx * sdt;
+        p.y += p.vy * sdt;
+      }
+    }
+    pushTrail(p);
+
+    // Apex, by the same test the MIRV splits on. Once the burn is spent it
+    // falls the rest of the way as an ordinary shell, wind and all.
+    if (w.guides && !p.armed && p.vy >= 0 && p.age > MISSILE.armDelay) armMissile(p);
+
+    // Apex: the frame the climb turns into a fall. A flat or downward shot
+    // (angle 0 or 180) starts at vy 0 and has no apex, so the age floor is
+    // what keeps those from splitting in the shooter's own lap.
+    if (w.mirvCount && !p.split && p.vy >= 0 && p.age > 0.15) { splitMirv(p); return; }
+
+    let hit = false;
+    let hitGround = false;
+    if (p.x < -20 || p.x > W + 20 || p.y > H + 60) {
+      p.dead = true; // off the map
+      return;
+    }
+    if (heliHitBy(p.x, p.y) || missileFuzed(p)) {
+      // the shell bursts on the airframe; the wreck falls on its own from here
+      spawnExplosionFx(p.x, p.y, 32, '#ffd27a');
+      heli.falling = true;
+      heli.vy = 20;
+      p.dead = true;
+      shotExploded = true;
+      return;
+    }
+    if (p.y >= groundHeightAt(p.x)) {
+      hit = true;
+      hitGround = true;
+    } else {
+      // direct tank hit check
+      for (const t of tanks) {
+        if (!t.alive) continue;
+        const topY = groundHeightAt(t.x) - TANK_H;
+        if (Math.abs(p.x - t.x) < TANK_W / 2 && p.y > topY - 4 && p.y < topY + TANK_H) {
+          hit = true;
+          break;
+        }
+      }
+    }
+    if (!hit) return;
+
+    const px = p.x, py = Math.min(p.y, groundHeightAt(p.x));
+    if (w.rolls && hitGround) {
+      // Landed on the ground rather than straight onto a tank: settle it on
+      // the surface and hand it to the roll phase instead of detonating.
+      p.rolling = true;
+      p.rollTime = 0;
+      p.x = px;
+      p.y = groundHeightAt(px);
+      p.vy = 0;
+      p.vx *= 0.45; // most of the impact energy goes into the dirt
+      p.trail = [];
+      spawnDust(p.x, p.y, w.color);
+      return;
+    }
+    if (p.weapon === 'cluster') {
+      applyDamageAndCrater(px, py, p.weapon);
+      for (let i = 0; i < w.clusterCount; i++) {
+        clusterQueue.push({
+          x: px + (Math.random() * 2 - 1) * 60 * physScale,
+          vy: -(80 + Math.random() * 60) * physScale,
+          vx: (Math.random() * 2 - 1) * 40 * physScale,
+          delay: i * 0.08
+        });
+      }
+      spawnClusterTimer = 0;
+    } else {
+      applyDamageAndCrater(px, py, p.weapon);
+    }
+    p.dead = true;
+    shotExploded = true;
+    updateHUD();
   }
 
   // ---------- Physics step ----------
@@ -1693,73 +2068,16 @@
     dt = Math.min(dt, 0.033);
     lastTime = ts;
 
-    if (state === 'FIRING' && projectile) {
-      const sub = 2;
-      for (let s = 0; s < sub; s++) {
-        const sdt = dt / sub;
-        projectile.vx += wind * physScale * sdt;
-        projectile.vy += GRAVITY * physScale * sdt;
-        projectile.x += projectile.vx * sdt;
-        projectile.y += projectile.vy * sdt;
-      }
-      trail.push({ x: projectile.x, y: projectile.y });
-      if (trail.length > 60) trail.shift();
-
-      let hit = false;
-      let outOfBounds = false;
-      let shotHeli = false;
-      if (projectile.x < -20 || projectile.x > W + 20 || projectile.y > H + 60) {
-        outOfBounds = true;
-      } else if (heliHitBy(projectile.x, projectile.y)) {
-        shotHeli = true;
-      } else if (projectile.y >= groundHeightAt(projectile.x)) {
-        hit = true;
-      } else {
-        // direct tank hit check
-        for (const t of tanks) {
-          if (!t.alive) continue;
-          const topY = groundHeightAt(t.x) - TANK_H;
-          if (Math.abs(projectile.x - t.x) < TANK_W / 2 && projectile.y > topY - 4 && projectile.y < topY + TANK_H) {
-            hit = true;
-            break;
-          }
-        }
-      }
-
-      if (shotHeli) {
-        // the shell bursts on the airframe; the wreck falls on its own from here
-        spawnExplosionFx(projectile.x, projectile.y, 32, '#ffd27a');
-        heli.falling = true;
-        heli.vy = 20;
-        projectile = null;
-        trail = [];
-        state = 'EXPLODING';
-        explodeTimer = 0;
-      } else if (outOfBounds) {
-        projectile = null;
-        trail = [];
-        state = 'RESOLVED'; // shot missed entirely, move straight to next turn
-      } else if (hit && projectile) {
-        const weaponKey = projectile.weapon;
-        const w = WEAPONS[weaponKey];
-        const px = projectile.x, py = Math.min(projectile.y, groundHeightAt(projectile.x));
-        if (weaponKey === 'cluster') {
-          applyDamageAndCrater(px, py, weaponKey);
-          for (let i = 0; i < w.clusterCount; i++) {
-            clusterQueue.push({
-              x: px + (Math.random() * 2 - 1) * 60 * physScale,
-              vy: -(80 + Math.random() * 60) * physScale,
-              vx: (Math.random() * 2 - 1) * 40 * physScale,
-              delay: i * 0.08
-            });
-          }
-          spawnClusterTimer = 0;
-        } else {
-          applyDamageAndCrater(px, py, weaponKey);
-        }
-        projectile = null;
-        trail = [];
-        state = 'EXPLODING';
+    if (state === 'FIRING') {
+      for (const p of projectiles) stepProjectile(p, dt);
+      // Warheads a MIRV split off this frame join the flight next frame, so
+      // the list isn't mutated while it is being walked.
+      projectiles = projectiles.filter(p => !p.dead).concat(spawnQueue);
+      spawnQueue = [];
+      if (projectiles.length === 0) {
+        // Nothing went off anywhere: the whole shot missed, so skip the
+        // explosion wait and hand the turn straight on.
+        state = shotExploded ? 'EXPLODING' : 'RESOLVED';
         explodeTimer = 0;
       }
     }
@@ -2258,8 +2576,20 @@
     const barrelLen = 20;
     const x0 = t.x + barrelLen * Math.cos(a);
     const y0 = groundHeightAt(t.x) - TANK_H - barrelLen * Math.sin(a);
-    const pts = traceShot(x0, y0, t.angle, t.power, wind);
+    let pts = traceShot(x0, y0, t.angle, t.power, wind);
     if (pts.length < 2) return;
+    // traceShot integrates a plain parabola. A guided shell leaves that path at
+    // apex, so the preview stops there rather than promising a landing spot it
+    // has no intention of using.
+    const guided = WEAPONS[weaponSelect.value] && WEAPONS[weaponSelect.value].guides;
+    if (guided) {
+      let apex = pts.length;
+      for (let i = 1; i < pts.length; i++) {
+        if (pts[i][1] >= pts[i - 1][1]) { apex = i + 1; break; }
+      }
+      pts = pts.slice(0, apex);
+      if (pts.length < 2) return;
+    }
 
     ctx.save();
     if (full) {
@@ -2273,12 +2603,14 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const end = pts[pts.length - 1];
-      ctx.globalAlpha = 0.85;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(end[0], end[1], 5, 0, Math.PI * 2);
-      ctx.stroke();
+      if (!guided) {
+        const end = pts[pts.length - 1];
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(end[0], end[1], 5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     } else {
       // Roughly the first half second of flight, fading out: enough to read
       // departure angle and which way the wind is bending it, not enough to
@@ -2332,21 +2664,65 @@
     drawHeli();
     drawAimPreview();
 
-    // trail
-    if (trail.length > 1) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      trail.forEach((p, idx) => idx === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-      ctx.stroke();
-    }
-
-    // projectile
-    if (projectile) {
-      ctx.fillStyle = WEAPONS[projectile.weapon].color;
-      ctx.beginPath();
-      ctx.arc(projectile.x, projectile.y, 4, 0, Math.PI * 2);
-      ctx.fill();
+    // trails and shells, one set per warhead in the air
+    for (const p of projectiles) {
+      if (p.trail.length > 1) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        p.trail.forEach((pt, idx) => idx === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
+        ctx.stroke();
+      }
+      const pw = WEAPONS[p.weapon];
+      ctx.fillStyle = pw.color;
+      if (p.rolling) {
+        // A rolling mine reads as a spiked drum sitting on the ground, and the
+        // spin direction shows which way it is travelling.
+        const r = 6;
+        const cy = p.y - r;
+        const spin = p.x / r;
+        ctx.strokeStyle = pw.color;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 6; i++) {
+          const a = spin + i * Math.PI / 3;
+          ctx.beginPath();
+          ctx.moveTo(p.x + Math.cos(a) * r, cy + Math.sin(a) * r);
+          ctx.lineTo(p.x + Math.cos(a) * (r + 3), cy + Math.sin(a) * (r + 3));
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(p.x, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (pw.guides) {
+        // Pointed along its heading, so the nose-over at apex is visible, with
+        // a flame out the back while the motor is lit.
+        const a = Math.atan2(p.vy, p.vx);
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(a);
+        if (p.burnLeft > 0) {
+          ctx.fillStyle = '#ffb03a';
+          ctx.beginPath();
+          ctx.moveTo(-5, 0);
+          ctx.lineTo(-11 - Math.random() * 5, 2.2);
+          ctx.lineTo(-11 - Math.random() * 5, -2.2);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.fillStyle = pw.color;
+        ctx.beginPath();
+        ctx.moveTo(7, 0);
+        ctx.lineTo(-5, 3);
+        ctx.lineTo(-5, -3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // An unsplit MIRV is drawn fatter than the warheads it carries.
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, WEAPONS[p.weapon].mirvCount && !p.split ? 6 : 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // explosions
@@ -2383,6 +2759,7 @@
   }
   resize();
   buildInfo.textContent = BUILD;
+  pruneWeaponOptions();
   initLanguage();
   refreshOpponentUi();
   resetGame();
