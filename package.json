@@ -4,6 +4,6 @@
   "private": true,
   "description": "Barrage — a single-file artillery game. index.html is the whole app; this file exists only to run the tests.",
   "scripts": {
-    "test": "node --test "tests/*.test.mjs""
+    "test": "node --test tests/*.test.mjs"
   }
 }
