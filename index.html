@@ -600,9 +600,9 @@
     <div class="ctrl-group">
       <div class="ctrl-label"><span data-i18n="angle">ANGLE</span> <span class="val" id="angle-val">45°</span></div>
       <div class="slider-row">
-        <button type="button" class="nudge" id="angle-dec" aria-label="Angle down one degree">◀</button>
+        <button type="button" class="nudge" id="angle-left" aria-label="Aim one degree left">◀</button>
         <input type="range" id="angle-slider" min="0" max="180" value="45">
-        <button type="button" class="nudge" id="angle-inc" aria-label="Angle up one degree">▶</button>
+        <button type="button" class="nudge" id="angle-right" aria-label="Aim one degree right">▶</button>
       </div>
     </div>
     <div class="ctrl-group">
@@ -767,7 +767,7 @@
       tanks2: '2 Players', tanks3: '3 Players', tanks4: '4 Players',
       vsCpu: 'vs CPU', allHuman: 'All Human',
       easy: 'Easy', medium: 'Medium', hard: 'Hard', brutal: 'Brutal',
-      angleDown: 'Angle down one degree', angleUp: 'Angle up one degree',
+      aimLeft: 'Aim one degree left', aimRight: 'Aim one degree right',
       powerDown: 'Power down one', powerUp: 'Power up one',
     },
     tr: {
@@ -789,7 +789,7 @@
       tanks2: '2 Oyuncu', tanks3: '3 Oyuncu', tanks4: '4 Oyuncu',
       vsCpu: 'Bilgisayara Karşı', allHuman: 'Hepsi İnsan',
       easy: 'Kolay', medium: 'Orta', hard: 'Zor', brutal: 'Acımasız',
-      angleDown: 'Açıyı bir derece azalt', angleUp: 'Açıyı bir derece artır',
+      aimLeft: 'Bir derece sola nişan al', aimRight: 'Bir derece sağa nişan al',
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
       'Rust Canyon': 'Pas Kanyonu'
     }
@@ -856,7 +856,7 @@
     relabel(countSelect, ['tanks2', 'tanks3', 'tanks4']);
     relabel(modeSelect, ['vsCpu', 'allHuman']);
     relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
-    const aria = { 'angle-dec': 'angleDown', 'angle-inc': 'angleUp',
+    const aria = { 'angle-left': 'aimLeft', 'angle-right': 'aimRight',
                    'power-dec': 'powerDown', 'power-inc': 'powerUp' };
     for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
     lastTimerText = ''; // force the clock to redraw in the new language
@@ -1382,9 +1382,19 @@
     }
   }
 
+  // The angle is world space - 0 is due right - but the slider is a spatial
+  // control: dragging left has to swing the barrel left. So the slider carries
+  // the mirrored value and both directions convert here and in its listener.
+  // Do not "simplify" the 180 - away.
+  function angleToSlider(angle) { return 180 - angle; }
+  function sliderToAngle(value) { return 180 - value; }
+
   function syncControlsFromTank() {
     const t = tanks[currentPlayer];
-    angleSlider.value = t.angle;
+    angleSlider.value = angleToSlider(t.angle);
+    // The slider's own value is mirrored, so spell the real angle out for
+    // assistive tech rather than letting it read the position back.
+    angleSlider.setAttribute('aria-valuetext', t.angle + '°');
     powerSlider.value = t.power;
     angleVal.textContent = t.angle + '°';
     powerVal.textContent = t.power;
@@ -1427,8 +1437,10 @@
   }
 
   angleSlider.addEventListener('input', () => {
-    tanks[currentPlayer].angle = parseInt(angleSlider.value, 10);
-    angleVal.textContent = angleSlider.value + '°';
+    const angle = sliderToAngle(parseInt(angleSlider.value, 10));
+    tanks[currentPlayer].angle = angle;
+    angleVal.textContent = angle + '°';
+    angleSlider.setAttribute('aria-valuetext', angle + '°');
   });
   powerSlider.addEventListener('input', () => {
     tanks[currentPlayer].power = parseInt(powerSlider.value, 10);
@@ -1470,8 +1482,9 @@
     // pointer events at all; without this the buttons would be pointer-only.
     btn.addEventListener('click', (e) => { if (e.detail === 0) nudge(which, delta); });
   }
-  bindNudge('angle-dec', 'angle', -1);
-  bindNudge('angle-inc', 'angle', 1);
+  // Left button aims left, which is *up* in world degrees.
+  bindNudge('angle-left', 'angle', 1);
+  bindNudge('angle-right', 'angle', -1);
   bindNudge('power-dec', 'power', -1);
   bindNudge('power-inc', 'power', 1);
   // a press held while the tab loses focus would otherwise repeat forever
@@ -1480,8 +1493,8 @@
   window.addEventListener('keydown', (e) => {
     if (state !== 'AIMING' || isAi(currentPlayer)) return;
     const t = tanks[currentPlayer];
-    if (e.key === 'ArrowLeft') { t.angle = Math.max(0, t.angle - 1); syncControlsFromTank(); e.preventDefault(); }
-    else if (e.key === 'ArrowRight') { t.angle = Math.min(180, t.angle + 1); syncControlsFromTank(); e.preventDefault(); }
+    if (e.key === 'ArrowLeft') { t.angle = Math.min(180, t.angle + 1); syncControlsFromTank(); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { t.angle = Math.max(0, t.angle - 1); syncControlsFromTank(); e.preventDefault(); }
     else if (e.key === 'ArrowUp') { t.power = Math.min(100, t.power + 2); syncControlsFromTank(); e.preventDefault(); }
     else if (e.key === 'ArrowDown') { t.power = Math.max(0, t.power - 2); syncControlsFromTank(); e.preventDefault(); }
     else if (e.code === 'Space') { fire(); e.preventDefault(); }
@@ -2813,8 +2826,8 @@
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
-      powerSlider, fireBtn, overlay, turnBanner, ammoReadout, nudgeBtns, cards,
-      hpText, langCheckbox
+      powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner, ammoReadout,
+      nudgeBtns, cards, hpText, langCheckbox
     },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },
     get terrain() { return terrain; }, set terrain(v) { terrain = v; },

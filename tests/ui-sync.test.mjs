@@ -28,7 +28,9 @@ test('the sliders show the aiming seat\'s angle and power', () => {
 
   g.syncControlsFromTank();
 
-  assert.equal(Number(g.el.angleSlider.value), 120);
+  // The slider is a spatial control: its value is the mirror of the angle, so
+  // that dragging left aims left.
+  assert.equal(Number(g.el.angleSlider.value), 60);
   assert.equal(Number(g.el.powerSlider.value), 33);
 });
 
@@ -89,7 +91,7 @@ test('the aim arrows step angle and power inside their limits', () => {
   g.nudge('power', -5);
   assert.equal(t.power, 0);
 
-  assert.equal(Number(g.el.angleSlider.value), t.angle, 'the slider follows the arrows');
+  assert.equal(Number(g.el.angleSlider.value), 180 - t.angle, 'the slider follows the arrows');
 });
 
 test('dragging the angle slider aims the current tank', () => {
@@ -97,10 +99,36 @@ test('dragging the angle slider aims the current tank', () => {
   const { g } = h;
   g.currentPlayer = 0;
 
-  g.el.angleSlider.value = '77';
-  g.el.angleSlider.dispatch('input');
+  h.setAngleSlider(77);
 
-  assert.equal(g.tanks[0].angle, 77);
+  assert.equal(g.tanks[0].angle, 103, 'the slider position is mirrored into a world angle');
+  assert.equal(g.el.angleVal.textContent, '103°', 'and the readout shows the world angle');
+});
+
+test('the slider round-trips every angle', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+
+  for (const angle of [0, 1, 45, 90, 135, 179, 180]) {
+    g.tanks[0].angle = angle;
+    g.syncControlsFromTank();
+    h.setAngleSlider(g.el.angleSlider.value);
+    assert.equal(g.tanks[0].angle, angle, `angle ${angle} did not survive the slider`);
+  }
+});
+
+test('the slider tells assistive tech the angle, not its own position', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  g.tanks[0].angle = 135;
+
+  g.syncControlsFromTank();
+
+  // The value is mirrored, so on its own it would be announced as "45".
+  assert.equal(g.el.angleSlider.attributes['aria-valuetext'], '135°');
+  assert.equal(g.el.angleVal.textContent, '135°', 'and it matches what is on screen');
 });
 
 test('the banner says whose turn it is, and what the round is doing', () => {
@@ -171,4 +199,101 @@ test('the language choice is remembered', () => {
   g.el.langCheckbox.dispatch('change');
 
   assert.equal(h.ctx.window.localStorage.getItem('barrage.lang'), 'tr');
+});
+
+// ---------------------------------------------------------------------------
+// Aim direction. The angle is world space (0 = due right, 180 = due left), so
+// "aims further left" is "cos(angle) gets smaller" — the barrel tip moves left
+// on screen. Asserting on the barrel rather than on the number is the point:
+// it is the thing the player sees, and it survives a change of units.
+// ---------------------------------------------------------------------------
+const barrelX = (angle) => Math.cos(angle * Math.PI / 180);
+
+test('the left arrow button aims left', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  g.tanks[0].angle = 90;
+
+  const [left, right] = g.el.nudgeBtns; // angle-left, angle-right
+  left.dispatch('click', { detail: 0 }); // detail 0 is the keyboard path
+
+  assert.ok(barrelX(g.tanks[0].angle) < barrelX(90), 'the barrel swung right instead of left');
+});
+
+test('the right arrow button aims right', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  g.tanks[0].angle = 90;
+
+  const right = g.el.nudgeBtns[1];
+  right.dispatch('click', { detail: 0 });
+
+  assert.ok(barrelX(g.tanks[0].angle) > barrelX(90));
+});
+
+test('the arrow keys aim the way they point', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  g.state = 'AIMING';
+
+  g.tanks[0].angle = 90;
+  h.key('ArrowLeft');
+  assert.ok(barrelX(g.tanks[0].angle) < barrelX(90), 'ArrowLeft must aim left');
+
+  g.tanks[0].angle = 90;
+  h.key('ArrowRight');
+  assert.ok(barrelX(g.tanks[0].angle) > barrelX(90), 'ArrowRight must aim right');
+});
+
+test('dragging the slider left aims left', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  g.tanks[0].angle = 90;
+  g.syncControlsFromTank();
+  const middle = Number(g.el.angleSlider.value);
+
+  h.setAngleSlider(middle - 30); // thumb toward the left end
+  const leftAim = g.tanks[0].angle;
+  h.setAngleSlider(middle + 30); // thumb toward the right end
+  const rightAim = g.tanks[0].angle;
+
+  assert.ok(barrelX(leftAim) < barrelX(90), 'thumb left should aim left');
+  assert.ok(barrelX(rightAim) > barrelX(90), 'thumb right should aim right');
+});
+
+test('aiming works the same for a tank on the right of the map', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.placeTanksAt([200, 700]);
+  g.currentPlayer = 1;
+  g.state = 'AIMING';
+  g.tanks[1].angle = 135; // the right-hand tank lobs left, past vertical
+
+  h.key('ArrowLeft');
+
+  // This is where the old mapping felt worst: past 90° the control and the
+  // barrel disagreed most obviously.
+  assert.ok(barrelX(g.tanks[1].angle) < barrelX(135), 'ArrowLeft aimed right for a right-side tank');
+});
+
+test('the keys do nothing on a CPU seat or between turns', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.cpuMode = true;
+  g.currentPlayer = 1; // a CPU seat
+  g.state = 'AIMING';
+  g.tanks[1].angle = 100;
+  h.key('ArrowLeft');
+  assert.equal(g.tanks[1].angle, 100, 'a player must not aim for the CPU');
+
+  g.cpuMode = false;
+  g.state = 'FIRING';
+  g.currentPlayer = 0;
+  g.tanks[0].angle = 45;
+  h.key('ArrowLeft');
+  assert.equal(g.tanks[0].angle, 45, 'nor while a shell is in the air');
 });
