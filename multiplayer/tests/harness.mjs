@@ -115,7 +115,11 @@ function noopCanvasContext() {
     createLinearGradient: () => gradient,
     createRadialGradient: () => gradient,
     measureText: () => ({ width: 10 }),
-    canvas: null
+    canvas: null,
+    // Recorded so tests can tell world space from screen space: the camera only
+    // reaches the screen through here.
+    transforms: [],
+    setTransform(...args) { target.transforms.push(args); }
   };
   // Every other 2d call is a no-op that returns undefined; property writes
   // (fillStyle, font, ...) just stick.
@@ -333,6 +337,10 @@ export function load(opts = {}) {
     },
 
     el(id) { return document.getElementById(id); },
+
+    /** Canvas transforms applied so far, most recent last. */
+    transforms() { return canvasCtx.transforms; },
+    clearTransforms() { canvasCtx.transforms.length = 0; },
 
     /** Press a key, the way the window-level handlers see it. */
     key(key, event = {}) {

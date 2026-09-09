@@ -215,6 +215,35 @@
     aspect-ratio: 1000 / 620;
     max-height: 100%;
   }
+  /* Zoom controls float over the playfield: the world is drawn small on a
+     phone, and reaching for them must not cost the world any room. */
+  #view-controls {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    display: flex;
+    gap: 6px;
+    z-index: 3;
+  }
+  #view-controls button {
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 8px;
+    background: rgba(12,11,16,0.55);
+    color: var(--text);
+    font: inherit;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+  #view-controls button:disabled { opacity: 0.35; cursor: default; }
+  @media (pointer: coarse) {
+    #view-controls button { width: 42px; height: 42px; font-size: 18px; }
+  }
+
   canvas#game {
     /* width/height are set in resize(), to keep the world aspect; inset+margin
        centres whatever size that came out as. */
@@ -222,6 +251,9 @@
     position: absolute;
     inset: 0;
     margin: auto;
+    /* The canvas handles its own drag and pinch, so the browser must not also
+       scroll or zoom the page from touches that land on it. */
+    touch-action: none;
   }
 
   /* Online lobby: host / code / join on one line, sized like the nudge rows */
@@ -664,6 +696,11 @@
 
   <div id="game-wrap">
     <canvas id="game"></canvas>
+    <div id="view-controls">
+      <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+      <button type="button" id="zoom-fit" aria-label="Fit the whole battlefield">⛶</button>
+      <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+    </div>
     <div id="overlay">
       <h1 id="overlay-title">Tank 1 wins!</h1>
       <p id="overlay-sub">Round over.</p>
@@ -836,6 +873,9 @@
   const modeSelect = document.getElementById('mode-select');
   const countSelect = document.getElementById('count-select');
   const difficultyGroup = document.getElementById('difficulty-group');
+  const zoomInBtn = document.getElementById('zoom-in');
+  const zoomOutBtn = document.getElementById('zoom-out');
+  const zoomFitBtn = document.getElementById('zoom-fit');
   const onlineGroup = document.getElementById('online-group');
   const onlineStatus = document.getElementById('online-status');
   const onlineHostBtn = document.getElementById('online-host');
@@ -867,6 +907,7 @@
       easy: 'Easy', medium: 'Medium', hard: 'Hard', brutal: 'Brutal',
       aimLeft: 'Aim one degree left', aimRight: 'Aim one degree right',
       powerDown: 'Power down one', powerUp: 'Power up one',
+      zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomFit: 'Fit the whole battlefield',
       online: 'ONLINE', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
       roomCode: 'CODE', roomCodeLabel: 'Room code',
       netOffline: 'off', netConnecting: 'connecting…', netWaiting: 'code {code} — waiting',
@@ -896,6 +937,7 @@
       easy: 'Kolay', medium: 'Orta', hard: 'Zor', brutal: 'Acımasız',
       aimLeft: 'Bir derece sola nişan al', aimRight: 'Bir derece sağa nişan al',
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
+      zoomIn: 'Yakınlaştır', zoomOut: 'Uzaklaştır', zoomFit: 'Tüm sahayı göster',
       online: 'ÇEVRİMİÇİ', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
       roomCode: 'KOD', roomCodeLabel: 'Oda kodu',
       netOffline: 'kapalı', netConnecting: 'bağlanıyor…', netWaiting: 'kod {code} — bekleniyor',
@@ -968,7 +1010,8 @@
     relabel(countSelect, ['tanks2', 'tanks3', 'tanks4']);
     relabel(modeSelect, ['vsCpu', 'allHuman']);
     relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
-    const aria = { 'angle-left': 'aimLeft', 'angle-right': 'aimRight',
+    const aria = { 'zoom-in': 'zoomIn', 'zoom-out': 'zoomOut', 'zoom-fit': 'zoomFit',
+                   'angle-left': 'aimLeft', 'angle-right': 'aimRight',
                    'power-dec': 'powerDown', 'power-inc': 'powerUp' };
     for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
     lastTimerText = ''; // force the clock to redraw in the new language
@@ -1081,10 +1124,68 @@
     hudWindVisible = windHud.offsetParent !== null;
   }
 
+  // ---------- Camera ----------
+  // Purely a way of looking at the world: the camera never touches the
+  // simulation, so two players zoomed differently still hold the same
+  // battlefield. A fixed-shape world has to be drawn small on a phone —
+  // roughly 390x242 in portrait — and this is what makes that playable.
+  //
+  // camZoom 1 fits the whole world; above that, camX/camY are the world
+  // coordinates of the view's top-left corner.
+  const CAM_MIN = 1, CAM_MAX = 5;
+  let camZoom = 1, camX = 0, camY = 0;
+  // A manual pan owns the camera until the turn changes, so following a shell
+  // cannot yank the view away from someone who is looking somewhere on purpose.
+  let camPanned = false;
+
+  /** World width/height currently in view. */
+  function camViewW() { return SIM_W / camZoom; }
+  function camViewH() { return SIM_H / camZoom; }
+
+  /** Keep the view inside the world, and centred on the axis that fully fits. */
+  function camClamp() {
+    camZoom = Math.min(CAM_MAX, Math.max(CAM_MIN, camZoom));
+    camX = Math.min(SIM_W - camViewW(), Math.max(0, camX));
+    camY = Math.min(SIM_H - camViewH(), Math.max(0, camY));
+  }
+
+  /** Zoom to `z` while pinning the world point under (fx, fy), each 0..1 of the canvas. */
+  function camZoomTo(z, fx = 0.5, fy = 0.5) {
+    const worldX = camX + fx * camViewW();
+    const worldY = camY + fy * camViewH();
+    camZoom = Math.min(CAM_MAX, Math.max(CAM_MIN, z));
+    camX = worldX - fx * camViewW();
+    camY = worldY - fy * camViewH();
+    camClamp();
+    refreshViewUi();
+  }
+
+  /** Centre the view on a world point, as far as the edges allow. */
+  function camCenterOn(x, y) {
+    camX = x - camViewW() / 2;
+    camY = y - camViewH() / 2;
+    camClamp();
+  }
+
+  /** Back to the whole battlefield. */
+  function camFit() {
+    camZoom = CAM_MIN; camX = 0; camY = 0; camPanned = false;
+    camClamp();
+    refreshViewUi();
+  }
+
+  /** Move the view by a screen-pixel delta. */
+  function camPanByPixels(dxPx, dyPx) {
+    if (!viewW || !viewH) return;
+    camX -= dxPx / viewW * camViewW();
+    camY -= dyPx / viewH * camViewH();
+    camClamp();
+  }
+
   /** Draw in world units (the default for everything on the battlefield). */
   function worldTransform() {
-    const k = DPR * viewScale;
-    ctx.setTransform(k, 0, 0, k, 0, 0);
+    const k = DPR * viewScale * camZoom;
+    ctx.setTransform(k, 0, 0, k, -camX * k, -camY * k);
   }
 
   /** Draw in CSS pixels — for on-canvas UI that must stay legible at any size. */
@@ -1092,12 +1193,12 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   }
 
-  /** A pointer event's position in world units. */
+  /** A pointer event's position in world units, wherever the camera is. */
   function eventToWorld(e) {
     const r = canvas.getBoundingClientRect();
     return {
-      x: r.width ? (e.clientX - r.left) / r.width * SIM_W : 0,
-      y: r.height ? (e.clientY - r.top) / r.height * SIM_H : 0
+      x: r.width ? camX + (e.clientX - r.left) / r.width * camViewW() : camX,
+      y: r.height ? camY + (e.clientY - r.top) / r.height * camViewH() : camY
     };
   }
 
@@ -1749,6 +1850,7 @@
     if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
     setWind();
     state = 'AIMING';
+    camPanned = false; // a new turn releases the camera back to whoever is aiming
     updateHUD();
     syncControlsFromTank();
     // The player who took the turn is the authority on how it ended.
@@ -2320,6 +2422,7 @@
     });
     particles = particles.filter(p => p.age < p.life);
     windPulse = Math.max(0, windPulse - dt * 1.6);
+    camFollow(dt);
     updateHeli(dt);
     updateTimer();
 
@@ -2485,6 +2588,113 @@
     const box = windGaugeRect();
     if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) summonHeli();
   });
+
+  // ---------- Zoom and pan input ----------
+  // One finger drags the view, two pinch it. Pointer events cover mouse, pen
+  // and touch with one code path; `touch-action: none` on the canvas stops the
+  // browser scrolling the page out from under the gesture.
+  const camPointers = new Map();
+  let pinchStart = null; // {dist, zoom, fx, fy}
+
+  function pointerFrac(e) {
+    const r = canvas.getBoundingClientRect();
+    if (!r.width || !r.height) return { x: 0.5, y: 0.5 };
+    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    camPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (camPointers.size === 2) {
+      const [a, b] = [...camPointers.values()];
+      const mid = { clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 };
+      const f = pointerFrac(mid);
+      pinchStart = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: camZoom, fx: f.x, fy: f.y };
+    }
+    if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch {} }
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    const prev = camPointers.get(e.pointerId);
+    if (!prev) return;
+    const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+    camPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (camPointers.size >= 2 && pinchStart) {
+      const [a, b] = [...camPointers.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      camPanned = true;
+      camZoomTo(pinchStart.zoom * (dist / pinchStart.dist), pinchStart.fx, pinchStart.fy);
+      return;
+    }
+    if (camPointers.size === 1 && camZoom > CAM_MIN) {
+      camPanned = true;
+      camPanByPixels(dx, dy);
+      e.preventDefault();
+    }
+  });
+
+  function endPointer(e) {
+    camPointers.delete(e.pointerId);
+    if (camPointers.size < 2) pinchStart = null;
+  }
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+  canvas.addEventListener('pointerleave', endPointer);
+
+  // Wheel zooms about the cursor, the way a map does.
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const f = pointerFrac(e);
+    camPanned = true;
+    camZoomTo(camZoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), f.x, f.y);
+  }, { passive: false });
+
+  const ZOOM_STEP = 1.5;
+  // The buttons deliberately do NOT set camPanned. A drag or a pinch says
+  // "look here", and following must not fight that; pressing +/- only says
+  // "closer", so the view should still settle on the action. Zooming about the
+  // canvas centre without this leaves you staring at whatever happens to be in
+  // the middle of the world, which is usually empty sky.
+  zoomInBtn.addEventListener('click', () => camZoomTo(camZoom * ZOOM_STEP));
+  zoomOutBtn.addEventListener('click', () => camZoomTo(camZoom / ZOOM_STEP));
+  zoomFitBtn.addEventListener('click', camFit);
+
+  function refreshViewUi() {
+    const fitted = camZoom <= CAM_MIN + 1e-6;
+    // Fitted, there is nothing to zoom out of and nothing to fit, so those two
+    // go away rather than sitting there greyed: at rest the cluster is a single
+    // "+". They are to the LEFT of "+", which never moves, so nothing slides
+    // under a finger that is already on it.
+    zoomOutBtn.hidden = fitted;
+    zoomFitBtn.hidden = fitted;
+    // "+" is kept at maximum zoom, disabled. Hiding it would drag the other two
+    // rightwards mid-tap — you press "+" to the limit and the next press lands
+    // on "−", undoing what you just did.
+    zoomInBtn.disabled = camZoom >= CAM_MAX - 1e-6;
+  }
+
+  /**
+   * Zoomed in, the interesting thing is rarely in the middle: follow the shell
+   * while it flies, and settle on whoever is aiming between turns. A manual pan
+   * takes precedence until the turn changes — see camPanned.
+   */
+  function camFollow(dt) {
+    if (camZoom <= CAM_MIN) return;
+    let target = null;
+    if (projectiles.length) target = projectiles[0];          // the shell in the air
+    else if (!camPanned && tanks[currentPlayer]) {
+      const t = tanks[currentPlayer];
+      target = { x: t.x, y: groundHeightAt(t.x) - TANK_H };
+    }
+    if (!target) return;
+    const wantX = Math.min(SIM_W - camViewW(), Math.max(0, target.x - camViewW() / 2));
+    const wantY = Math.min(SIM_H - camViewH(), Math.max(0, target.y - camViewH() / 2));
+    // Ease rather than snap: a hard cut makes the arc impossible to read.
+    const k = Math.min(1, dt * 6);
+    camX += (wantX - camX) * k;
+    camY += (wantY - camY) * k;
+    camClamp();
+  }
 
   function updateHeli(dt) {
     rotorAngle += dt * 26;
@@ -2821,7 +3031,13 @@
   }
 
   function render() {
-    ctx.clearRect(0, 0, W, H);
+    // Every frame, because the camera can have moved since the last one. This
+    // used to be set only by resize() and by the on-canvas wind gauge, so on a
+    // screen wide enough to show the HUD wind pill — where that gauge is not
+    // drawn — zooming changed the camera and nothing on screen.
+    screenTransform();
+    ctx.clearRect(0, 0, viewW, viewH);
+    worldTransform();
 
     // sky
     const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
@@ -3244,6 +3460,7 @@
   }
   resize();
   buildInfo.textContent = BUILD;
+  refreshViewUi();
   pruneWeaponOptions();
   initLanguage();
   refreshOpponentUi();
@@ -3293,6 +3510,10 @@
     get lang() { return lang; },
     get W() { return W; }, get H() { return H; }, get physScale() { return physScale; },
     get viewScale() { return viewScale; }, get viewW() { return viewW; }, get viewH() { return viewH; },
+    camZoomTo, camFit, camCenterOn, camPanByPixels, camFollow, camViewW, camViewH,
+    eventToWorld, CAM_MIN, CAM_MAX,
+    get camZoom() { return camZoom; }, get camX() { return camX; }, get camY() { return camY; },
+    get camPanned() { return camPanned; }, set camPanned(v) { camPanned = v; },
     get turnToken() { return turnToken; }, get lastWinner() { return lastWinner; },
     get shotExploded() { return shotExploded; },
     get explosions() { return explosions; }, get particles() { return particles; }

@@ -49,8 +49,29 @@ canvas is only a window onto it, described by `viewScale`:
   targets instead of black bars.
 
 Reshaping the battlefield means changing `SIM_W` / `SIM_H` and nothing else.
-A portrait phone cannot show a wide world large — landscape is the better way
-to play on a phone, and it already has the side-rail layout.
+
+### The camera
+
+A fixed-shape world is necessarily drawn small on a phone — about 390×242 in
+portrait — so the view can be zoomed and panned. `camZoom` 1 fits the whole
+world; above that `camX`/`camY` are the world coordinates of the view's
+top-left corner, clamped so the view can never leave the world.
+
+The camera is **only a way of looking**. It must never reach the simulation:
+two players zoomed differently still hold the same battlefield and the same
+shot lands in the same place, and there is a test for exactly that. Everything
+it touches lives in `worldTransform()` and `eventToWorld()`.
+
+- One finger drags, two fingers pinch, the wheel zooms about the cursor, and
+  three buttons over the playfield do the same for anyone not on a touch
+  screen. Pointer events cover all three input kinds in one path, and the
+  canvas carries `touch-action: none` so the browser does not scroll the page
+  out from under a gesture.
+- `camFollow()` runs each frame: zoomed in, it eases onto the shell while one
+  is in the air and onto whoever is aiming between turns — without it, zoom is
+  useless, because firing loses the shell immediately.
+- A deliberate pan sets `camPanned` and owns the camera until the turn changes,
+  so following never yanks the view away from someone looking on purpose.
 
 ## The relay
 
