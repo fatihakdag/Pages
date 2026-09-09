@@ -16,11 +16,24 @@ Read this file first; it is a map so you don't have to read all of `index.html`.
 index.html         the whole game (see map below)
 tests/             node:test suite; tests/README.md explains the harness
 tests/harness.mjs  boots index.html in a node:vm against a stub DOM
-tools/shots.mjs    screenshots the page at every breakpoint (npm run shots)
+tools/shots.mjs    screenshots a page at every breakpoint (npm run shots)
+multiplayer/       the online build — its own game, tests and relay
 .claude/           permission allowlist for read-only and test commands
 .github/workflows/ CI: node --test "tests/*.test.mjs"
 .gitlab-ci.yml     same test job + a pages deploy stage
 ```
+
+## Two builds
+
+`index.html` at the root is the single-player game and is **frozen in shape**:
+it is the version that ships to Pages today. `multiplayer/` is a fork of it
+being taken online, with its own `index.html`, its own copy of the suite, and
+the match relay. See [multiplayer/AGENTS.md](multiplayer/AGENTS.md) for what
+differs — the short version is that its simulation runs in fixed world units
+rather than canvas pixels, which is what lets two clients share a battlefield.
+
+A change that belongs to both has to be made in both. That duplication is the
+deliberate cost of leaving the shipping game alone while the online one moves.
 
 ## Map of index.html
 

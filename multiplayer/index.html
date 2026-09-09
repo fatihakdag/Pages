@@ -1,0 +1,2912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Prevent the browser from serving a stale copy after edits -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Barrage — Tank Artillery</title>
+<style>
+  :root {
+    --sky-top: #2b3a55;
+    --sky-bot: #7d5a6e;
+    --ground-1: #4a3728;
+    --ground-2: #2e2118;
+    --panel-bg: #1c1b22;
+    --panel-line: #3a3844;
+    --accent-p1: #ff7a45;
+    --accent-p2: #4dc0ff;
+    --accent-p3: #8ee06a;
+    --accent-p4: #d98cff;
+    --text-main: #ece7e1;
+    --text-dim: #8d8a99;
+    --danger: #e14b4b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%;
+    background: #0c0b10;
+    font-family: 'Courier New', ui-monospace, monospace;
+    color: var(--text-main);
+    overflow: hidden;
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-text-size-adjust: 100%;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: calc(var(--vh, 1vh) * 100); /* JS-set fallback for iOS < 15.4 */
+    height: 100dvh; /* dvh excludes mobile browser chrome where supported */
+    width: 100vw;
+    overflow: hidden;
+  }
+  #hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: stretch;
+    background: var(--panel-bg);
+    border-bottom: 2px solid var(--panel-line);
+    padding: 8px 14px;
+    gap: 10px;
+    flex-wrap: nowrap;
+    flex: 0 0 auto;
+    z-index: 5;
+  }
+  #players-row {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .player-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 190px;
+  }
+  /* A class selector would otherwise beat the UA rule for [hidden] */
+  .player-card[hidden] { display: none; }
+  .player-card.active {
+    outline: 1px dashed currentColor;
+    outline-offset: 4px;
+  }
+  .player-card.dead { opacity: 0.38; }
+  /* Bar and HP share the second line. Pairing the HP with the *name* instead
+     would need the sum of name + badge + HP on one line, which overflows once
+     the badge reads BİLGİSAYAR; this way the row only needs the wider of the
+     two, and the bar simply takes what is left. */
+  .player-bar-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .player-bar-row .health-bar-track { flex: 1 1 auto; }
+  .player-bar-row .health-text { flex: 0 0 auto; }
+  .player-name {
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    font-weight: bold;
+    white-space: nowrap;
+  }
+  .pn-abbr { display: none; }
+  .cb-abbr { display: none; }
+  #players-row[data-count="4"] .cb-full { display: none; }
+  #players-row[data-count="4"] .cb-abbr { display: inline; }
+  .p1 { color: var(--accent-p1); }
+  .p2 { color: var(--accent-p2); }
+  .p3 { color: var(--accent-p3); }
+  .p4 { color: var(--accent-p4); }
+  .health-bar-track {
+    width: 100%;
+    max-width: 150px;
+    height: 10px;
+    background: #000;
+    border: 1px solid var(--panel-line);
+    position: relative;
+  }
+  .health-bar-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+  }
+  .health-text { font-size: 11px; color: var(--text-dim); }
+
+  #center-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--text-dim);
+    min-width: 160px;
+    text-align: center;
+  }
+  #turn-banner {
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--text-main);
+    margin-bottom: 2px;
+  }
+  #info-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+  #build-info { font-size: 10px; color: var(--text-dim); }
+  #lang-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #lang-toggle input {
+    width: 12px; height: 12px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--accent-p1);
+  }
+  .hud-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+  /* Wind lives in the middle of the bar only where there is room for it; below
+     that the on-canvas gauge is the single readout, so it is never shown twice. */
+  #wind-hud { display: none; flex: 0 0 auto; align-self: center; }
+  @media (min-width: 900px) {
+    #wind-hud { display: flex; }
+    #players-row { flex: 1 1 0; }
+    #center-info { flex: 1 1 0; align-items: flex-end; text-align: right; min-width: 0; }
+  }
+  #timer-val { font-weight: bold; color: var(--text-main); }
+  #wind-arrow {
+    display: inline-block;
+    font-size: 20px;
+    font-weight: bold;
+    line-height: 1;
+    transition: color 0.3s ease;
+  }
+  #wind-val {
+    font-weight: bold;
+    min-width: 36px;
+    text-align: right;
+    transition: color 0.3s ease;
+  }
+
+  #game-wrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 120px;
+    overflow: hidden;
+    /* The world has one fixed shape (SIM_W x SIM_H) so that two players in a
+       match share the same battlefield. The canvas is sized to that aspect in
+       resize(), and the wrap shrinks to whatever the canvas turned out to be:
+       the space the world cannot use is handed to #controls below rather than
+       being painted as bars around the playfield. */
+    /* The wrap takes its height from the world's aspect in CSS, and the canvas
+       is taken out of the flow (absolute) so it cannot feed back into that
+       height — sizing the wrap from the canvas while the canvas is sized from
+       the wrap collapses both. */
+    flex: 0 1 auto;
+    width: 100%;
+    aspect-ratio: 1000 / 620;
+    max-height: 100%;
+  }
+  canvas#game {
+    /* width/height are set in resize(), to keep the world aspect; inset+margin
+       centres whatever size that came out as. */
+    display: block;
+    position: absolute;
+    inset: 0;
+    margin: auto;
+  }
+
+  #controls {
+    background: var(--panel-bg);
+    border-top: 2px solid var(--panel-line);
+    padding: 10px 16px 14px;
+    display: flex;
+    /* Top-aligned, not centred: the weapon group carries an ammo readout under
+       its select, so centring made that group taller and lifted its select
+       clear of the other three. Aligning tops lines every label and control up
+       and lets the readout hang below. */
+    align-items: flex-start;
+    gap: 22px;
+    flex-wrap: wrap;
+    /* The world cannot use all the height on a tall screen, so the rows spread
+       down the panel instead: the slack becomes spacing between touch targets. */
+    flex: 1 1 auto;
+    align-content: space-evenly;
+    z-index: 5;
+  }
+  .ctrl-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 150px;
+  }
+  .ctrl-label {
+    font-size: 10px;
+    letter-spacing: 0.6px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  .ctrl-label span.val {
+    color: var(--text-main);
+    font-weight: bold;
+  }
+  /* The element itself is the hit area, so it gets a real height and the
+     visible rail is drawn on the track pseudo-element. It used to be 4px
+     tall, which meant aiming at a hairline with a mouse or a fingertip. */
+  input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 30px;
+    margin: 0;
+    background: transparent;
+    outline: none;
+    cursor: pointer;
+    touch-action: none; /* drag the thumb without the page taking the gesture */
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 3px;
+    background: #444;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 22px; height: 22px;
+    margin-top: -8px; /* centre the thumb on the 6px track */
+    border-radius: 50%;
+    background: var(--text-main);
+    border: 2px solid #000;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+  input[type=range]::-moz-range-track {
+    height: 6px;
+    border-radius: 3px;
+    background: #444;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--text-main);
+    border: 2px solid #000;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+  input[type=range]:active::-webkit-slider-thumb {
+    box-shadow: 0 0 0 7px rgba(236,231,225,0.16);
+  }
+  input[type=range]:active::-moz-range-thumb {
+    box-shadow: 0 0 0 7px rgba(236,231,225,0.16);
+  }
+  input[type=range]:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px rgba(236,231,225,0.45);
+  }
+  input[type=range]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Arrow buttons flanking each slider, for single-step aiming */
+  .slider-row { display: flex; align-items: center; gap: 8px; }
+  .slider-row input[type=range] { flex: 1 1 auto; min-width: 0; }
+  .nudge {
+    flex: 0 0 auto;
+    width: 28px; height: 28px;
+    padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #12111a;
+    color: var(--text-main);
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    font-size: 11px;
+    line-height: 1;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation; /* no double-tap zoom on repeated presses */
+  }
+  .nudge:hover:not(:disabled) { background: #1e1c29; border-color: #55526a; }
+  .nudge:active:not(:disabled) { background: #2a2739; transform: scale(0.94); }
+  .nudge:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Fingers need a bigger target than a mouse pointer does */
+  @media (pointer: coarse) {
+    input[type=range] { height: 42px; }
+    input[type=range]::-webkit-slider-thumb {
+      width: 28px; height: 28px; margin-top: -11px;
+    }
+    input[type=range]::-moz-range-thumb { width: 28px; height: 28px; }
+    .nudge { width: 34px; height: 34px; font-size: 13px; }
+  }
+  /* Was scoped to the weapon select by id, so the other three fell back to the
+     browser's default white control. */
+  #controls select {
+    background: #12111a;
+    color: var(--text-main);
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    /* also darkens the native dropdown list itself, not just the closed control */
+    color-scheme: dark;
+  }
+  #controls select:hover { border-color: #55526a; }
+  #controls select:focus-visible {
+    outline: 2px solid rgba(236,231,225,0.45);
+    outline-offset: 1px;
+  }
+  #controls select:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* Firefox needs the options coloured explicitly */
+  #controls select option { background: #12111a; color: var(--text-main); }
+  #controls select option:disabled { color: var(--text-dim); }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+  }
+  #fire-btn {
+    align-self: center; /* the row top-aligns; the button shouldn't */
+    background: var(--danger);
+    color: #fff;
+    border: none;
+    padding: 12px 26px;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    border-radius: 3px;
+    transition: transform 0.08s ease, background 0.15s;
+  }
+  #fire-btn:hover { background: #ff5f5f; }
+  #fire-btn:active { transform: scale(0.96); }
+  #fire-btn:disabled {
+    background: #4a4750;
+    cursor: not-allowed;
+  }
+  #keys-hint {
+    align-self: center;
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-left: auto;
+  }
+
+  #overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(8,7,12,0.86);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    z-index: 20;
+    text-align: center;
+  }
+  #overlay.show { display: flex; }
+  #overlay h1 {
+    font-size: 28px;
+    margin: 0;
+    letter-spacing: 1px;
+  }
+  #overlay p { color: var(--text-dim); margin: 0; font-size: 13px; }
+  #overlay button {
+    background: var(--accent-p1);
+    border: none;
+    color: #1a1a1a;
+    padding: 12px 24px;
+    font-weight: bold;
+    border-radius: 3px;
+    font-size: 13px;
+  }
+  .ai-badge {
+    font-size: 9px;
+    color: var(--text-dim);
+    border: 1px solid var(--panel-line);
+    padding: 1px 5px;
+    border-radius: 2px;
+    margin-left: 6px;
+  }
+
+  /* ---- Narrow / portrait screens ---- */
+  @media (max-width: 720px) and (orientation: portrait) {
+    #hud { padding: 5px 8px; gap: 6px; }
+    #players-row { gap: 6px; }
+    .player-card { gap: 2px; }
+    .player-name { font-size: 10px; }
+    .pn-full { display: none; }
+    .pn-abbr { display: inline; }
+    .player-bar-row { display: block; } /* ~46px cards: no room to pair */
+    #info-row { gap: 3px 6px; }
+    .cb-full { display: none; }
+    .cb-abbr { display: inline; }
+    .health-bar-track { max-width: 110px; height: 8px; }
+    /* four cards on a phone leave ~50px each — keep "100 / 100" on one line */
+    .health-text { font-size: 8px; white-space: nowrap; }
+    #center-info { min-width: 0; flex: 0 0 auto; font-size: 10px; }
+    #turn-banner { font-size: 10px; }
+    .ai-badge { font-size: 8px; margin-left: 3px; padding: 0 3px; }
+
+    #controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+      padding: 8px 10px 10px;
+      align-items: start;
+    }
+    .ctrl-group { min-width: 0; }
+    .ctrl-label { font-size: 9px; }
+    #controls select {
+      width: 100%;
+      font-size: 11px;
+      padding: 5px 6px;
+    }
+    #fire-btn {
+      grid-column: 1 / -1;
+      width: 100%;
+      padding: 14px;
+      font-size: 15px;
+    }
+    /* keyboard hints are useless on touch devices */
+    #keys-hint { display: none; }
+    #overlay h1 { font-size: 20px; }
+    #overlay p { font-size: 11px; padding: 0 20px; }
+  }
+
+  /* Very short screens: shrink the sliders row further */
+  @media (max-height: 500px) and (orientation: portrait) {
+    #game-wrap { min-height: 90px; }
+    #fire-btn { padding: 10px; font-size: 13px; }
+    #controls { gap: 6px 10px; padding: 6px 8px 8px; }
+  }
+
+  /* ---- Landscape on short screens: move panels to the sides ----
+     Stacking panels vertically would leave almost no height for the
+     playfield, which makes the terrain look flat. Flanking the canvas
+     instead keeps the full screen height for the game. */
+  @media (orientation: landscape) and (max-height: 620px) {
+    #app { flex-direction: row; }
+
+    #hud {
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: stretch;
+      width: 132px;
+      flex: 0 0 132px;
+      height: 100%;
+      overflow-y: auto;
+      border-bottom: none;
+      border-right: 2px solid var(--panel-line);
+      padding: 8px;
+      gap: 10px;
+    }
+    #players-row { flex-direction: column; flex: 0 0 auto; gap: 8px; }
+    .cb-full { display: none; }
+    .cb-abbr { display: inline; }
+    .player-card { flex: 0 0 auto; max-width: none; }
+    .health-bar-track { max-width: none; }
+    #center-info {
+      align-items: flex-start;
+      text-align: left;
+      border-top: 1px solid var(--panel-line);
+      padding-top: 8px;
+    }
+    #wind-hud { display: none; }
+    .hud-pill { justify-content: flex-start; }
+
+    #game-wrap { flex: 1 1 auto; height: 100%; min-height: 0; aspect-ratio: auto; }
+
+    #controls {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: stretch;
+      width: 158px;
+      flex: 0 0 158px;
+      height: 100%;
+      overflow-y: auto;
+      border-top: none;
+      border-left: 2px solid var(--panel-line);
+      padding: 8px;
+      gap: 9px;
+    }
+    .ctrl-group { min-width: 0; width: 100%; }
+    #controls select { width: 100%; }
+    /* the side rail is height-constrained, so trim the touch target a little */
+    input[type=range] { height: 32px; }
+    input[type=range]::-webkit-slider-thumb {
+      width: 24px; height: 24px; margin-top: -9px;
+    }
+    input[type=range]::-moz-range-thumb { width: 24px; height: 24px; }
+    /* the rail is only ~158px wide, so the arrows have to give some back */
+    .slider-row { gap: 6px; }
+    .nudge { width: 30px; height: 30px; }
+    #fire-btn {
+      width: 100%;
+      grid-column: auto;
+      margin-top: auto;
+      padding: 14px 10px;
+      font-size: 14px;
+    }
+    #keys-hint { display: none; }
+  }
+
+  /* Ultra-short landscape (small phones): tighten the side panels */
+  @media (orientation: landscape) and (max-height: 400px) {
+    #hud { width: 112px; flex: 0 0 112px; gap: 6px; padding: 6px; }
+    #controls { width: 138px; flex: 0 0 138px; gap: 6px; padding: 6px; }
+    .player-name { font-size: 9px; }
+    .health-text { font-size: 8px; }
+    #turn-banner { font-size: 9px; }
+    #fire-btn { padding: 11px 8px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div id="players-row">
+      <div class="player-card p1" id="card-p1">
+        <div class="player-name"><span class="pn-full">PLAYER 1</span><span class="pn-abbr">P1</span> <span class="ai-badge" id="ai-badge-1"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-1">100 / 100</div>
+        </div>
+      </div>
+      <div class="player-card p2" id="card-p2">
+        <div class="player-name"><span class="pn-full">PLAYER 2</span><span class="pn-abbr">P2</span> <span class="ai-badge" id="ai-badge-2"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-2">100 / 100</div>
+        </div>
+      </div>
+      <div class="player-card p3" id="card-p3" hidden>
+        <div class="player-name"><span class="pn-full">PLAYER 3</span><span class="pn-abbr">P3</span> <span class="ai-badge" id="ai-badge-3"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-3" style="background:var(--accent-p3); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-3">100 / 100</div>
+        </div>
+      </div>
+      <div class="player-card p4" id="card-p4" hidden>
+        <div class="player-name"><span class="pn-full">PLAYER 4</span><span class="pn-abbr">P4</span> <span class="ai-badge" id="ai-badge-4"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
+        <div class="player-bar-row">
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-4" style="background:var(--accent-p4); width:100%;"></div></div>
+          <div class="health-text" id="hp-text-4">100 / 100</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="wind-hud" class="hud-pill"><span data-i18n="wind">WIND</span> <span id="wind-arrow">→</span> <span id="wind-val">0</span></div>
+
+    <div id="center-info">
+      <div id="turn-banner">—</div>
+      <div id="info-row">
+        <span id="build-info">—</span>
+        <span id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
+        <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
+      </div>
+    </div>
+  </div>
+
+  <div id="game-wrap">
+    <canvas id="game"></canvas>
+    <div id="overlay">
+      <h1 id="overlay-title">Tank 1 wins!</h1>
+      <p id="overlay-sub">Round over.</p>
+      <button id="restart-btn" data-i18n="playAgain">Play Again</button>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="ctrl-group">
+      <div class="ctrl-label"><span data-i18n="angle">ANGLE</span> <span class="val" id="angle-val">45°</span></div>
+      <div class="slider-row">
+        <button type="button" class="nudge" id="angle-left" aria-label="Aim one degree left">◀</button>
+        <input type="range" id="angle-slider" min="0" max="180" value="45">
+        <button type="button" class="nudge" id="angle-right" aria-label="Aim one degree right">▶</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label"><span data-i18n="power">POWER</span> <span class="val" id="power-val">50</span></div>
+      <div class="slider-row">
+        <button type="button" class="nudge" id="power-dec" aria-label="Power down one">◀</button>
+        <input type="range" id="power-slider" min="0" max="100" value="50">
+        <button type="button" class="nudge" id="power-inc" aria-label="Power up one">▶</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label" data-i18n="weapon">WEAPON</div>
+      <select id="weapon-select">
+        <option value="standard">Standard Shell</option>
+        <option value="big">Big Bomb</option>
+        <option value="cluster">Cluster Bomb</option>
+        <option value="roller">Roller Mine</option>
+        <option value="mirv">MIRV</option>
+        <option value="missile">Guided Missile</option>
+      </select>
+      <div class="ctrl-label" id="ammo-readout" style="margin-top:2px;"></div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label" data-i18n="tanks">TANKS</div>
+      <select id="count-select">
+        <option value="2" selected>2 Players</option>
+        <option value="3">3 Players</option>
+        <option value="4">4 Players</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label" data-i18n="opponents">OPPONENTS</div>
+      <select id="mode-select">
+        <option value="cpu" selected>vs CPU</option>
+        <option value="human">All Human</option>
+      </select>
+    </div>
+    <div class="ctrl-group" id="difficulty-group">
+      <div class="ctrl-label" data-i18n="cpuLevel">CPU LEVEL</div>
+      <select id="difficulty-select">
+        <option value="easy">Easy</option>
+        <option value="medium" selected>Medium</option>
+        <option value="hard">Hard</option>
+        <option value="brutal">Brutal</option>
+      </select>
+    </div>
+    <button id="fire-btn" data-i18n="fire">FIRE</button>
+    <div id="keys-hint">
+      <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// Surface any startup failure on screen — a blank canvas is otherwise silent.
+(function () {
+  function showError(msg) {
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#7a1420;color:#fff;' +
+      'font:12px/1.45 monospace;padding:10px 12px;white-space:pre-wrap;max-height:45%;overflow:auto;';
+    // This block runs before the game's string table exists, so it does its
+    // own tiny language check rather than reaching for one.
+    var tr = (navigator.language || '').toLowerCase().indexOf('tr') === 0;
+    d.textContent = (tr ? 'Başlatma hatası: ' : 'Startup error: ') + msg;
+    (document.body || document.documentElement).appendChild(d);
+  }
+  window.addEventListener('error', function (e) {
+    showError((e.message || 'unknown') + (e.filename ? ' @' + e.lineno + ':' + e.colno : ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    showError('promise: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+  // iOS < 15.4 has no dvh; keep a real pixel height in a CSS variable.
+  function setVh() {
+    document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px');
+  }
+  setVh();
+  window.addEventListener('resize', setVh);
+  window.addEventListener('orientationchange', function () { setTimeout(setVh, 150); });
+})();
+</script>
+<script>
+(() => {
+  const BUILD = 'v42';
+  console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
+
+  // ---------- Guided missile: one switch for the whole weapon ----------
+  // Set enabled to false and the missile leaves the dropdown, every tank's
+  // ammo and the CPU's choices; nothing else in the game changes. The rest of
+  // these are its tuning, all in real units so they mean the same thing on a
+  // phone and an ultrawide (the turn rate is angular and the times are
+  // seconds, so neither needs scaling).
+  const MISSILE = {
+    enabled: true,
+    armDelay: 0.3,      // s of ordinary flight before the motor can light, so a
+                        // flat shot (angle 0 or 180, which has no apex) cannot
+                        // nose over in the shooter's own lap
+    burn: 2.2,          // s the motor runs once lit. Burn x boostSpeed has to
+                        // cover both the cruise (below) and a helicopter chase
+                        // across most of the map; a missile that runs dry early
+                        // is just a worse shell
+    boostSpeed: 380,    // px/s floor while under power: at apex a steep shot has
+                        // almost no speed left, and would otherwise crawl
+    turnRate: 260,      // deg/s the nose can swing while under power. Turn
+                        // radius is speed/turnRate, so 380 px/s at 260 deg/s
+                        // loops in ~170px: enough to reverse onto a helicopter
+                        // that is behind it without flying into the ground
+    diveAngle: 78,      // deg below horizontal it pitches to with nothing to chase
+    heliLead: 0.15,     // s of lead when chasing the helicopter
+    fuze: 0.7           // proximity fuze radius, as a fraction of the airframe.
+                        // heliHitBy's box is only ~13px tall, and a tail chase
+                        // closes on a target asymptotically, so a missile that
+                        // is plainly going to hit slides underneath instead
+  };
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const gameWrap = document.getElementById('game-wrap');
+
+  const angleSlider = document.getElementById('angle-slider');
+  const powerSlider = document.getElementById('power-slider');
+  const angleVal = document.getElementById('angle-val');
+  const powerVal = document.getElementById('power-val');
+  const weaponSelect = document.getElementById('weapon-select');
+  const ammoReadout = document.getElementById('ammo-readout');
+  const fireBtn = document.getElementById('fire-btn');
+  const turnBanner = document.getElementById('turn-banner');
+  const buildInfo = document.getElementById('build-info');
+  const windArrow = document.getElementById('wind-arrow');
+  const windHud = document.getElementById('wind-hud');
+  const playersRow = document.getElementById('players-row');
+  const timerVal = document.getElementById('timer-val');
+  const windVal = document.getElementById('wind-val');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlay-title');
+  const overlaySub = document.getElementById('overlay-sub');
+  const restartBtn = document.getElementById('restart-btn');
+  const difficultySelect = document.getElementById('difficulty-select');
+  const modeSelect = document.getElementById('mode-select');
+  const countSelect = document.getElementById('count-select');
+  const difficultyGroup = document.getElementById('difficulty-group');
+
+  // ---------- Language ----------
+  // Theme names are keyed by their English name so the THEMES table stays the
+  // single place they are defined.
+  const STRINGS = {
+    en: {
+      wind: 'WIND', angle: 'ANGLE', power: 'POWER', weapon: 'WEAPON',
+      tanks: 'TANKS', opponents: 'OPPONENTS', cpuLevel: 'CPU LEVEL',
+      fire: 'FIRE', playAgain: 'Play Again', time: 'TIME',
+      timerMs: '{m}m {s}s', timerS: '{s}s',
+      cpuBadge: 'CPU', cpuBadgeShort: 'CPU',
+      keysHint: '← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire',
+      playerFull: 'PLAYER {n}', playerAbbr: 'P{n}',
+      playerName: 'Player {n}', cpuName: 'CPU {n}',
+      roundOver: 'ROUND OVER', inFlight: 'IN FLIGHT…',
+      thinking: '{name} THINKING…', aimFire: '{name} — AIM & FIRE',
+      wins: '{name} wins!', everybodyLoses: 'Everybody loses!',
+      playAgainHint: 'Tap Play Again for a new terrain and rematch.',
+      w_standard: 'Standard Shell', w_big: 'Big Bomb', w_cluster: 'Cluster Bomb',
+      w_roller: 'Roller Mine', w_mirv: 'MIRV', w_missile: 'Guided Missile',
+      unlimited: 'unlimited', nLeft: '{n} left',
+      tanks2: '2 Players', tanks3: '3 Players', tanks4: '4 Players',
+      vsCpu: 'vs CPU', allHuman: 'All Human',
+      easy: 'Easy', medium: 'Medium', hard: 'Hard', brutal: 'Brutal',
+      aimLeft: 'Aim one degree left', aimRight: 'Aim one degree right',
+      powerDown: 'Power down one', powerUp: 'Power up one',
+    },
+    tr: {
+      wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
+      tanks: 'TANKLAR', opponents: 'RAKİPLER', cpuLevel: 'BİLGİSAYAR SEVİYESİ',
+      fire: 'ATEŞ', playAgain: 'Tekrar Oyna', time: 'SÜRE',
+      timerMs: '{m}d {s}sn', timerS: '{s}sn',
+      cpuBadge: 'BİLGİSAYAR', cpuBadgeShort: 'BİL',
+      keysHint: '← → nişan &nbsp;|&nbsp; ↑ ↓ güç &nbsp;|&nbsp; BOŞLUK ateş',
+      playerFull: 'OYUNCU {n}', playerAbbr: 'O{n}',
+      playerName: 'Oyuncu {n}', cpuName: 'Bilgisayar {n}',
+      roundOver: 'TUR BİTTİ', inFlight: 'HAVADA…',
+      thinking: '{name} DÜŞÜNÜYOR…', aimFire: '{name} — NİŞAN AL & ATEŞ',
+      wins: '{name} kazandı!', everybodyLoses: 'Herkes kaybetti!',
+      playAgainHint: 'Yeni arazi ve rövanş için Tekrar Oyna\'ya dokun.',
+      w_standard: 'Standart Mermi', w_big: 'Büyük Bomba', w_cluster: 'Misket Bombası',
+      w_roller: 'Yuvarlanan Mayın', w_mirv: 'MIRV', w_missile: 'Güdümlü Füze',
+      unlimited: 'sınırsız', nLeft: '{n} kaldı',
+      tanks2: '2 Oyuncu', tanks3: '3 Oyuncu', tanks4: '4 Oyuncu',
+      vsCpu: 'Bilgisayara Karşı', allHuman: 'Hepsi İnsan',
+      easy: 'Kolay', medium: 'Orta', hard: 'Zor', brutal: 'Acımasız',
+      aimLeft: 'Bir derece sola nişan al', aimRight: 'Bir derece sağa nişan al',
+      powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
+      'Rust Canyon': 'Pas Kanyonu'
+    }
+  };
+
+  let lang = 'en';
+  // Named txt() rather than t(): `t` is the tank variable all over this file,
+  // and a lookup shadowed by a tank object would throw at runtime.
+  function txt(key, vars) {
+    let s = STRINGS[lang][key];
+    if (s === undefined) s = STRINGS.en[key];
+    if (s === undefined) return key;
+    if (vars) for (const k in vars) s = s.split('{' + k + '}').join(vars[k]);
+    return s;
+  }
+
+  // Turkish casing is not the default casing: toUpperCase() maps the dotted i
+  // to a dotless I, so "Bilgisayar" would come out "BILGISAYAR".
+  function upper(s) { return lang === 'tr' ? s.toLocaleUpperCase('tr-TR') : s.toUpperCase(); }
+
+  const MAX_PLAYERS = 4;
+  const PLAYER_VARS = ['--accent-p1', '--accent-p2', '--accent-p3', '--accent-p4'];
+  const hpFill = [], hpText = [], cards = [], aiBadges = [];
+  for (let i = 1; i <= MAX_PLAYERS; i++) {
+    hpFill.push(document.getElementById('hp-fill-' + i));
+    hpText.push(document.getElementById('hp-text-' + i));
+    cards.push(document.getElementById('card-p' + i));
+    aiBadges.push(document.getElementById('ai-badge-' + i));
+  }
+
+  let cpuMode = modeSelect.value === 'cpu'; // false = every tank is a local human
+  let playerCount = parseInt(countSelect.value, 10);
+  let aiDifficulty = difficultySelect.value; // 'easy' | 'medium' | 'hard' | 'brutal'
+
+  // Player 1 is always the local human; every other seat is a CPU when enabled.
+  function isAi(i) { return cpuMode && i > 0; }
+  function playerName(i) { return txt(isAi(i) ? 'cpuName' : 'playerName', { n: i + 1 }); }
+
+  // Remembered so the win overlay can be re-rendered if the language changes
+  // while it is on screen.
+  let lastWinner = null;
+  function refreshOverlayText() {
+    if (lastWinner === null) return;
+    overlayTitle.textContent = lastWinner === -1
+      ? txt('everybodyLoses')
+      : txt('wins', { name: playerName(lastWinner) });
+    overlaySub.textContent = txt('playAgainHint');
+  }
+
+  const langCheckbox = document.getElementById('lang-tr');
+
+  function applyLanguage() {
+    document.documentElement.lang = lang;
+    for (const el of document.querySelectorAll('[data-i18n]')) {
+      el.innerHTML = txt(el.getAttribute('data-i18n'));
+    }
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+      cards[i].querySelector('.pn-full').textContent = txt('playerFull', { n: i + 1 });
+      cards[i].querySelector('.pn-abbr').textContent = txt('playerAbbr', { n: i + 1 });
+    }
+    const relabel = (sel, keys) => {
+      for (let i = 0; i < sel.options.length; i++) sel.options[i].textContent = txt(keys[i]);
+    };
+    relabel(countSelect, ['tanks2', 'tanks3', 'tanks4']);
+    relabel(modeSelect, ['vsCpu', 'allHuman']);
+    relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
+    const aria = { 'angle-left': 'aimLeft', 'angle-right': 'aimRight',
+                   'power-dec': 'powerDown', 'power-inc': 'powerUp' };
+    for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
+    lastTimerText = ''; // force the clock to redraw in the new language
+    // the weapon <option> labels and ammo readout are rebuilt from here
+    if (tanks.length) { updateHUD(); syncControlsFromTank(); }
+    refreshOverlayText();
+  }
+
+  langCheckbox.addEventListener('change', () => {
+    lang = langCheckbox.checked ? 'tr' : 'en';
+    try { localStorage.setItem('barrage.lang', lang); } catch (e) { /* private mode */ }
+    applyLanguage();
+  });
+
+  function initLanguage() {
+    let stored = null;
+    try { stored = localStorage.getItem('barrage.lang'); } catch (e) { /* private mode */ }
+    const browserTr = (navigator.language || '').toLowerCase().indexOf('tr') === 0;
+    lang = (stored === 'tr' || stored === 'en') ? stored : (browserTr ? 'tr' : 'en');
+    langCheckbox.checked = lang === 'tr';
+    applyLanguage();
+  }
+
+  function refreshOpponentUi() {
+    // CPU level only matters when playing against the computer
+    difficultyGroup.style.display = cpuMode ? '' : 'none';
+  }
+
+  modeSelect.addEventListener('change', () => {
+    cpuMode = modeSelect.value === 'cpu';
+    turnToken++; // seats changed hands; drop anything the AI had queued
+    refreshOpponentUi();
+    updateHUD();
+    syncControlsFromTank();
+    // if we just switched to CPU mid-way through a CPU seat's turn, let it play
+    maybeAiTurn();
+  });
+
+  // Changing the roster mid-round has no sane continuation — start a fresh round.
+  countSelect.addEventListener('change', () => {
+    playerCount = parseInt(countSelect.value, 10);
+    resetGame();
+  });
+
+  difficultySelect.addEventListener('change', () => {
+    aiDifficulty = difficultySelect.value;
+  });
+  weaponSelect.addEventListener('change', () => {
+    const t = tanks[currentPlayer];
+    if (!t) return;
+    t.weapon = weaponSelect.value; // the choice belongs to this tank, not the control
+    const remaining = t.ammo[t.weapon];
+    ammoReadout.textContent = remaining === Infinity ? txt('unlimited') : txt('nLeft', { n: remaining });
+  });
+
+  // ---------- World vs view ----------
+  // The simulation lives in world units on a fixed-size battlefield, and the
+  // canvas is only a window onto it. That separation is what makes a match
+  // possible: two players on a 1440px desktop and a 390px phone hold the same
+  // terrain array, the same tank coordinates and the same physics, and differ
+  // only in how large it is drawn.
+  //
+  // It also removes a whole class of bug from the single-player game. The world
+  // used to be rebuilt at the new pixel width on every resize, which meant
+  // every crater was erased and the tanks had to be re-placed by fraction;
+  // rotating a phone mid-game quietly reset the landscape.
+  //
+  // The world's shape is fixed, so the canvas is sized to that aspect and the
+  // spare space goes back to the layout (see #game-wrap). Change these two
+  // numbers to reshape the battlefield; nothing else needs to know.
+  const SIM_W = 1000, SIM_H = 620;
+  let W = SIM_W, H = SIM_H;
+
+  // The physics below is tuned in absolute units, so a shot's range is a fixed
+  // distance in the world. W_REF is the width that tuning is expressed in; with
+  // the world fixed at SIM_W this is a constant, and it stays in the formulas
+  // so that reshaping the battlefield rescales trajectories with it.
+  const W_REF = 1000;
+  let physScale = SIM_W / W_REF;
+
+  // How the world is drawn: `viewScale` world-units-to-CSS-pixels, and the
+  // canvas size in CSS pixels. Only rendering and pointer input use these.
+  let viewScale = 1, viewW = SIM_W, viewH = SIM_H;
+  let DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    let availW = gameWrap.clientWidth;
+    let availH = gameWrap.clientHeight;
+    // Some mobile browsers report 0 during early layout / orientation change.
+    // Falling through with 0 would produce a blank canvas with no error.
+    if (!availW || !availH) {
+      const r = gameWrap.getBoundingClientRect();
+      availW = Math.round(r.width) || window.innerWidth || 320;
+      availH = Math.round(r.height) || Math.max(160, (window.innerHeight || 480) - 200);
+    }
+    availW = Math.max(160, availW);
+    availH = Math.max(120, availH);
+
+    // Contain: the largest whole world that fits the space we were given.
+    viewScale = Math.min(availW / SIM_W, availH / SIM_H);
+    viewW = Math.round(SIM_W * viewScale);
+    viewH = Math.round(SIM_H * viewScale);
+
+    canvas.width = Math.round(viewW * DPR);
+    canvas.height = Math.round(viewH * DPR);
+    canvas.style.width = viewW + 'px';
+    canvas.style.height = viewH + 'px';
+    // With this transform every draw call below is in world units.
+    worldTransform();
+
+    hudWindVisible = windHud.offsetParent !== null;
+  }
+
+  /** Draw in world units (the default for everything on the battlefield). */
+  function worldTransform() {
+    const k = DPR * viewScale;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+  }
+
+  /** Draw in CSS pixels — for on-canvas UI that must stay legible at any size. */
+  function screenTransform() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  /** A pointer event's position in world units. */
+  function eventToWorld(e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: r.width ? (e.clientX - r.left) / r.width * SIM_W : 0,
+      y: r.height ? (e.clientY - r.top) / r.height * SIM_H : 0
+    };
+  }
+
+  let hudWindVisible = false;
+
+  // ---------- Environments ----------
+  // Each level gets a distinct sky, ground palette, and terrain personality.
+  const THEMES = [
+    {
+      name: 'Dusk Ridge',
+      skyTop: '#2b3a55', skyBot: '#7d5a6e',
+      ground1: '#4a3728', ground2: '#2e2118',
+      rim: 'rgba(255,200,150,0.20)',
+      decor: 'stars', decorColor: 'rgba(255,255,255,0.25)',
+      roughness: 0.56, falloff: 0.62, points: 160, baseLo: 0.33, baseHi: 0.77
+    },
+    {
+      name: 'Salt Flats',
+      skyTop: '#8fb8d6', skyBot: '#e8d9b8',
+      ground1: '#d9c9a3', ground2: '#8a7a5c',
+      rim: 'rgba(255,255,255,0.35)',
+      decor: 'clouds', decorColor: 'rgba(255,255,255,0.5)',
+      roughness: 0.22, falloff: 0.52, points: 200, baseLo: 0.47, baseHi: 0.76
+    },
+    {
+      name: 'Ash Peaks',
+      skyTop: '#3a2b33', skyBot: '#8c4a35',
+      ground1: '#5c4038', ground2: '#241a19',
+      rim: 'rgba(255,120,60,0.30)',
+      decor: 'embers', decorColor: 'rgba(255,140,60,0.45)',
+      roughness: 0.70, falloff: 0.67, points: 140, baseLo: 0.28, baseHi: 0.72
+    },
+    {
+      name: 'Glacier',
+      skyTop: '#1d3550', skyBot: '#6fa8bf',
+      ground1: '#cfe4ee', ground2: '#6d8ba0',
+      rim: 'rgba(255,255,255,0.55)',
+      decor: 'snow', decorColor: 'rgba(255,255,255,0.6)',
+      roughness: 0.66, falloff: 0.65, points: 150, baseLo: 0.30, baseHi: 0.74
+    },
+    {
+      name: 'Verdant Hills',
+      skyTop: '#5aa4d6', skyBot: '#cfe6c8',
+      ground1: '#5c8a3c', ground2: '#2c4520',
+      rim: 'rgba(200,255,170,0.30)',
+      decor: 'clouds', decorColor: 'rgba(255,255,255,0.55)',
+      roughness: 0.36, falloff: 0.57, points: 180, baseLo: 0.40, baseHi: 0.76
+    },
+    {
+      name: 'Night Crater',
+      skyTop: '#0d1024', skyBot: '#2a1f45',
+      ground1: '#3b3550', ground2: '#161327',
+      rim: 'rgba(160,150,255,0.30)',
+      decor: 'stars', decorColor: 'rgba(220,220,255,0.45)',
+      roughness: 0.62, falloff: 0.63, points: 150, baseLo: 0.32, baseHi: 0.76
+    },
+    {
+      name: 'Rust Canyon',
+      skyTop: '#7a4a2e', skyBot: '#e0a05a',
+      ground1: '#a85a35', ground2: '#4a2418',
+      rim: 'rgba(255,180,120,0.30)',
+      decor: 'dust', decorColor: 'rgba(255,200,150,0.35)',
+      roughness: 0.74, falloff: 0.69, points: 130, baseLo: 0.26, baseHi: 0.70
+    }
+  ];
+
+  let theme = THEMES[0];
+  let decorItems = []; // clouds / stars / embers positions for the current theme
+
+  // Relative luminance, so wind streaks can pick a colour that shows up
+  // against this theme's sky instead of vanishing into a pale one.
+  function hexLum(hex) {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.slice(0, 2), 16) / 255;
+    const g = parseInt(h.slice(2, 4), 16) / 255;
+    const b = parseInt(h.slice(4, 6), 16) / 255;
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  let streakRGB = '255,255,255';
+
+  function applyTheme(t) {
+    theme = t;
+    streakRGB = hexLum(t.skyTop) > 0.5 ? '40,34,30' : '255,255,255';
+    const root = document.documentElement;
+    if (root && root.style) {
+      root.style.setProperty('--sky-top', t.skyTop);
+      root.style.setProperty('--sky-bot', t.skyBot);
+      root.style.setProperty('--ground-1', t.ground1);
+      root.style.setProperty('--ground-2', t.ground2);
+    }
+    buildDecor();
+  }
+
+  function buildDecor() {
+    decorItems = [];
+    const kind = theme.decor;
+    if (kind === 'stars') {
+      for (let i = 0; i < 70; i++) {
+        decorItems.push({ x: Math.random(), y: Math.random() * 0.55, r: Math.random() * 1.4 + 0.5, tw: Math.random() * 6.28 });
+      }
+    } else if (kind === 'clouds') {
+      for (let i = 0; i < 6; i++) {
+        decorItems.push({ x: Math.random(), y: 0.08 + Math.random() * 0.3, s: 0.6 + Math.random() * 0.9, drift: 0.004 + Math.random() * 0.008 });
+      }
+    } else if (kind === 'embers' || kind === 'dust' || kind === 'snow') {
+      const count = kind === 'snow' ? 60 : 40;
+      for (let i = 0; i < count; i++) {
+        decorItems.push({
+          x: Math.random(), y: Math.random(),
+          r: Math.random() * 1.8 + 0.6,
+          vy: (kind === 'snow' ? 0.02 : -0.03) * (0.5 + Math.random()),
+          vx: (Math.random() * 2 - 1) * 0.01
+        });
+      }
+    }
+  }
+
+  function nextTheme() {
+    // advance through environments, avoiding an immediate repeat
+    let idx;
+    do { idx = Math.floor(Math.random() * THEMES.length); }
+    while (THEMES.length > 1 && THEMES[idx] === theme);
+    applyTheme(THEMES[idx]);
+  }
+
+  // ---------- Terrain ----------
+  const GROUND_MARGIN_TOP = 0.35; // terrain never rises above 35% of canvas height
+  let terrain = []; // heightmap, index = x pixel, value = y of ground surface
+  let terrainSeedShape = []; // normalized 0..1 shape independent of width, resampled on resize
+
+  function generateTerrainShape() {
+    // midpoint displacement, tuned per theme so each environment has its own feel
+    const n = theme.points;
+    const arr = new Array(n);
+    arr[0] = theme.baseLo + Math.random() * (theme.baseHi - theme.baseLo);
+    arr[n - 1] = theme.baseLo + Math.random() * (theme.baseHi - theme.baseLo);
+    function subdivide(lo, hi, roughness) {
+      if (hi - lo < 2) return;
+      const mid = Math.floor((lo + hi) / 2);
+      const avg = (arr[lo] + arr[hi]) / 2;
+      arr[mid] = avg + (Math.random() * 2 - 1) * roughness;
+      arr[mid] = Math.max(0.05, Math.min(0.85, arr[mid]));
+      subdivide(lo, mid, roughness * theme.falloff);
+      subdivide(mid, hi, roughness * theme.falloff);
+    }
+    subdivide(0, n - 1, theme.roughness);
+    return arr;
+  }
+
+  function buildTerrainFromShape() {
+    const n = terrainSeedShape.length;
+    terrain = new Array(Math.ceil(W));
+
+    // Relief is scaled against the world's aspect rather than being a flat
+    // fraction of H, so that reshaping the battlefield (SIM_W / SIM_H) keeps
+    // hills the same *shape* instead of flattening them.
+    const aspect = W / Math.max(1, H);
+    // 1.0 at a squarish 4:3 view, growing (capped) as the view gets wider
+    const reliefBoost = Math.min(1.55, Math.max(1, Math.sqrt(aspect / 1.33)));
+    const usableSpan = H * (1 - GROUND_MARGIN_TOP - 0.03);
+    const span = Math.min(usableSpan * reliefBoost, H * 0.72);
+    const top = Math.max(H * 0.06, H - H * 0.05 - span);
+
+    for (let x = 0; x < W; x++) {
+      const t = (x / (W - 1)) * (n - 1);
+      const i0 = Math.floor(t);
+      const i1 = Math.min(n - 1, i0 + 1);
+      const f = t - i0;
+      const shapeVal = terrainSeedShape[i0] * (1 - f) + terrainSeedShape[i1] * f;
+      const y = top + shapeVal * span;
+      terrain[x] = Math.min(Math.max(y, H * 0.06), H - TANK_H - 6);
+    }
+  }
+
+  function newTerrain() {
+    terrainSeedShape = generateTerrainShape();
+    buildTerrainFromShape();
+  }
+
+  // Craters dig downward; without a floor, repeated hits in one spot push the
+  // ground (and any tank resting on it) below the bottom of the canvas.
+  function bedrockY() {
+    return H - TANK_H - 6; // deepest the ground is allowed to go, keeping tanks visible
+  }
+
+  function craterAt(cx, groundY, radius) {
+    // carve a circular crater into terrain heightmap
+    const rSq = radius * radius;
+    const floor = bedrockY();
+    const xStart = Math.max(0, Math.floor(cx - radius));
+    const xEnd = Math.min(terrain.length - 1, Math.ceil(cx + radius));
+    for (let x = xStart; x <= xEnd; x++) {
+      const dx = x - cx;
+      const dySq = rSq - dx * dx;
+      if (dySq < 0) continue;
+      const dy = Math.sqrt(dySq);
+      const craterBottom = Math.min(groundY + dy, floor); // clamp to bedrock
+      if (craterBottom > terrain[x]) {
+        terrain[x] = craterBottom;
+      }
+    }
+  }
+
+  function groundHeightAt(x) {
+    const xi = Math.max(0, Math.min(terrain.length - 1, Math.round(x)));
+    return terrain[xi];
+  }
+
+  // ---------- Game state ----------
+  const GRAVITY = 340; // px/s^2
+  const TANK_W = 26, TANK_H = 14;
+  const MAX_HP = 100;
+
+  let tanks = [];
+
+  function getVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  let wind = 0; // px/s^2 lateral accel
+  let windPulse = 0; // 1 -> 0 flash right after the wind changes
+  let roundStart = 0, lastTimerText = '';
+  let currentPlayer = 0;
+  let state = 'AIMING'; // AIMING | FIRING | EXPLODING | GAMEOVER
+  // A list, not a single shell: a MIRV puts three warheads in the air at once,
+  // and everything below already treats them one at a time. Each carries its
+  // own trail so the split reads as three separate arcs.
+  let projectiles = [];
+  // Set when any shell of the current shot detonated, so the turn can tell an
+  // explosion apart from a shot that simply flew off the map.
+  let shotExploded = false;
+  let explosions = []; // active explosion animations {x,y,r,maxR,t}
+  let clusterQueue = []; // pending sub-explosions for cluster bomb
+  let particles = [];
+
+  const WEAPONS = {
+    standard: { radius: 26, damageMax: 34, color: '#ffcf5c', label: 'Standard Shell', startAmmo: Infinity },
+    big:      { radius: 46, damageMax: 55, color: '#ff7a45', label: 'Big Bomb', startAmmo: 5 },
+    cluster:  { radius: 18, damageMax: 22, color: '#ff5c9c', label: 'Cluster Bomb', clusterCount: 5, startAmmo: 3 },
+    // Doesn't burst where it lands: it settles on the ground and rolls downhill
+    // until it reaches a tank, runs out of momentum or times out. Trades the
+    // direct-hit precision of a shell for the ability to reach a tank sitting
+    // in a valley or behind a ridge you can't clear cleanly.
+    roller:   { radius: 30, damageMax: 40, color: '#7ce0ff', label: 'Roller Mine', startAmmo: 3, rolls: true },
+    // Splits at the top of its arc into independent warheads that finish the
+    // flight on their own paths — unlike the cluster bomb, which splits on
+    // impact. Each warhead is weak; the value is the width of the pattern,
+    // which covers a tank you can only place roughly.
+    mirv:     { radius: 22, damageMax: 26, color: '#b6ff7a', label: 'MIRV', startAmmo: 2,
+                mirvCount: 3, mirvSpread: 55 },
+    // Climbs on the arc you aimed, then lights its motor at the top and comes
+    // down almost vertically — so it drops behind a ridge onto a tank a flat
+    // parabola would sail over or bury itself short of. If a helicopter is up
+    // when the motor lights it chases that instead: the wreck is the most
+    // violent thing in the game, and this is the only reliable way to choose
+    // when it falls.
+    missile:  { radius: 24, damageMax: 28, color: '#ff4d5e', label: 'Guided Missile',
+                startAmmo: 2, guides: true, enabled: MISSILE.enabled }
+  };
+
+  // Roll tuning. ROLL_ACCEL is read against GRAVITY of 340: a 45° slope
+  // (gradient 1) accelerates the mine at close to a free fall, and friction
+  // caps it near 300 * gradient / 0.6 px/s, so shallow ground barely moves it.
+  const ROLL_ACCEL = 300;      // px/s^2 per unit of ground gradient
+  const ROLL_FRICTION = 0.55;  // fraction of speed kept per second
+  const ROLL_MAX_TIME = 3.5;   // s before it gives up and detonates where it is
+  const ROLL_MIN_SPEED = 18;   // px/s under which it has effectively stopped
+
+  function weaponEnabled(key) {
+    const w = WEAPONS[key];
+    return !!w && w.enabled !== false;
+  }
+
+  // Switched on, and this tank still has rounds for it.
+  function weaponAvailable(t, key) {
+    return weaponEnabled(key) && t.ammo[key] > 0;
+  }
+
+  function freshAmmo() {
+    const a = {};
+    for (const key in WEAPONS) if (weaponEnabled(key)) a[key] = WEAPONS[key].startAmmo;
+    return a;
+  }
+
+  // Drops the <option>s for weapons that are switched off, so the rest of the
+  // weapon plumbing — which walks the select — never sees them at all.
+  function pruneWeaponOptions() {
+    for (const opt of [...weaponSelect.options]) {
+      if (!weaponEnabled(opt.value)) opt.remove();
+    }
+  }
+
+  function buildTanks() {
+    tanks = [];
+    for (let i = 0; i < playerCount; i++) {
+      tanks.push({ x: 0, hp: MAX_HP, color: getVar(PLAYER_VARS[i]), alive: true,
+                   angle: 45, power: 50, weapon: 'standard', ammo: freshAmmo() });
+    }
+  }
+
+  // One slot per tank across the width, jittered inside it, so 2, 3 or 4 tanks
+  // all start well spaced instead of piling up at the edges.
+  function placeTanks() {
+    const slot = 1 / tanks.length;
+    tanks.forEach((t, i) => {
+      const frac = (i + 0.2 + Math.random() * 0.6) * slot;
+      t.x = Math.max(24, Math.min(W - 24, W * frac));
+      t.angle = t.x < W / 2 ? 45 : 135; // start aimed toward the middle of the map
+      t.power = 50;
+    });
+    levelTankPads();
+  }
+
+  // A tank is drawn as a flat rectangle, so on the steeper terrain it now sits
+  // on it would bury one end in the hillside. Ease a short level pad under each
+  // one; the quadratic falloff blends it into the surrounding slope.
+  function levelTankPads() {
+    if (!terrain.length) return;
+    const pad = TANK_W;
+    for (const t of tanks) {
+      const y = groundHeightAt(t.x);
+      const x0 = Math.max(0, Math.round(t.x - pad));
+      const x1 = Math.min(terrain.length - 1, Math.round(t.x + pad));
+      for (let x = x0; x <= x1; x++) {
+        const d = Math.min(1, Math.abs(x - t.x) / pad);
+        const w = 1 - d * d;
+        terrain[x] = terrain[x] * (1 - w) + y * w;
+      }
+    }
+  }
+
+  // Lateral accel, against GRAVITY of 340. Drift over a shot works out to
+  // (wind / GRAVITY) * tan(angle) * range. At 60 a max-wind 45° shot moved the
+  // shell under two tank widths — inside the blast radius, so wind was
+  // ignorable. 120 overshot the other way and made every round a fight against
+  // the weather. 80 puts a typical shot's drift at ~1.3 tank widths and a
+  // worst case at ~2.6: worth aiming off for, not worth dreading.
+  const WIND_MAX = 80;
+  function windStrength() { return Math.min(1, Math.abs(wind) / WIND_MAX); }
+  // px/s^2 is an internal unit and only means anything next to GRAVITY, so it
+  // is never shown. Players get a 0-10 force instead; 0 reads as calm.
+  function windForce() { return Math.round(windStrength() * 10); }
+  function windColor() {
+    const s = windStrength();
+    if (s > 0.58) return '#ff6b6b';
+    if (s > 0.28) return '#ffc44d';
+    return '#8fe3a8';
+  }
+
+  // Round clock. Frozen once the round is over so it reads as how long it took,
+  // and only written when the displayed second actually changes.
+  function updateTimer() {
+    if (state === 'GAMEOVER') return;
+    const secs = Math.floor((performance.now() - roundStart) / 1000);
+    const s = secs >= 60
+      ? txt('timerMs', { m: Math.floor(secs / 60), s: secs % 60 })
+      : txt('timerS', { s: secs });
+    if (s !== lastTimerText) { lastTimerText = s; timerVal.textContent = s; }
+  }
+
+  function setWind() {
+    wind = (Math.random() * 2 - 1) * WIND_MAX;
+    const col = windColor();
+    windVal.textContent = windForce() + '/10';
+    windArrow.textContent = wind >= 0 ? '→' : '←';
+    windArrow.style.color = col;
+    windVal.style.color = col;
+    windPulse = 1; // flash the on-canvas gauge so a new wind isn't missed
+  }
+
+  function resetGame() {
+    turnToken++;
+    roundStart = performance.now();
+    lastTimerText = '';
+    buildTanks();
+    currentPlayer = 0;
+    state = 'AIMING';
+    projectiles = [];
+    shotExploded = false;
+    explosions = [];
+    particles = [];
+    clusterQueue = [];
+    heli = null;
+    nextTheme();
+    newTerrain();
+    placeTanks();
+    setWind();
+    updateHUD();
+    overlay.classList.remove('show');
+    syncControlsFromTank();
+    maybeAiTurn();
+  }
+
+  function updateHUD() {
+    playersRow.dataset.count = tanks.length;
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+      const t = tanks[i];
+      cards[i].hidden = !t;
+      if (!t) continue;
+      const pct = Math.max(0, t.hp / MAX_HP * 100);
+      hpFill[i].style.width = pct + '%';
+      hpText[i].textContent = `${Math.max(0, Math.round(t.hp))} / ${MAX_HP}`;
+      cards[i].classList.toggle('active', currentPlayer === i && state === 'AIMING');
+      cards[i].classList.toggle('dead', !t.alive);
+      aiBadges[i].style.display = isAi(i) ? 'inline-block' : 'none';
+    }
+    if (state === 'GAMEOVER') {
+      turnBanner.textContent = txt('roundOver');
+    } else if (state !== 'AIMING') {
+      turnBanner.textContent = txt('inFlight');
+    } else {
+      const who = upper(playerName(currentPlayer));
+      turnBanner.textContent = txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
+    }
+  }
+
+  // The angle is world space - 0 is due right - but the slider is a spatial
+  // control: dragging left has to swing the barrel left. So the slider carries
+  // the mirrored value and both directions convert here and in its listener.
+  // Do not "simplify" the 180 - away.
+  function angleToSlider(angle) { return 180 - angle; }
+  function sliderToAngle(value) { return 180 - value; }
+
+  function syncControlsFromTank() {
+    const t = tanks[currentPlayer];
+    angleSlider.value = angleToSlider(t.angle);
+    // The slider's own value is mirrored, so spell the real angle out for
+    // assistive tech rather than letting it read the position back.
+    angleSlider.setAttribute('aria-valuetext', t.angle + '°');
+    powerSlider.value = t.power;
+    angleVal.textContent = t.angle + '°';
+    powerVal.textContent = t.power;
+    const isAiTurn = isAi(currentPlayer);
+    fireBtn.disabled = (state !== 'AIMING') || isAiTurn;
+    angleSlider.disabled = isAiTurn;
+    powerSlider.disabled = isAiTurn;
+    nudgeBtns.forEach(b => { b.disabled = isAiTurn; });
+    // The weapon is a turn control like the sliders, not a game setting: on a
+    // CPU seat the select is showing that seat's choice, so leaving it live let
+    // a player reach in and change what the computer was about to fire.
+    weaponSelect.disabled = isAiTurn;
+    // The three game settings freeze while a CPU seat is actually playing, but
+    // not once the round is over — the round may well have ended on a CPU seat,
+    // and the roster and difficulty are exactly what you want to change before
+    // hitting Play Again.
+    const aiHoldsTurn = isAiTurn && state !== 'GAMEOVER';
+    countSelect.disabled = aiHoldsTurn;
+    modeSelect.disabled = aiHoldsTurn;
+    difficultySelect.disabled = aiHoldsTurn;
+    syncWeaponOptions(t);
+  }
+
+  function syncWeaponOptions(t) {
+    for (const opt of weaponSelect.options) {
+      const key = opt.value;
+      const remaining = t.ammo[key];
+      const label = txt('w_' + key);
+      opt.textContent = remaining === Infinity ? `${label} (∞)` : `${label} (${remaining})`;
+      opt.disabled = remaining <= 0;
+    }
+    // The select is one control shared by every seat, so it is restored from
+    // whoever is aiming rather than left holding the last player's pick — the
+    // same way the angle and power sliders are. A choice that has since run dry
+    // (or been switched off) falls back to the standard shell.
+    if (!weaponAvailable(t, t.weapon)) t.weapon = 'standard';
+    weaponSelect.value = t.weapon;
+    const curRemaining = t.ammo[t.weapon];
+    ammoReadout.textContent = curRemaining === Infinity ? txt('unlimited') : txt('nLeft', { n: curRemaining });
+  }
+
+  angleSlider.addEventListener('input', () => {
+    const angle = sliderToAngle(parseInt(angleSlider.value, 10));
+    tanks[currentPlayer].angle = angle;
+    angleVal.textContent = angle + '°';
+    angleSlider.setAttribute('aria-valuetext', angle + '°');
+  });
+  powerSlider.addEventListener('input', () => {
+    tanks[currentPlayer].power = parseInt(powerSlider.value, 10);
+    powerVal.textContent = powerSlider.value;
+  });
+
+  // Arrow buttons either side of each slider: a slider alone can't reliably
+  // pick one degree out of 180, especially with a fingertip.
+  function nudge(which, delta) {
+    if (isAi(currentPlayer)) return; // same condition that gates the sliders
+    const t = tanks[currentPlayer];
+    if (which === 'angle') t.angle = Math.max(0, Math.min(180, t.angle + delta));
+    else t.power = Math.max(0, Math.min(100, t.power + delta));
+    syncControlsFromTank();
+  }
+
+  const nudgeBtns = [], nudgeStops = [];
+  function bindNudge(id, which, delta) {
+    const btn = document.getElementById(id);
+    nudgeBtns.push(btn);
+    let holdTimer = null, repeatTimer = null;
+    const stop = () => {
+      clearTimeout(holdTimer);
+      clearInterval(repeatTimer);
+      holdTimer = repeatTimer = null;
+    };
+    nudgeStops.push(stop);
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); // don't let a touch turn into a scroll or a zoom
+      nudge(which, delta);
+      holdTimer = setTimeout(() => {
+        repeatTimer = setInterval(() => nudge(which, delta), 55);
+      }, 380);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+      btn.addEventListener(ev, stop);
+    }
+    // detail === 0 means the click came from the keyboard, which fires no
+    // pointer events at all; without this the buttons would be pointer-only.
+    btn.addEventListener('click', (e) => { if (e.detail === 0) nudge(which, delta); });
+  }
+  // Left button aims left, which is *up* in world degrees.
+  bindNudge('angle-left', 'angle', 1);
+  bindNudge('angle-right', 'angle', -1);
+  bindNudge('power-dec', 'power', -1);
+  bindNudge('power-inc', 'power', 1);
+  // a press held while the tab loses focus would otherwise repeat forever
+  window.addEventListener('blur', () => nudgeStops.forEach(fn => fn()));
+
+  window.addEventListener('keydown', (e) => {
+    if (state !== 'AIMING' || isAi(currentPlayer)) return;
+    const t = tanks[currentPlayer];
+    if (e.key === 'ArrowLeft') { t.angle = Math.min(180, t.angle + 1); syncControlsFromTank(); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { t.angle = Math.max(0, t.angle - 1); syncControlsFromTank(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { t.power = Math.min(100, t.power + 2); syncControlsFromTank(); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { t.power = Math.max(0, t.power - 2); syncControlsFromTank(); e.preventDefault(); }
+    else if (e.code === 'Space') { fire(); e.preventDefault(); }
+  });
+
+  fireBtn.addEventListener('click', fire);
+  restartBtn.addEventListener('click', resetGame);
+
+  function fire() {
+    if (state !== 'AIMING') return;
+    const shooter = tanks[currentPlayer];
+    let weaponKey = shooter.weapon;
+    if (!weaponAvailable(shooter, weaponKey)) weaponKey = 'standard'; // safety net; syncWeaponOptions gets there first
+    shooter.ammo[weaponKey] -= 1;
+    // Spending the last round hands this tank back to the standard shell, so
+    // its next turn does not open on something it cannot fire.
+    if (!weaponAvailable(shooter, weaponKey)) shooter.weapon = 'standard';
+    const angleRad = shooter.angle * Math.PI / 180;
+    // Angles are in world space for every tank: 0° = due right, 180° = due left.
+    const speed = shooter.power * 6.2 * physScale;
+    const vx = Math.cos(angleRad) * speed;
+    const vy = -Math.sin(angleRad) * speed;
+    const barrelLen = 20;
+    projectiles = [{
+      x: shooter.x + barrelLen * Math.cos(angleRad),
+      y: groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad),
+      vx, vy,
+      weapon: weaponKey,
+      firedBy: currentPlayer,
+      // Where an ordinary shell of this angle and power would have come down.
+      // A missile cruises to this spot and drops on it, so the aim you have
+      // built up on every other shell carries over unchanged; only the angle of
+      // arrival differs. (predictLandingX also sets predictHitHeli, which only
+      // the AI solver reads, and only straight after its own call.)
+      aimX: WEAPONS[weaponKey].guides
+        ? predictLandingX(shooter.x + barrelLen * Math.cos(angleRad),
+                          groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad),
+                          shooter.angle, shooter.power, wind)
+        : 0,
+      trail: []
+    }];
+    shotExploded = false;
+    state = 'FIRING';
+    updateHUD();
+  }
+
+  function applyDamageAndCrater(px, py, weaponKey) {
+    const w = WEAPONS[weaponKey];
+    // Compute damage using terrain heights BEFORE cratering — otherwise a
+    // close/direct hit carves the ground out from under the tank first,
+    // which makes the tank look farther from the blast than it really was
+    // and under-credits exactly the hits that should do the most damage.
+    for (const t of tanks) {
+      if (!t.alive) continue;
+      const tankTopY = groundHeightAt(t.x) - TANK_H;
+      const dx = t.x - px;
+      const dy = tankTopY - py;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < w.radius) {
+        const falloff = 1 - dist / w.radius;
+        const dmg = w.damageMax * falloff;
+        t.hp -= dmg;
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+      }
+    }
+    craterAt(px, py, w.radius);
+    spawnExplosionFx(px, py, w.radius, w.color);
+  }
+
+  function spawnExplosionFx(x, y, radius, color) {
+    explosions.push({ x, y, r: 4, maxR: radius * 1.15, t: 0, color });
+    const count = Math.round(radius * 0.9);
+    for (let i = 0; i < count; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 40 + Math.random() * 140;
+      particles.push({
+        x, y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - 60,
+        life: 0.5 + Math.random() * 0.5,
+        age: 0,
+        color: Math.random() < 0.5 ? color : '#fff2c9'
+      });
+    }
+  }
+
+  function endTurnCheckWin() {
+    const alive = tanks.filter(t => t.alive);
+    if (alive.length <= 1) {
+      state = 'GAMEOVER';
+      lastWinner = tanks.findIndex(tk => tk.alive);
+      refreshOverlayText();
+      overlay.classList.add('show');
+      updateHUD();
+      syncControlsFromTank(); // releases the settings the CPU seat was holding
+      return true;
+    }
+    return false;
+  }
+
+  function nextTurn() {
+    if (endTurnCheckWin()) return;
+    // at least two tanks are alive here, so this always lands on someone else
+    do { currentPlayer = (currentPlayer + 1) % tanks.length; }
+    while (!tanks[currentPlayer].alive);
+    turnToken++;
+    if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
+    setWind();
+    state = 'AIMING';
+    updateHUD();
+    syncControlsFromTank();
+    maybeAiTurn();
+  }
+
+  // ---------- AI: trajectory-solving aim, scaled by difficulty ----------
+  // heliChance   - how often it goes for the helicopter at all when one is up
+  // heliPatience - how often it holds fire unless the wreck would land on someone
+  // heli*Jitter  - absolute aim error for that shot, deliberately far wider than
+  //                the tank jitter above, so even Brutal mostly misses a target
+  //                this small and moving
+  const DIFFICULTY_SETTINGS = {
+    easy:    { angleStep: 6, powerStep: 6,  angleJitter: 16, powerJitter: 22, missChance: 0.30, thinkMs: 900,
+               heliChance: 0.30, heliPatience: 0.15, heliAngleJitter: 14, heliPowerJitter: 18 },
+    medium:  { angleStep: 3, powerStep: 3,  angleJitter: 7,  powerJitter: 10, missChance: 0.12, thinkMs: 750,
+               heliChance: 0.30, heliPatience: 0.40, heliAngleJitter: 10, heliPowerJitter: 13 },
+    hard:    { angleStep: 1.5, powerStep: 1.5, angleJitter: 3,  powerJitter: 4,  missChance: 0.04, thinkMs: 600,
+               heliChance: 0.30, heliPatience: 0.65, heliAngleJitter: 7,  heliPowerJitter: 9 },
+    brutal:  { angleStep: 1, powerStep: 1,  angleJitter: 0.5, powerJitter: 1,  missChance: 0,    thinkMs: 450,
+               heliChance: 0.30, heliPatience: 0.85, heliAngleJitter: 3,  heliPowerJitter: 4 }
+  };
+
+  // Simulates a shot with the same physics as the real game and returns
+  // where it would land (x coordinate), so the AI can search for the
+  // angle/power combo that actually lands on the target.
+  // Set by the last predictLandingX call: the shot stopped on the helicopter
+  // rather than on the ground. A module-level flag rather than a returned
+  // object because this runs thousands of times per turn.
+  let predictHitHeli = false;
+
+  function predictLandingX(x0, y0, angleDeg, power, windAccel) {
+    const angleRad = angleDeg * Math.PI / 180;
+    let vx = Math.cos(angleRad) * power * 6.2 * physScale;
+    let vy = -Math.sin(angleRad) * power * 6.2 * physScale;
+    let x = x0, y = y0, t = 0;
+    const dt = 0.03;
+    predictHitHeli = false;
+    // The real shot stops on the airframe, so a prediction that flies straight
+    // through it would have the AI picking shots that get intercepted. Bounds
+    // are hoisted out of the loop; this is the hottest code in the game.
+    const live = heli && !heli.falling;
+    const hx = live ? heli.x : 0, hy = live ? heli.y : 0;
+    const hw = live ? heliSize() * 0.55 : 0, hh = live ? heliSize() * 0.30 : 0;
+    // Lead the target. The shell lands one to three seconds after launch, and
+    // the AI fires a further fraction of a second after solving, by which time
+    // the helicopter has moved several times its own width. Checking against
+    // where it is now rather than where it will be made hitting it impossible
+    // and left the difficulty knobs doing nothing at all.
+    const hVel = live ? heli.dir * heli.speed : 0;
+    const hLead = live ? aiFireDelaySec() : 0;
+    while (t < 12) {
+      vx += windAccel * physScale * dt;
+      vy += GRAVITY * physScale * dt;
+      x += vx * dt;
+      y += vy * dt;
+      t += dt;
+      if (live && Math.abs(x - (hx + hVel * (hLead + t))) < hw && Math.abs(y - hy) < hh) { predictHitHeli = true; break; }
+      if (x < -80 || x > W + 80) break;
+      if (y >= groundHeightAt(Math.max(0, Math.min(terrain.length - 1, x)))) break;
+    }
+    return x;
+  }
+
+  // Brutal is very hard to out-shoot, so at that level both sides get to see
+  // the arc before it is fired. This traces with the same integrator step()
+  // uses — sub-stepped at a 60fps dt rather than predictLandingX's coarser
+  // single step — so the drawn line matches where the shell actually goes.
+  function traceShot(x0, y0, angleDeg, power, windAccel) {
+    const a = angleDeg * Math.PI / 180;
+    const speed = power * 6.2 * physScale;
+    let vx = Math.cos(a) * speed, vy = -Math.sin(a) * speed;
+    let x = x0, y = y0;
+    const pts = [[x, y]];
+    const dt = 1 / 60, sub = 2;
+    for (let i = 0; i < 900; i++) {
+      for (let s = 0; s < sub; s++) {
+        const sdt = dt / sub;
+        vx += windAccel * physScale * sdt;
+        vy += GRAVITY * physScale * sdt;
+        x += vx * sdt;
+        y += vy * sdt;
+      }
+      pts.push([x, y]);
+      if (x < -20 || x > W + 20 || y > H + 60) break;
+      if (y >= groundHeightAt(x)) break;
+    }
+    return pts;
+  }
+
+  function aimPreviewOn() { return cpuMode && aiDifficulty === 'brutal'; }
+
+  // Gap between the AI solving its shot and actually firing. Shared so the
+  // lead used when aiming can't drift away from the real delay.
+  function aiFireDelayMs() { return aimPreviewOn() ? 900 : 350; }
+  function aiFireDelaySec() { return aiFireDelayMs() / 1000; }
+
+  function chooseAiShot(difficulty) {
+    const cfg = DIFFICULTY_SETTINGS[difficulty] || DIFFICULTY_SETTINGS.medium;
+    const shooter = tanks[currentPlayer];
+    const targets = tanks.filter((t, i) => t.alive && i !== currentPlayer);
+    const barrelLen = 20;
+    let bestAngle = 45, bestPower = 55, bestErr = Infinity;
+    let bestHeliAngle = 45, bestHeliPower = 55, bestHeliErr = Infinity;
+
+    // Sweep the full 0-180 arc: with more than two tanks an enemy can be on
+    // either side. A landing spot is scored against whichever enemy it is
+    // closest to, so the AI naturally picks the target it can actually reach.
+    for (let angle = 8; angle <= 172; angle += cfg.angleStep) {
+      const angleRad = angle * Math.PI / 180;
+      const y0 = groundHeightAt(shooter.x) - TANK_H - barrelLen * Math.sin(angleRad);
+      for (let power = 15; power <= 100; power += cfg.powerStep) {
+        const landX = predictLandingX(shooter.x, y0, angle, power, wind);
+        if (Math.abs(landX - shooter.x) < TANK_W) continue; // don't shell yourself
+        if (predictHitHeli) {
+          // This shot is stopped by the airframe, so it can never reach a tank:
+          // keep it out of the tank scoring (that alone is the dodge), and hold
+          // on to the best one in case we decide to go hunting below.
+          let herr = Infinity;
+          for (const t of targets) herr = Math.min(herr, Math.abs(landX - t.x));
+          if (herr < bestHeliErr) {
+            bestHeliErr = herr;
+            bestHeliAngle = angle;
+            bestHeliPower = power;
+          }
+          continue;
+        }
+        let err = Infinity;
+        for (const t of targets) err = Math.min(err, Math.abs(landX - t.x));
+        if (err < bestErr) {
+          bestErr = err;
+          bestAngle = angle;
+          bestPower = power;
+        }
+      }
+    }
+
+    // Difficulty-scaled human-like imprecision on top of the solved shot.
+    let jitterAngle = cfg.angleJitter;
+    let jitterPower = cfg.powerJitter;
+
+    // Sometimes go for the helicopter instead, and go for it badly: a much
+    // wider aim error than any tank shot, and at the lower levels it will take
+    // the shot even when the wreck would come down nowhere near anybody.
+    if (heli && !heli.falling && bestHeliErr < Infinity && Math.random() < cfg.heliChance) {
+      const overSomeone = bestHeliErr < 70; // wreck would come down on someone
+      if (overSomeone || Math.random() > cfg.heliPatience) {
+        bestAngle = bestHeliAngle;
+        bestPower = bestHeliPower;
+        jitterAngle = cfg.heliAngleJitter;
+        jitterPower = cfg.heliPowerJitter;
+      }
+    }
+
+    if (Math.random() < cfg.missChance) {
+      // occasional bigger miss, more likely at lower difficulty
+      jitterAngle *= 2.5;
+      jitterPower *= 2.5;
+    }
+    const finalAngle = Math.max(5, Math.min(175, bestAngle + (Math.random() * 2 - 1) * jitterAngle));
+    const finalPower = Math.max(10, Math.min(100, bestPower + (Math.random() * 2 - 1) * jitterPower));
+    return { angle: Math.round(finalAngle), power: Math.round(finalPower) };
+  }
+
+  // A CPU seat has no meaningful aim until it has solved its shot, so the
+  // preview stays hidden while it is still "thinking".
+  let cpuAimReady = false;
+
+  // Bumped whenever the active seat changes, a round restarts, or the opponent
+  // mode changes. The AI defers both its aim and its shot on timers, and a
+  // helicopter crash can end a turn from outside the normal shot resolution, so
+  // a deferred shot could otherwise land after the turn had moved on - and
+  // fire() shoots for whoever is current, which meant the human's tank firing
+  // by itself.
+  let turnToken = 0;
+
+  // First entry whose threshold r falls under, else the fallback.
+  function pick(r, table, fallback) {
+    for (const [threshold, key] of table) if (r < threshold) return key;
+    return fallback;
+  }
+
+  function maybeAiTurn() {
+    if (!isAi(currentPlayer) || state !== 'AIMING') return;
+    cpuAimReady = false;
+    updateHUD();
+    const cfg = DIFFICULTY_SETTINGS[aiDifficulty] || DIFFICULTY_SETTINGS.medium;
+    const seat = currentPlayer;
+    const token = turnToken;
+    const stillOurTurn = () =>
+      turnToken === token && state === 'AIMING' && currentPlayer === seat;
+    setTimeout(() => {
+      if (!stillOurTurn()) return;
+      const shot = chooseAiShot(aiDifficulty);
+      const shooter = tanks[seat];
+      shooter.angle = shot.angle;
+      shooter.power = shot.power;
+      // Stronger CPU levels lean on the bigger/smarter weapons more often,
+      // but only when it actually still has ammo for them.
+      const r = Math.random();
+      let preferred;
+      // Thresholds are cumulative: each level leans further from the plain
+      // shell toward the specials, and a MIRV forgives a rough solution, so
+      // the weaker levels get proportionally more use out of it.
+      // The guided missile is deliberately absent: chooseAiShot solves on
+      // predictLandingX, which integrates a plain parabola, and a missile
+      // stops travelling at apex — so the CPU would undershoot every one of
+      // them. Teaching the predictor about the burn is what it would take.
+      if (aiDifficulty === 'easy') {
+        preferred = pick(r, [[0.80, 'standard'], [0.86, 'big'], [0.91, 'cluster'], [0.95, 'roller']], 'mirv');
+      } else if (aiDifficulty === 'medium') {
+        preferred = pick(r, [[0.58, 'standard'], [0.72, 'big'], [0.83, 'cluster'], [0.92, 'roller']], 'mirv');
+      } else {
+        preferred = pick(r, [[0.38, 'standard'], [0.56, 'big'], [0.72, 'cluster'], [0.88, 'roller']], 'mirv');
+      }
+      shooter.weapon = weaponAvailable(shooter, preferred) ? preferred : 'standard';
+      syncControlsFromTank(); // pushes the seat's choice into the shared select
+      cpuAimReady = true;
+      // hold a beat longer when the arc is on screen, so it can be read
+      setTimeout(() => { if (stillOurTurn()) fire(); }, aiFireDelayMs());
+    }, cfg.thinkMs);
+  }
+
+  // ---------- Roller mine ----------
+  // Ground gradient at x, sampled over a few pixels so single-pixel terrain
+  // noise doesn't shove the mine around. Canvas y grows downward, so a positive
+  // gradient means the ground falls away to the right.
+  function groundGradientAt(x) {
+    const d = 4 * physScale;
+    return (groundHeightAt(x + d) - groundHeightAt(x - d)) / (2 * d);
+  }
+
+  function spawnDust(x, y, color) {
+    for (let i = 0; i < 8; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() * 2 - 1) * 60,
+        vy: -Math.random() * 70,
+        life: 0.3 + Math.random() * 0.3,
+        age: 0,
+        color: Math.random() < 0.5 ? color : '#cbd5e1'
+      });
+    }
+  }
+
+  function detonateRoller(p) {
+    applyDamageAndCrater(p.x, groundHeightAt(p.x), p.weapon);
+    p.dead = true;
+    shotExploded = true;
+    updateHUD();
+  }
+
+  // The mine hugs the surface: gravity along the slope pushes it downhill,
+  // friction bleeds the speed off, and it detonates as soon as it reaches a
+  // tank, stalls, times out or falls off the map.
+  function stepRoller(p, dt) {
+    p.rollTime += dt;
+
+    const sub = 3;
+    for (let i = 0; i < sub; i++) {
+      const sdt = dt / sub;
+      p.vx += groundGradientAt(p.x) * ROLL_ACCEL * physScale * sdt;
+      p.vx *= Math.pow(ROLL_FRICTION, sdt);
+      p.x += p.vx * sdt;
+      p.y = groundHeightAt(p.x);
+    }
+
+    pushTrail(p);
+
+    if (p.x < -20 || p.x > W + 20) {
+      p.dead = true; // rolled off the edge of the map
+      return;
+    }
+    for (const t of tanks) {
+      if (!t.alive) continue;
+      if (Math.abs(p.x - t.x) < TANK_W / 2 + 4) { detonateRoller(p); return; } // yes, including the tank that fired it
+    }
+    if (p.rollTime > ROLL_MAX_TIME ||
+        (p.rollTime > 0.25 && Math.abs(p.vx) < ROLL_MIN_SPEED * physScale)) {
+      detonateRoller(p);
+    }
+  }
+
+  // ---------- MIRV ----------
+  // Splits at the top of the arc — vy crossing zero — into evenly fanned
+  // warheads. They are ordinary shells from here on, marked so they can't
+  // split again, so wind bends each one on its own the rest of the way down.
+  function splitMirv(p) {
+    const w = WEAPONS.mirv;
+    p.dead = true;
+    for (let i = 0; i < w.mirvCount; i++) {
+      const offset = i - (w.mirvCount - 1) / 2; // -1, 0, +1 for three
+      spawnQueue.push({
+        x: p.x, y: p.y,
+        vx: p.vx + offset * w.mirvSpread * physScale,
+        // a touch of downward kick, so they separate vertically too
+        vy: p.vy + Math.abs(offset) * 18 * physScale,
+        weapon: 'mirv',
+        firedBy: p.firedBy,
+        split: true,
+        trail: []
+      });
+    }
+    spawnDust(p.x, p.y, w.color);
+  }
+
+  // ---------- Guided missile ----------
+  // The motor lights at the top of the arc — the same moment a MIRV splits —
+  // so the climb is whatever the player aimed and only the descent changes.
+  function armMissile(p) {
+    p.armed = true;
+    p.burnLeft = MISSILE.burn;
+    // Apex sits at half of a ballistic shot's range, so cruising the same
+    // horizontal distance again before tipping over lands the missile where an
+    // ordinary shell of the same angle and power would have landed. Measured
+    // rather than set as a constant: range scales with the square of power, so
+    // no fixed cruise time can hold across the power range or across screen
+    // sizes. This is what makes the weapon aimable on instinct.
+    p.armX = p.x;
+    // Locked once, here: a helicopter that shows up later isn't chased, and one
+    // that is shot down or leaves mid-burn drops the missile back into its dive.
+    p.chase = !!(heli && !heli.falling);
+    // At apex a steep shot has almost no speed left, so the motor sets a floor
+    // rather than preserving what little is there.
+    p.burnSpeed = Math.max(Math.hypot(p.vx, p.vy), MISSILE.boostSpeed * physScale);
+    spawnDust(p.x, p.y, WEAPONS.missile.color);
+  }
+
+  // How much ground the dive still to come will cover: the geometry of the drop
+  // itself, plus the swing into it, which is not free at a capped turn rate.
+  // Cruising until this equals the distance left is what puts the missile on the
+  // aim point instead of well beyond it.
+  function diveRunFor(p) {
+    const gy = groundHeightAt(Math.max(0, Math.min(W - 1, p.aimX)));
+    const drop = Math.max(0, gy - p.y);
+    const turnIn = p.burnSpeed * (MISSILE.diveAngle / MISSILE.turnRate) * 0.5;
+    return drop / Math.tan(MISSILE.diveAngle * Math.PI / 180) + turnIn;
+  }
+
+  // Under power: no gravity, no wind (the motor overpowers both), constant
+  // speed, and the nose swings toward what it wants at a capped rate.
+  function flyMissile(p, dt) {
+    p.burnLeft -= dt;
+    const target = (p.chase && heli && !heli.falling) ? heli : null;
+    let want;
+    if (target) {
+      const lead = target.dir * target.speed * MISSILE.heliLead;
+      want = Math.atan2(target.y - p.y, (target.x + lead) - p.x);
+    } else if (!p.diving && Math.abs(p.aimX - p.x) > diveRunFor(p)) {
+      // Cruise: hold altitude until the dive ahead will just reach the aim point.
+      want = p.vx >= 0 ? 0 : Math.PI;
+    } else {
+      // Committed. Steering at the aim point itself rather than holding a fixed
+      // angle lets the dive absorb the error in diveRunFor's estimate, which is
+      // only ever approximate — the swing into the dive is not free and the
+      // ground under the target is not flat. The trigger above is what makes
+      // this steep; this only decides where it ends up. Latched, because the
+      // dive carries it across the aim point and the distance test would
+      // otherwise go false on the far side and pull it out of the dive.
+      p.diving = true;
+      const gy = groundHeightAt(Math.max(0, Math.min(W - 1, p.aimX)));
+      want = Math.atan2(Math.max(1, gy - p.y), p.aimX - p.x);
+    }
+    let cur = Math.atan2(p.vy, p.vx);
+    let diff = want - cur;
+    while (diff > Math.PI) diff -= Math.PI * 2;   // turn the short way round
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    const step = MISSILE.turnRate * Math.PI / 180 * dt;
+    cur += Math.max(-step, Math.min(step, diff));
+    p.vx = Math.cos(cur) * p.burnSpeed;
+    p.vy = Math.sin(cur) * p.burnSpeed;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+
+    if (Math.random() < 0.8) {
+      particles.push({
+        x: p.x - Math.cos(cur) * 6, y: p.y - Math.sin(cur) * 6,
+        vx: (Math.random() * 2 - 1) * 26 - p.vx * 0.06,
+        vy: (Math.random() * 2 - 1) * 26 - p.vy * 0.06,
+        life: 0.25 + Math.random() * 0.35, age: 0,
+        color: Math.random() < 0.5 ? '#ffb03a' : '#8e8b99'
+      });
+    }
+  }
+
+  // A chasing missile goes off when it gets close enough, rather than having to
+  // thread the airframe's own hit box. Only a missile that locked on: everything
+  // else still has to actually hit.
+  function missileFuzed(p) {
+    if (!p.chase || !heli || heli.falling) return false;
+    const r = heliSize() * MISSILE.fuze;
+    return Math.hypot(p.x - heli.x, p.y - heli.y) < r;
+  }
+
+  // ---------- Per-shell flight ----------
+  // One shell for one frame: marks itself dead when it is spent, and leaves
+  // the turn's bookkeeping to the caller — there may be two more in the air.
+  let spawnQueue = []; // warheads spawned mid-frame, added once the walk is done
+
+  function pushTrail(p) {
+    p.trail.push({ x: p.x, y: p.y });
+    if (p.trail.length > 60) p.trail.shift();
+  }
+
+  function stepProjectile(p, dt) {
+    if (p.rolling) { stepRoller(p, dt); return; }
+
+    const w = WEAPONS[p.weapon];
+    p.age = (p.age || 0) + dt;
+    if (w.guides && p.burnLeft > 0) {
+      flyMissile(p, dt);
+    } else {
+      const sub = 2;
+      for (let s = 0; s < sub; s++) {
+        const sdt = dt / sub;
+        p.vx += wind * physScale * sdt;
+        p.vy += GRAVITY * physScale * sdt;
+        p.x += p.vx * sdt;
+        p.y += p.vy * sdt;
+      }
+    }
+    pushTrail(p);
+
+    // Apex, by the same test the MIRV splits on. Once the burn is spent it
+    // falls the rest of the way as an ordinary shell, wind and all.
+    if (w.guides && !p.armed && p.vy >= 0 && p.age > MISSILE.armDelay) armMissile(p);
+
+    // Apex: the frame the climb turns into a fall. A flat or downward shot
+    // (angle 0 or 180) starts at vy 0 and has no apex, so the age floor is
+    // what keeps those from splitting in the shooter's own lap.
+    if (w.mirvCount && !p.split && p.vy >= 0 && p.age > 0.15) { splitMirv(p); return; }
+
+    let hit = false;
+    let hitGround = false;
+    if (p.x < -20 || p.x > W + 20 || p.y > H + 60) {
+      p.dead = true; // off the map
+      return;
+    }
+    if (heliHitBy(p.x, p.y) || missileFuzed(p)) {
+      // the shell bursts on the airframe; the wreck falls on its own from here
+      spawnExplosionFx(p.x, p.y, 32, '#ffd27a');
+      heli.falling = true;
+      heli.vy = 20;
+      p.dead = true;
+      shotExploded = true;
+      return;
+    }
+    if (p.y >= groundHeightAt(p.x)) {
+      hit = true;
+      hitGround = true;
+    } else {
+      // direct tank hit check
+      for (const t of tanks) {
+        if (!t.alive) continue;
+        const topY = groundHeightAt(t.x) - TANK_H;
+        if (Math.abs(p.x - t.x) < TANK_W / 2 && p.y > topY - 4 && p.y < topY + TANK_H) {
+          hit = true;
+          break;
+        }
+      }
+    }
+    if (!hit) return;
+
+    const px = p.x, py = Math.min(p.y, groundHeightAt(p.x));
+    if (w.rolls && hitGround) {
+      // Landed on the ground rather than straight onto a tank: settle it on
+      // the surface and hand it to the roll phase instead of detonating.
+      p.rolling = true;
+      p.rollTime = 0;
+      p.x = px;
+      p.y = groundHeightAt(px);
+      p.vy = 0;
+      p.vx *= 0.45; // most of the impact energy goes into the dirt
+      p.trail = [];
+      spawnDust(p.x, p.y, w.color);
+      return;
+    }
+    if (p.weapon === 'cluster') {
+      applyDamageAndCrater(px, py, p.weapon);
+      for (let i = 0; i < w.clusterCount; i++) {
+        clusterQueue.push({
+          x: px + (Math.random() * 2 - 1) * 60 * physScale,
+          vy: -(80 + Math.random() * 60) * physScale,
+          vx: (Math.random() * 2 - 1) * 40 * physScale,
+          delay: i * 0.08
+        });
+      }
+      spawnClusterTimer = 0;
+    } else {
+      applyDamageAndCrater(px, py, p.weapon);
+    }
+    p.dead = true;
+    shotExploded = true;
+    updateHUD();
+  }
+
+  // ---------- Physics step ----------
+  let lastTime = null;
+  function step(ts) {
+    if (lastTime === null) lastTime = ts;
+    let dt = (ts - lastTime) / 1000;
+    dt = Math.min(dt, 0.033);
+    lastTime = ts;
+
+    if (state === 'FIRING') {
+      for (const p of projectiles) stepProjectile(p, dt);
+      // Warheads a MIRV split off this frame join the flight next frame, so
+      // the list isn't mutated while it is being walked.
+      projectiles = projectiles.filter(p => !p.dead).concat(spawnQueue);
+      spawnQueue = [];
+      if (projectiles.length === 0) {
+        // Nothing went off anywhere: the whole shot missed, so skip the
+        // explosion wait and hand the turn straight on.
+        state = shotExploded ? 'EXPLODING' : 'RESOLVED';
+        explodeTimer = 0;
+      }
+    }
+
+    if (state === 'EXPLODING') {
+      explodeTimer += dt;
+      if (clusterQueue.length) {
+        spawnClusterTimer += dt;
+        const remaining = [];
+        for (const c of clusterQueue) {
+          c.delay -= dt;
+          if (c.delay <= 0) {
+            // simulate a short lob then explode
+            let x = c.x, y = groundHeightAt(c.x) - 200 * physScale;
+            let vx = c.vx, vy = c.vy;
+            let t = 0;
+            while (y < groundHeightAt(x) && t < 2) {
+              vx += wind * physScale * 0.05; // bomblets drift like any other shell
+              vy += GRAVITY * physScale * 0.05;
+              x += vx * 0.05;
+              y += vy * 0.05;
+              t += 0.05;
+            }
+            applyDamageAndCrater(x, groundHeightAt(x), 'cluster');
+          } else {
+            remaining.push(c);
+          }
+        }
+        clusterQueue = remaining;
+      }
+      updateHUD();
+      if (explodeTimer > 0.9 && clusterQueue.length === 0 && explosions.every(e => e.t > e.maxR / 90)) {
+        state = 'RESOLVED';
+      }
+    }
+
+    if (state === 'RESOLVED') {
+      nextTurn();
+    }
+
+    // explosion fx aging
+    explosions.forEach(e => { e.t += dt * 90; e.r = Math.min(e.maxR, 4 + e.t); });
+    explosions = explosions.filter(e => e.r < e.maxR - 0.5);
+    particles.forEach(p => {
+      p.age += dt;
+      p.vy += 220 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+    });
+    particles = particles.filter(p => p.age < p.life);
+    windPulse = Math.max(0, windPulse - dt * 1.6);
+    updateHeli(dt);
+    updateTimer();
+
+    render();
+    requestAnimationFrame(step);
+  }
+  let explodeTimer = 0;
+  let spawnClusterTimer = 0;
+
+  // ---------- Rendering ----------
+  let decorClock = 0;
+
+  function drawDecor() {
+    const kind = theme.decor;
+    decorClock += 0.016;
+
+    if (kind === 'stars') {
+      for (const s of decorItems) {
+        const twinkle = 0.55 + 0.45 * Math.sin(decorClock * 1.5 + s.tw);
+        ctx.globalAlpha = twinkle;
+        ctx.fillStyle = theme.decorColor;
+        ctx.beginPath();
+        ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    if (kind === 'clouds') {
+      ctx.fillStyle = theme.decorColor;
+      for (const c of decorItems) {
+        c.x += c.drift * 0.006;
+        if (c.x > 1.2) c.x = -0.2;
+        const cx = c.x * W, cy = c.y * H, s = c.s * (W * 0.05);
+        ctx.beginPath();
+        ctx.arc(cx, cy, s, 0, Math.PI * 2);
+        ctx.arc(cx + s * 0.8, cy + s * 0.15, s * 0.75, 0, Math.PI * 2);
+        ctx.arc(cx - s * 0.85, cy + s * 0.2, s * 0.65, 0, Math.PI * 2);
+        ctx.arc(cx + s * 0.2, cy - s * 0.45, s * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      return;
+    }
+
+    // embers / dust / snow: drifting particles
+    ctx.fillStyle = theme.decorColor;
+    for (const p of decorItems) {
+      p.y += p.vy * 0.01;
+      p.x += p.vx * 0.01;
+      if (p.y < -0.05) p.y = 1.05;
+      if (p.y > 1.05) p.y = -0.05;
+      if (p.x < -0.05) p.x = 1.05;
+      if (p.x > 1.05) p.x = -0.05;
+      ctx.beginPath();
+      ctx.arc(p.x * W, p.y * H, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ---------- Helicopter ----------
+  // An occasional fly-by, high above the peaks. Shoot it and it comes down;
+  // whatever it lands on is finished, which makes it a gamble worth taking.
+  let heli = null;
+  let rotorAngle = 0;
+  // the first one comes sooner so it gets discovered; after that it's rare
+  let heliTimer = 60 + Math.random() * 50;
+
+  function heliSize() { return Math.max(30, Math.min(58, W * 0.04)); }
+
+  // Cruise just clear of the tallest peak rather than at a fixed height near
+  // the top of the canvas. On a low or flat map a fixed altitude left the
+  // helicopter miles above every barrel and simply unreachable; anchoring to
+  // the terrain keeps the shot on the table whatever the map looks like, while
+  // still passing over every hill. Craters only ever lower ground, so as a
+  // round chews the map down the fly-by drifts down with it.
+  function heliCruiseY() {
+    let peak = H * 0.5;
+    for (let x = 0; x < terrain.length; x++) if (terrain[x] < peak) peak = terrain[x];
+    // clearance comfortably exceeds TANK_H, so it clears a tank sat on the peak
+    const clearance = Math.max(34, H * 0.075) + Math.random() * H * 0.03;
+    return Math.max(H * 0.05, peak - clearance);
+  }
+
+  // It turns back at the edges rather than leaving on the first pass, so the
+  // fly-by isn't a lottery won by whoever happens to be up when it appears.
+  // It always makes at least one return trip: with two players both may have
+  // technically "had a turn" during a single crossing, while the one who was
+  // mid-shot barely saw it. The upper bound stops it loitering through a slow
+  // round.
+  const HELI_MIN_LEGS = 2, HELI_MAX_LEGS = 6;
+
+  function spawnHeli() {
+    const fromLeft = Math.random() < 0.5;
+    const w = heliSize();
+    heli = {
+      x: fromLeft ? -w : W + w,
+      y: heliCruiseY(),
+      dir: fromLeft ? 1 : -1,
+      speed: W / (9 + Math.random() * 5),   // ~9-14s to cross, whatever the width
+      vy: 0,
+      falling: false,
+      spin: 0,
+      legs: 0,
+      // whoever is aiming right now can already shoot at it; anyone mid-shot
+      // cannot, and gets counted when their next turn starts
+      seen: new Set(state === 'AIMING' ? [currentPlayer] : [])
+    };
+  }
+
+  function heliHitBy(px, py) {
+    if (!heli || heli.falling) return false;
+    const w = heliSize();
+    return Math.abs(px - heli.x) < w * 0.55 && Math.abs(py - heli.y) < w * 0.30;
+  }
+
+  // Landing on a tank destroys it outright; everything close by takes a big
+  // blast. This is deliberately harsher than any shell in the game.
+  function heliCrash(x, y) {
+    const CRUSH = 26, BLAST = 74, BLAST_DMG = 80;
+    for (const t of tanks) {
+      if (!t.alive) continue;
+      if (Math.abs(t.x - x) < CRUSH) { t.hp = 0; t.alive = false; continue; }
+      const tankTopY = groundHeightAt(t.x) - TANK_H;
+      const dist = Math.sqrt((t.x - x) * (t.x - x) + (tankTopY - y) * (tankTopY - y));
+      if (dist < BLAST) {
+        t.hp -= BLAST_DMG * (1 - dist / BLAST);
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+      }
+    }
+    craterAt(x, y, BLAST * 0.7);
+    spawnExplosionFx(x, y, BLAST, '#ffb03a');
+    for (let i = 0; i < 36; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 60 + Math.random() * 200;
+      particles.push({
+        x, y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 90,
+        life: 0.6 + Math.random() * 0.7, age: 0,
+        color: Math.random() < 0.5 ? '#ffb03a' : '#6d7684'
+      });
+    }
+    updateHUD();
+    // A crash can kill between turns, so the round may need resolving here.
+    if (state === 'AIMING') {
+      if (endTurnCheckWin()) return;
+      if (!tanks[currentPlayer].alive) nextTurn();
+    }
+  }
+
+  // Hidden: double-click the wind readout to call one in. Wherever the readout
+  // happens to be - the bar's pill above 900px, the canvas gauge below it.
+  function summonHeli() {
+    if (heli || state === 'GAMEOVER' || !terrain.length) return;
+    spawnHeli();
+    heliTimer = 120 + Math.random() * 60; // don't let a scheduled one pile in behind it
+  }
+
+  windHud.addEventListener('dblclick', summonHeli);
+  canvas.addEventListener('dblclick', (e) => {
+    if (hudWindVisible) return; // the gauge isn't drawn when the pill is up
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const box = windGaugeRect();
+    if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) summonHeli();
+  });
+
+  function updateHeli(dt) {
+    rotorAngle += dt * 26;
+    if (!heli) {
+      if (state !== 'GAMEOVER') {
+        heliTimer -= dt;
+        if (heliTimer <= 0) { spawnHeli(); heliTimer = 120 + Math.random() * 60; }
+      }
+      return;
+    }
+    const w = heliSize();
+    if (!heli.falling) {
+      heli.x += heli.dir * heli.speed * dt;
+      if (heli.x < -w * 1.5 || heli.x > W + w * 1.5) {
+        heli.legs++;
+        const allHadATurn = tanks.every((t, i) => !t.alive || heli.seen.has(i));
+        if ((allHadATurn && heli.legs >= HELI_MIN_LEGS) || heli.legs >= HELI_MAX_LEGS) {
+          heli = null;
+        } else {
+          // Come back in over the edge it just left, rather than reappearing on
+          // the far side, at a slightly different altitude each time.
+          const leftOverRight = heli.x > W;
+          heli.dir = leftOverRight ? -1 : 1;
+          heli.x = leftOverRight ? W + w * 1.5 : -w * 1.5;
+          heli.y = heliCruiseY();
+        }
+      }
+      return;
+    }
+    heli.vy += GRAVITY * physScale * dt * 0.75;
+    heli.x += heli.dir * heli.speed * 0.35 * dt;
+    heli.y += heli.vy * dt;
+    heli.spin += dt * (4 + heli.vy * 0.004);
+    if (Math.random() < 0.6) {
+      particles.push({
+        x: heli.x + (Math.random() * 2 - 1) * 8, y: heli.y,
+        vx: (Math.random() * 2 - 1) * 20, vy: -20 - Math.random() * 30,
+        life: 0.6 + Math.random() * 0.6, age: 0,
+        color: Math.random() < 0.5 ? '#59606b' : '#ff7a45'
+      });
+    }
+    if (heli.x < -60 || heli.x > W + 60) { heli = null; return; } // fell off the map
+    if (heli.y >= groundHeightAt(heli.x) - 4) {
+      const cx = Math.max(0, Math.min(W - 1, heli.x));
+      const cy = groundHeightAt(cx);
+      heli = null;
+      heliCrash(cx, cy);
+    }
+  }
+
+  function drawHeli() {
+    if (!heli) return;
+    const w = heliSize(), h = w * 0.34;
+    ctx.save();
+    ctx.translate(heli.x, heli.y);
+    if (heli.falling) ctx.rotate(heli.spin);
+    ctx.scale(heli.dir, 1);
+
+    ctx.fillStyle = heli.falling ? '#6b4a34' : '#46525f';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, w * 0.30, h * 0.55, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-w * 0.56, -h * 0.10, w * 0.34, h * 0.20); // tail boom
+    ctx.fillRect(-w * 0.60, -h * 0.60, w * 0.07, h * 0.60); // tail fin
+
+    ctx.fillStyle = 'rgba(185,222,255,0.78)';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.14, -h * 0.05, w * 0.10, h * 0.30, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#2b333d';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.18, h * 0.66); ctx.lineTo(w * 0.20, h * 0.66);
+    ctx.stroke();
+
+    // rotors, drawn as a blade seen edge-on so they read as spinning
+    ctx.strokeStyle = 'rgba(232,238,247,0.9)';
+    ctx.lineWidth = 2;
+    const blade = Math.cos(rotorAngle) * w * 0.48;
+    ctx.beginPath();
+    ctx.moveTo(-blade, -h * 0.78); ctx.lineTo(blade, -h * 0.78);
+    ctx.moveTo(0, -h * 0.78); ctx.lineTo(0, -h * 0.5);
+    ctx.stroke();
+    const tail = Math.cos(rotorAngle * 1.7) * h * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.58, -h * 0.30 - tail); ctx.lineTo(-w * 0.58, -h * 0.30 + tail);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Drawn detail only — TANK_W and TANK_H still define the collision box, so
+  // nothing here changes how shots land or how damage is scored.
+  function drawTank(t) {
+    const gy = groundHeightAt(t.x);
+    const w = TANK_W, h = TANK_H;
+    ctx.save();
+    ctx.translate(t.x, gy);
+
+    // tracks, with road wheels showing through
+    const trackH = 5, trackW = w + 4;
+    ctx.fillStyle = '#26222b';
+    pillPath(-trackW / 2, -trackH, trackW, trackH, 2.5);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.20)';
+    for (let i = 0; i < 4; i++) {
+      const x = -trackW / 2 + 4 + i * ((trackW - 8) / 3);
+      ctx.beginPath();
+      ctx.arc(x, -trackH / 2, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // hull, sloped front and back rather than a plain block
+    ctx.fillStyle = t.color;
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, -trackH);
+    ctx.lineTo(-w / 2 + 3.5, -h + 4);
+    ctx.lineTo(w / 2 - 3.5, -h + 4);
+    ctx.lineTo(w / 2, -trackH);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.22)'; // shaded skirt
+    ctx.fillRect(-w / 2 + 1, -trackH - 1.5, w - 2, 1.5);
+    ctx.fillStyle = 'rgba(255,255,255,0.20)'; // lit deck
+    ctx.fillRect(-w / 2 + 3.5, -h + 4, w - 7, 1.4);
+
+    // turret
+    ctx.fillStyle = t.color;
+    ctx.beginPath();
+    ctx.moveTo(-7, -h + 4);
+    ctx.lineTo(-4.5, -h - 1);
+    ctx.lineTo(4.5, -h - 1);
+    ctx.lineTo(7, -h + 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(-4.5, -h - 1, 9, 1.2);
+
+    // barrel: dark sleeve under a coloured core, with a muzzle brake
+    const ang = t.angle * Math.PI / 180;
+    const bx = Math.cos(ang), by = -Math.sin(ang);
+    const py = -h + 1;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#241f29';
+    ctx.lineWidth = 4.6;
+    ctx.beginPath();
+    ctx.moveTo(0, py); ctx.lineTo(bx * 19, py + by * 19);
+    ctx.stroke();
+    ctx.strokeStyle = t.color;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(0, py); ctx.lineTo(bx * 18, py + by * 18);
+    ctx.stroke();
+    ctx.strokeStyle = '#241f29';
+    ctx.lineWidth = 4.6;
+    ctx.beginPath();
+    ctx.moveTo(bx * 16, py + by * 16); ctx.lineTo(bx * 20, py + by * 20);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ---------- Wind indicators ----------
+  // Sky streaks drift with the wind so its direction and force are readable
+  // at a glance from the playfield, not just from the number in the HUD.
+  const windStreaks = [];
+  for (let i = 0; i < 22; i++) {
+    windStreaks.push({
+      x: Math.random(),
+      y: 0.04 + Math.random() * 0.6,
+      len: 0.025 + Math.random() * 0.06,
+      sp: 0.7 + Math.random() * 0.9,
+      a: 0.25 + Math.random() * 0.45
+    });
+  }
+
+  function drawWindStreaks() {
+    const s = windStrength();
+    if (s < 0.06) return; // dead calm — nothing to show
+    const dir = wind >= 0 ? 1 : -1;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 1.5;
+    // Speed off normalized strength, so retuning WIND_MAX doesn't change the pace.
+    const drift = (wind >= 0 ? s : -s) * 190 * 0.016;
+    for (const k of windStreaks) {
+      k.x += drift / W * k.sp;
+      if (k.x > 1.2) k.x = -0.2;
+      if (k.x < -0.2) k.x = 1.2;
+      const len = k.len * W * (0.35 + s * 0.9);
+      ctx.strokeStyle = `rgba(${streakRGB},${(k.a * s * 0.6).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(k.x * W, k.y * H);
+      ctx.lineTo(k.x * W - dir * len, k.y * H);
+      ctx.stroke();
+    }
+  }
+
+  function pillPath(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // A dark pill keeps the gauge legible over both the bright and dark skies.
+  // In CSS pixels, not world units: see drawWindGauge.
+  function windGaugeRect() {
+    const w = Math.min(250, viewW - 24);
+    return { x: (viewW - w) / 2, y: 10, w: w, h: 30 };
+  }
+
+  function drawWindGauge() {
+    const s = windStrength();
+    const col = windColor();
+    const box = windGaugeRect();
+    const PW = box.w, PH = box.h, px = box.x, py = box.y;
+    const midY = py + PH / 2;
+
+    ctx.save();
+    pillPath(px, py, PW, PH, 6);
+    ctx.fillStyle = 'rgba(12,11,16,0.62)';
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = `rgba(255,255,255,${(0.16 + windPulse * 0.55).toFixed(3)})`;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(236,231,225,0.6)';
+    ctx.fillText(txt('wind'), px + 10, midY);
+
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.fillStyle = col;
+    ctx.fillText(windForce() + '/10', px + PW - 10, midY);
+
+    // Track with a centre tick, so the arrow reads as "how far from calm".
+    const g0 = px + 48, g1 = px + PW - 52;
+    const gc = (g0 + g1) / 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(g0, midY); ctx.lineTo(g1, midY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(gc, midY - 5); ctx.lineTo(gc, midY + 5); ctx.stroke();
+
+    if (s > 0.02) {
+      const dir = wind >= 0 ? 1 : -1;
+      const len = Math.max(10, s * ((g1 - g0) / 2 - 6));
+      const ex = gc + dir * len;
+      ctx.strokeStyle = col;
+      ctx.fillStyle = col;
+      ctx.lineWidth = 3 + windPulse * 1.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(gc, midY); ctx.lineTo(ex - dir * 5, midY); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ex, midY);
+      ctx.lineTo(ex - dir * 9, midY - 6);
+      ctx.lineTo(ex - dir * 9, midY + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Dashed arc from the active tank's barrel, in that player's colour, ending
+  // in a ring at the predicted impact point.
+  function drawAimPreview() {
+    if (state !== 'AIMING') return;
+    const t = tanks[currentPlayer];
+    if (!t || !t.alive) return;
+    const full = aimPreviewOn();
+    // Everyone gets the short hint on their own turn; only Brutal shows the
+    // whole arc, and only Brutal telegraphs a CPU shot.
+    if (!full && isAi(currentPlayer)) return;
+    if (isAi(currentPlayer) && !cpuAimReady) return;
+
+    const a = t.angle * Math.PI / 180;
+    const barrelLen = 20;
+    const x0 = t.x + barrelLen * Math.cos(a);
+    const y0 = groundHeightAt(t.x) - TANK_H - barrelLen * Math.sin(a);
+    let pts = traceShot(x0, y0, t.angle, t.power, wind);
+    if (pts.length < 2) return;
+    // traceShot integrates a plain parabola. A guided shell leaves that path at
+    // apex, so the preview stops there rather than promising a landing spot it
+    // has no intention of using.
+    const guided = WEAPONS[t.weapon] && WEAPONS[t.weapon].guides;
+    if (guided) {
+      let apex = pts.length;
+      for (let i = 1; i < pts.length; i++) {
+        if (pts[i][1] >= pts[i - 1][1]) { apex = i + 1; break; }
+      }
+      pts = pts.slice(0, apex);
+      if (pts.length < 2) return;
+    }
+
+    ctx.save();
+    if (full) {
+      ctx.strokeStyle = t.color;
+      ctx.lineWidth = 1.6;
+      ctx.globalAlpha = 0.5;
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (!guided) {
+        const end = pts[pts.length - 1];
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(end[0], end[1], 5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    } else {
+      // Roughly the first half second of flight, fading out: enough to read
+      // departure angle and which way the wind is bending it, not enough to
+      // hand over the landing spot.
+      const SHORT = 34;
+      const n = Math.min(SHORT, pts.length);
+      ctx.fillStyle = t.color;
+      for (let i = 2; i < n; i += 3) {
+        ctx.globalAlpha = 0.5 * (1 - i / SHORT);
+        ctx.beginPath();
+        ctx.arc(pts[i][0], pts[i][1], 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    // sky
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, theme.skyTop);
+    skyGrad.addColorStop(1, theme.skyBot);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    drawDecor();
+    drawWindStreaks();
+
+    // terrain
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x < terrain.length; x += 2) {
+      ctx.lineTo(x, terrain[x]);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    const groundGrad = ctx.createLinearGradient(0, H * 0.3, 0, H);
+    groundGrad.addColorStop(0, theme.ground1);
+    groundGrad.addColorStop(1, theme.ground2);
+    ctx.fillStyle = groundGrad;
+    ctx.fill();
+    ctx.strokeStyle = theme.rim;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // tanks
+    tanks.forEach(t => { if (t.alive) drawTank(t); });
+
+    drawHeli();
+    drawAimPreview();
+
+    // trails and shells, one set per warhead in the air
+    for (const p of projectiles) {
+      if (p.trail.length > 1) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        p.trail.forEach((pt, idx) => idx === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
+        ctx.stroke();
+      }
+      const pw = WEAPONS[p.weapon];
+      ctx.fillStyle = pw.color;
+      if (p.rolling) {
+        // A rolling mine reads as a spiked drum sitting on the ground, and the
+        // spin direction shows which way it is travelling.
+        const r = 6;
+        const cy = p.y - r;
+        const spin = p.x / r;
+        ctx.strokeStyle = pw.color;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 6; i++) {
+          const a = spin + i * Math.PI / 3;
+          ctx.beginPath();
+          ctx.moveTo(p.x + Math.cos(a) * r, cy + Math.sin(a) * r);
+          ctx.lineTo(p.x + Math.cos(a) * (r + 3), cy + Math.sin(a) * (r + 3));
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(p.x, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (pw.guides) {
+        // Pointed along its heading, so the nose-over at apex is visible, with
+        // a flame out the back while the motor is lit.
+        const a = Math.atan2(p.vy, p.vx);
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(a);
+        if (p.burnLeft > 0) {
+          ctx.fillStyle = '#ffb03a';
+          ctx.beginPath();
+          ctx.moveTo(-5, 0);
+          ctx.lineTo(-11 - Math.random() * 5, 2.2);
+          ctx.lineTo(-11 - Math.random() * 5, -2.2);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.fillStyle = pw.color;
+        ctx.beginPath();
+        ctx.moveTo(7, 0);
+        ctx.lineTo(-5, 3);
+        ctx.lineTo(-5, -3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // An unsplit MIRV is drawn fatter than the warheads it carries.
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, WEAPONS[p.weapon].mirvCount && !p.split ? 6 : 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // explosions
+    explosions.forEach(e => {
+      const alpha = Math.max(0, 1 - e.r / e.maxR);
+      const grad = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r);
+      grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      grad.addColorStop(0.4, e.color);
+      grad.addColorStop(1, 'rgba(255,80,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // particles
+    particles.forEach(p => {
+      const alpha = 1 - p.age / p.life;
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+      ctx.globalAlpha = 1;
+    });
+
+    // Only one wind readout at a time: the bar's pill where it fits, this otherwise.
+    // The gauge is UI sitting on top of the battlefield, not part of it: drawn
+    // in CSS pixels so its text stays the same readable size whether the world
+    // is 1400px wide or 390px wide.
+    if (!hudWindVisible) {
+      screenTransform();
+      drawWindGauge();
+      worldTransform();
+    }
+  }
+
+  // ---------- Boot ----------
+  // The canvas is sized entirely in resize() now, so missing a size change
+  // leaves the playfield visibly wrong rather than merely blurry — the old
+  // width:100% canvas used to paper over a late measurement. Watching the box
+  // itself catches every cause (orientation, browser chrome, a layout shift,
+  // a wrapping control row), not just the ones that raise a window event.
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(resize).observe(gameWrap);
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 150));
+  // Mobile browsers resize the visual viewport when the address bar hides/shows
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize);
+  }
+  resize();
+  buildInfo.textContent = BUILD;
+  pruneWeaponOptions();
+  initLanguage();
+  refreshOpponentUi();
+  resetGame();
+  requestAnimationFrame(step);
+  // iOS Safari can report stale/zero layout on first paint; re-measure shortly after.
+  setTimeout(resize, 60);
+  setTimeout(resize, 400);
+  window.addEventListener('load', resize);
+
+  // ---------- Test seam ----------
+  // The game is one IIFE inside one file (it ships as a single self-contained
+  // page), so tests/ reaches in through here to drive the physics, the AI and
+  // the turn machinery directly. Nothing in the game itself reads this object.
+  window.__BARRAGE_TEST__ = {
+    BUILD, WEAPONS, MISSILE, DIFFICULTY_SETTINGS, GRAVITY, TANK_W, TANK_H, MAX_HP,
+    WIND_MAX, MAX_PLAYERS, THEMES, SIM_W, SIM_H,
+    groundHeightAt, craterAt, bedrockY, newTerrain, buildTerrainFromShape,
+    placeTanks, levelTankPads, groundGradientAt, buildTanks,
+    freshAmmo, weaponEnabled, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
+    fire, applyDamageAndCrater, stepProjectile, stepRoller, detonateRoller, splitMirv,
+    armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
+    endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
+    setWind, windStrength, windForce, isAi, txt, upper, playerName,
+    syncControlsFromTank, updateHUD, nudge,
+    heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
+    el: {
+      weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
+      powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner, ammoReadout,
+      nudgeBtns, cards, hpText, langCheckbox
+    },
+    get tanks() { return tanks; }, set tanks(v) { tanks = v; },
+    get terrain() { return terrain; }, set terrain(v) { terrain = v; },
+    get wind() { return wind; }, set wind(v) { wind = v; },
+    get state() { return state; }, set state(v) { state = v; },
+    get currentPlayer() { return currentPlayer; }, set currentPlayer(v) { currentPlayer = v; },
+    get projectiles() { return projectiles; }, set projectiles(v) { projectiles = v; },
+    get clusterQueue() { return clusterQueue; }, set clusterQueue(v) { clusterQueue = v; },
+    get heli() { return heli; }, set heli(v) { heli = v; },
+    get cpuMode() { return cpuMode; }, set cpuMode(v) { cpuMode = v; },
+    get aiDifficulty() { return aiDifficulty; }, set aiDifficulty(v) { aiDifficulty = v; },
+    get playerCount() { return playerCount; }, set playerCount(v) { playerCount = v; },
+    get lang() { return lang; },
+    get W() { return W; }, get H() { return H; }, get physScale() { return physScale; },
+    get viewScale() { return viewScale; }, get viewW() { return viewW; }, get viewH() { return viewH; },
+    get turnToken() { return turnToken; }, get lastWinner() { return lastWinner; },
+    get shotExploded() { return shotExploded; },
+    get explosions() { return explosions; }, get particles() { return particles; }
+  };
+})();
+</script>
+</body>
+</html>

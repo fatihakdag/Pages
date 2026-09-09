@@ -5,9 +5,10 @@
 // Node's built-in WebSocket. Use it to *see* a CSS or render change instead of
 // assuming it worked.
 //
-//   node tools/shots.mjs                    # every viewport -> /tmp/barrage-shots
-//   node tools/shots.mjs portrait desktop   # just these
-//   node tools/shots.mjs --out shots/       # somewhere else
+//   node tools/shots.mjs                        # every viewport -> /tmp/barrage-shots
+//   node tools/shots.mjs portrait desktop       # just these
+//   node tools/shots.mjs --out shots/           # somewhere else
+//   node tools/shots.mjs --page multiplayer/index.html   # the online build
 //
 // Chrome's --window-size flag is not usable here: Chrome clamps it, so a
 // "390px" window lays out at 500px and the screenshot is a crop of the wrong
@@ -49,19 +50,21 @@ const CHROME_CANDIDATES = [
 function parseArgs(argv) {
   const names = [];
   let out = process.env.BARRAGE_SHOT_DIR || join(tmpdir(), 'barrage-shots');
+  let page = 'index.html';
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--out' || a === '-o') out = argv[++i];
+    else if (a === '--page' || a === '-p') page = argv[++i];
     else if (a === '--help' || a === '-h') { usage(); process.exit(0); }
     else if (a.startsWith('-')) { console.error(`unknown option: ${a}`); process.exit(2); }
     else if (!(a in VIEWPORTS)) { console.error(`unknown viewport: ${a}`); usage(); process.exit(2); }
     else names.push(a);
   }
-  return { names: names.length ? names : Object.keys(VIEWPORTS), out };
+  return { names: names.length ? names : Object.keys(VIEWPORTS), out, page };
 }
 
 function usage() {
-  console.log('usage: node tools/shots.mjs [--out DIR] [viewport...]\n\nviewports:');
+  console.log('usage: node tools/shots.mjs [--out DIR] [--page FILE] [viewport...]\n\nviewports:');
   for (const [name, v] of Object.entries(VIEWPORTS)) {
     console.log(`  ${name.padEnd(16)} ${String(v.w + 'x' + v.h).padEnd(10)} ${v.note}`);
   }
@@ -117,7 +120,7 @@ function connect(url) {
   };
 }
 
-const { names, out } = parseArgs(process.argv.slice(2));
+const { names, out, page } = parseArgs(process.argv.slice(2));
 
 const chrome = CHROME_CANDIDATES.find(p => existsSync(p));
 if (!chrome) {
@@ -179,7 +182,7 @@ try {
     }, sessionId);
 
     const loaded = new Promise((ok) => { onLoad = ok; });
-    await cdp.send('Page.navigate', { url: `file://${join(ROOT, 'index.html')}` }, sessionId);
+    await cdp.send('Page.navigate', { url: `file://${join(ROOT, page)}` }, sessionId);
     await loaded;
     // The game re-measures on timers at 60ms and 400ms after boot; wait past
     // both so the canvas in the shot is the settled layout, not the first paint.
