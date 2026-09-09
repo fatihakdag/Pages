@@ -2358,7 +2358,11 @@
   function step(ts) {
     if (lastTime === null) lastTime = ts;
     let dt = (ts - lastTime) / 1000;
-    dt = Math.min(dt, 0.033);
+    // Clamped at both ends. The ceiling keeps a long stall from teleporting a
+    // shell through the ground; the floor guards against a timestamp that goes
+    // backwards — which a negative dt turns into a negative explosion radius,
+    // and createRadialGradient throws on that, killing the render loop.
+    dt = Math.max(0, Math.min(dt, 0.033));
     lastTime = ts;
 
     if (state === 'FIRING') {
@@ -3210,7 +3214,7 @@
   // the page is static, so there is no socket at its own origin; set this to
   // the deployed relay's host. Empty means "same origin", which is what local
   // development wants (`npm run relay` serves the page and relays on one port).
-  const DEFAULT_RELAY = '';
+  const DEFAULT_RELAY = 'wss://barrage-relay.fly.dev';
 
   function relayUrl() {
     const override = new URLSearchParams(location.search).get('relay');
