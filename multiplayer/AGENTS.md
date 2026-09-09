@@ -141,7 +141,10 @@ Other things worth knowing:
   the CPU, which plays *that* turn rather than letting another lapse, and the
   tank stays in the game. Taking a turn at any point clears the count and hands
   the seat back; a CPU-played turn is marked `ai: true` so it is not mistaken
-  for the player returning.
+  for the player returning. A stand-in always plays at `TURN_AI_LEVEL`
+  (medium), not at the client's own difficulty setting — that control is hidden
+  during a match, so its value is only whatever that player last chose locally,
+  and a substitute's strength would otherwise depend on whose browser stood in.
 - `netActsForSeat()` decides which client speaks for a seat that cannot speak
   for itself — calling its deadline, and playing it once the CPU has it. It is
   the lowest living seat that is still a real player and is not this one:

@@ -195,3 +195,25 @@ test('offline play has no deadline at all', () => {
   assert.equal(h.g.tanks[0].alive, true, 'nobody is timed out of a local game');
   assert.equal(h.g.netTurnSecondsLeft(), null, 'and no clock is shown');
 });
+
+test('a stand-in plays at a fixed level, not the local difficulty setting', () => {
+  assert.equal(loadFlat().g.TURN_AI_LEVEL, 'medium');
+
+  // Two clients with wildly different local settings must produce the same
+  // substitute, since the difficulty control is hidden during a match and its
+  // value is only whatever that player last picked in a local game.
+  const shotFrom = (localLevel) => {
+    const { me } = matchOf(2, 1);
+    me.g.aiDifficulty = localLevel;
+    me.placeTanksAt([200, 700]);
+    me.g.currentPlayer = 0;
+    me.g.state = 'AIMING';
+    me.g.online.aiSeats.push(0);
+    me.seedRandom(4242);           // same jitter both times
+    me.g.netPlayAiTurn();
+    me.advance(3000);
+    return [me.g.tanks[0].angle, me.g.tanks[0].power];
+  };
+  assert.deepEqual(shotFrom('easy'), shotFrom('brutal'),
+    'the substitute is the same whoever is standing in');
+});

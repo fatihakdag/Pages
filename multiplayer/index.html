@@ -3250,6 +3250,12 @@
   // and plays it, so the game keeps moving without anyone being knocked out of
   // it. Taking a turn at any point clears the count and hands the seat back.
   const TURN_MISS_LIMIT = 2;
+  // A stand-in plays at a fixed level rather than at whatever the client
+  // running it happens to have selected. That control is hidden during a match,
+  // so its value is just whatever that player last chose in a local game —
+  // which would make a substitute's strength depend on which opponent's browser
+  // was doing the standing in.
+  const TURN_AI_LEVEL = 'medium';
   let turnDeadline = 0;   // performance.now() by which the current seat must fire
 
   const online = {
@@ -3320,7 +3326,7 @@
       turnToken === token && state === 'AIMING' && currentPlayer === seat;
     setTimeout(() => {
       if (!stillTheirTurn()) return;
-      const shot = chooseAiShot(aiDifficulty);
+      const shot = chooseAiShot(TURN_AI_LEVEL);
       const t = tanks[seat];
       t.angle = shot.angle;
       t.power = shot.power;
@@ -3800,7 +3806,7 @@
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
-    netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT,
+    netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },
