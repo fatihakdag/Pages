@@ -913,6 +913,7 @@
       netOffline: 'off', netConnecting: 'connecting…', netWaiting: 'code {code} — waiting',
       netPlaying: 'room {code}', netEnded: 'opponent left',
       netTheirTurn: '{name} — THEIR TURN', netYouAre: 'you are {name}',
+      netAway: 'opponent is away', netAwayTurn: '{name} — AWAY',
       netNoRoom: 'no such room', netFull: 'room is full',
       netVersion: 'update the page', netLost: 'connection lost',
     },
@@ -943,6 +944,7 @@
       netOffline: 'kapalı', netConnecting: 'bağlanıyor…', netWaiting: 'kod {code} — bekleniyor',
       netPlaying: 'oda {code}', netEnded: 'rakip ayrıldı',
       netTheirTurn: '{name} — SIRA ONDA', netYouAre: 'sen {name}',
+      netAway: 'rakip başka yerde', netAwayTurn: '{name} — BAŞKA YERDE',
       netNoRoom: 'oda bulunamadı', netFull: 'oda dolu',
       netVersion: 'sayfayı yenileyin', netLost: 'bağlantı koptu',
       'Rust Canyon': 'Pas Kanyonu'
@@ -1612,7 +1614,12 @@
       turnBanner.textContent = txt('inFlight');
     } else {
       const who = upper(playerName(currentPlayer));
-      turnBanner.textContent = txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
+      // A hidden tab has its animation loop throttled, so that player's game
+      // simply stops. Saying so beats a banner that looks like an ordinary wait.
+      const theirTurnAndAway = online.peerAway && netRemoteSeat(currentPlayer);
+      turnBanner.textContent = theirTurnAndAway
+        ? txt('netAwayTurn', { name: who })
+        : txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
     }
   }
 
@@ -3217,6 +3224,7 @@
     status: 'offline', // offline | connecting | waiting | playing | ended
     error: null,
     vacant: null,      // a seat whose player left, kept open for whoever arrives
+    peerAway: false,   // their window is hidden, so their game loop is stopped
 
     pendingSync: null  // a sync that arrived while a shot was still in the air
   };
@@ -3249,7 +3257,9 @@
     if (online.error) return online.error;
     if (online.status === 'connecting') return txt('netConnecting');
     if (online.status === 'waiting') return txt('netWaiting', { code: online.room });
-    if (online.status === 'playing') return txt('netPlaying', { code: online.room });
+    if (online.status === 'playing') {
+      return online.peerAway ? txt('netAway') : txt('netPlaying', { code: online.room });
+    }
     if (online.status === 'ended') return txt('netEnded');
     return txt('netOffline');
   }
@@ -3345,6 +3355,7 @@
       // deadlock a rejoin: the remaining player still believed it was a guest,
       // so nobody was willing to deal a new match.
       online.host = (m.host === online.id);
+      online.peerAway = false;   // they are not away, they are gone
       const seat = online.seats.indexOf(m.id);
       if (seat >= 0) {
         online.seats[seat] = null;
@@ -3366,6 +3377,7 @@
     if (d.k === 'rematch' && online.host) { netRestartMatch(); return; }
 
     if (d.k === 'start') {
+      online.peerAway = false;
       online.seats = d.seats;
       online.seat = d.seats.indexOf(online.id);
       online.status = 'playing';
@@ -3389,6 +3401,13 @@
       t.power = d.power;
       t.weapon = d.weapon;
       fire();
+      return;
+    }
+
+    if (d.k === 'away') {
+      online.peerAway = !!d.hidden;
+      refreshOnlineUi();
+      updateHUD();
       return;
     }
 
@@ -3533,6 +3552,16 @@
     netSend('sync', { state: netSnapshot() });
   }
 
+  // Sent as the tab hides, which is the last moment this page runs normally:
+  // once hidden, requestAnimationFrame is throttled and the game loop stops.
+  // The message still goes out here, so the other player learns why we have
+  // gone quiet instead of watching a match that appears to hang.
+  function netReportVisibility() {
+    if (!netPlaying()) return;
+    netSend('away', { hidden: !!document.hidden });
+  }
+  document.addEventListener('visibilitychange', netReportVisibility);
+
   function netLeave() {
     if (online.ws) online.ws.close();
   }
@@ -3586,7 +3615,7 @@
     endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
-    netRestartMatch, netResumeMatch, onRestartClicked,
+    netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
     netPlaying, NET_PROTOCOL,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },
