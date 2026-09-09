@@ -2580,6 +2580,9 @@
   // happens to be - the bar's pill above 900px, the canvas gauge below it.
   function summonHeli() {
     if (heli || state === 'GAMEOVER' || !terrain.length) return;
+    // In a match, calling one in on someone else's turn would conjure it for us
+    // alone until the next snapshot wiped it again.
+    if (!heliAuthority()) return;
     spawnHeli();
     heliTimer = 120 + Math.random() * 60; // don't let a scheduled one pile in behind it
   }
@@ -2706,10 +2709,22 @@
     camClamp();
   }
 
+  /**
+   * Who decides what the helicopter does. Offline that is us; in a match it is
+   * whoever's turn it is, and their snapshot carries the result to everyone
+   * else. Without this each client runs its own arrival timer and its own
+   * Math.random, so one player is shooting at a helicopter the other cannot
+   * see — and the two disagree about whether the shot hit anything.
+   *
+   * Movement is not gated: it is the same arithmetic from the same state on
+   * both sides, and any drift is erased by the next sync.
+   */
+  function heliAuthority() { return !netPlaying() || currentPlayer === online.seat; }
+
   function updateHeli(dt) {
     rotorAngle += dt * 26;
     if (!heli) {
-      if (state !== 'GAMEOVER') {
+      if (state !== 'GAMEOVER' && heliAuthority()) {
         heliTimer -= dt;
         if (heliTimer <= 0) { spawnHeli(); heliTimer = 120 + Math.random() * 60; }
       }
@@ -2719,6 +2734,7 @@
     if (!heli.falling) {
       heli.x += heli.dir * heli.speed * dt;
       if (heli.x < -w * 1.5 || heli.x > W + w * 1.5) {
+        if (!heliAuthority()) return; // our copy waits off-screen for the sync
         heli.legs++;
         const allHadATurn = tanks.every((t, i) => !t.alive || heli.seen.has(i));
         if ((allHadATurn && heli.legs >= HELI_MIN_LEGS) || heli.legs >= HELI_MAX_LEGS) {
@@ -2746,6 +2762,7 @@
         color: Math.random() < 0.5 ? '#59606b' : '#ff7a45'
       });
     }
+    if (!heliAuthority()) return; // the wreck is theirs to report
     if (heli.x < -60 || heli.x > W + 60) { heli = null; return; } // fell off the map
     if (heli.y >= groundHeightAt(heli.x) - 4) {
       const cx = Math.max(0, Math.min(W - 1, heli.x));
@@ -3465,7 +3482,16 @@
       })),
       wind, currentPlayer, state,
       theme: THEMES.indexOf(theme),
-      heli: heli ? { x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed, falling: heli.falling } : null
+      // The whole helicopter, not a sketch of it: a falling one that loses vy
+      // and spin lands somewhere different, and legs/seen decide when it
+      // leaves. heliTimer travels too, so both sides expect the next one at
+      // the same moment rather than each running its own clock.
+      heliTimer,
+      heli: heli ? {
+        x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed,
+        vy: heli.vy, falling: heli.falling, spin: heli.spin, legs: heli.legs,
+        seen: [...heli.seen]
+      } : null
     };
   }
 
@@ -3486,7 +3512,10 @@
     wind = snap.wind;
     currentPlayer = snap.currentPlayer;
     state = snap.state;
-    heli = snap.heli ? { ...(heli || {}), ...snap.heli, seen: (heli && heli.seen) || new Set() } : null;
+    // Rebuilt from the snapshot rather than merged over whatever we had, so a
+    // stale local helicopter cannot leave fields behind.
+    heli = snap.heli ? { ...snap.heli, seen: new Set(snap.heli.seen || []) } : null;
+    if (typeof snap.heliTimer === 'number') heliTimer = snap.heliTimer;
     projectiles = [];
     clusterQueue = [];
     setWind();
@@ -3576,6 +3605,7 @@
     get projectiles() { return projectiles; }, set projectiles(v) { projectiles = v; },
     get clusterQueue() { return clusterQueue; }, set clusterQueue(v) { clusterQueue = v; },
     get heli() { return heli; }, set heli(v) { heli = v; },
+    get heliTimer() { return heliTimer; }, set heliTimer(v) { heliTimer = v; },
     get cpuMode() { return cpuMode; }, set cpuMode(v) { cpuMode = v; },
     get aiDifficulty() { return aiDifficulty; }, set aiDifficulty(v) { aiDifficulty = v; },
     get playerCount() { return playerCount; }, set playerCount(v) { playerCount = v; },

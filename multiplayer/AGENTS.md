@@ -151,6 +151,9 @@ Other things worth knowing:
   throttling as the backgrounded-tab gap above.
 - The opponents select still reads "vs CPU" during a match; it should show and
   lock to the online roster.
+- A backgrounded tab is still the one unrecoverable state: it does not
+  disconnect, so no `gone` arrives and the seat is never freed. A turn timer is
+  what closes it.
 
 ## Still to build
 
@@ -160,11 +163,12 @@ Other things worth knowing:
   deals the same seats a fresh board, and a player who drops leaves their seat
   open (`online.vacant`) so the next arrival is handed the board as it stands
   rather than starting over. Both go out as the ordinary `start` message.
-- **Authority for everything a turn rolls.** `setWind()`, helicopter spawning
-  and the double-click `summonHeli()` are all `Math.random()` today. Wind
-  survives because the snapshot carries it, but the helicopter does not: it runs
-  on a wall clock (`heliTimer`, in seconds) that means nothing across two
-  machines, and a locally summoned one is a private hallucination. Tie it to
-  turn count and put it in the snapshot.
+- **Wind** is still rolled locally by each client in `nextTurn()`. It survives
+  only because the actor's snapshot overwrites it moments later, so a lost or
+  late `sync` would leave the receiver aiming against the wrong wind. The
+  helicopter is done: `heliAuthority()` gives the seat holding the turn sole say
+  over arrivals, legs, crashes and `summonHeli()`, and the snapshot carries the
+  whole aircraft plus `heliTimer`. Movement is deliberately not gated — it is
+  the same arithmetic on both sides, and drift is erased each turn.
 - **More than two seats.** The protocol deals N seats already, but the host
   hard-codes a two-player match.
