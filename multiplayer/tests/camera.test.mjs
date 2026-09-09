@@ -269,3 +269,42 @@ test('the zoom buttons keep following the action; a drag or pinch takes over', (
   g.camFollow(0.5);
   assert.equal(g.camX, held, 'and following leaves it alone');
 });
+
+test('the view holds on the impact instead of swinging back to the shooter', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.flatTerrain(400);
+  h.placeTanksAt([160, 840]);
+  g.wind = 0;
+  g.currentPlayer = 0;
+  g.tanks[0].angle = 45;
+  g.tanks[0].power = 70;
+  g.state = 'AIMING';
+  g.camZoomTo(3);
+  h.advance(600); // settle on the shooter
+
+  g.fire();
+  h.advanceUntil(() => g.state === 'EXPLODING' || g.state === 'AIMING');
+  assert.equal(g.state, 'EXPLODING', 'the shell landed');
+
+  const shooterX = g.tanks[0].x;
+  const atImpact = g.camX;
+  assert.ok(Math.abs(atImpact - shooterX) > 100,
+    `the view is downrange at impact, not on the shooter: cam ${atImpact.toFixed(0)}, tank ${shooterX}`);
+
+  // Through the whole explosion the view must not drift back toward the seat
+  // that fired -- it is still currentPlayer until the turn advances.
+  for (let i = 0; i < 10 && g.state === 'EXPLODING'; i++) {
+    h.advance(50);
+    assert.ok(Math.abs(g.camX - atImpact) < 1e-6,
+      `the view moved during the explosion: ${atImpact.toFixed(0)} -> ${g.camX.toFixed(0)}`);
+  }
+
+  // Once the turn changes it goes to the new player, and only then.
+  h.advanceUntil(() => g.state === 'AIMING');
+  assert.equal(g.currentPlayer, 1);
+  h.advance(1500);
+  const centre = g.camX + g.camViewW() / 2;
+  assert.ok(Math.abs(centre - g.tanks[1].x) < 60,
+    `and settles on the next player: ${centre.toFixed(0)} vs ${g.tanks[1].x}`);
+});

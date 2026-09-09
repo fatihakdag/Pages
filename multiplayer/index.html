@@ -2681,11 +2681,17 @@
   function camFollow(dt) {
     if (camZoom <= CAM_MIN) return;
     let target = null;
-    if (projectiles.length) target = projectiles[0];          // the shell in the air
-    else if (!camPanned && tanks[currentPlayer]) {
+    if (projectiles.length) {
+      target = projectiles[0];                                // the shell in the air
+    } else if (state === 'AIMING' && !camPanned && tanks[currentPlayer]) {
       const t = tanks[currentPlayer];
       target = { x: t.x, y: groundHeightAt(t.x) - TANK_H };
     }
+    // Nothing to chase between the shell landing and the turn changing: the
+    // camera holds on the impact. Following the seat here would swing back to
+    // the player who just fired -- who is still `currentPlayer` until
+    // nextTurn() runs -- and then straight off to the next one, so you would
+    // watch the view travel to your own tank for no reason before it left.
     if (!target) return;
     const wantX = Math.min(SIM_W - camViewW(), Math.max(0, target.x - camViewW() / 2));
     const wantY = Math.min(SIM_H - camViewH(), Math.max(0, target.y - camViewH() / 2));
