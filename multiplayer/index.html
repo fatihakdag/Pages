@@ -492,6 +492,10 @@
       align-items: start;
     }
     .ctrl-group { min-width: 0; }
+    /* The world cannot use a portrait screen's full height, so the slack is
+       here: aiming is the thing you touch every turn, and a half-width slider
+       between two arrow buttons is a cramped target. Give each its own row. */
+    #angle-group, #power-group { grid-column: 1 / -1; }
     .ctrl-label { font-size: 9px; }
     #controls select {
       width: 100%;
@@ -513,6 +517,8 @@
   /* Very short screens: shrink the sliders row further */
   @media (max-height: 500px) and (orientation: portrait) {
     #game-wrap { min-height: 90px; }
+    /* No slack to spend here — pair them up again. */
+    #angle-group, #power-group { grid-column: auto; }
     #fire-btn { padding: 10px; font-size: 13px; }
     #controls { gap: 6px 10px; padding: 6px 8px 8px; }
   }
@@ -666,7 +672,7 @@
   </div>
 
   <div id="controls">
-    <div class="ctrl-group">
+    <div class="ctrl-group" id="angle-group">
       <div class="ctrl-label"><span data-i18n="angle">ANGLE</span> <span class="val" id="angle-val">45°</span></div>
       <div class="slider-row">
         <button type="button" class="nudge" id="angle-left" aria-label="Aim one degree left">◀</button>
@@ -674,7 +680,7 @@
         <button type="button" class="nudge" id="angle-right" aria-label="Aim one degree right">▶</button>
       </div>
     </div>
-    <div class="ctrl-group">
+    <div class="ctrl-group" id="power-group">
       <div class="ctrl-label"><span data-i18n="power">POWER</span> <span class="val" id="power-val">50</span></div>
       <div class="slider-row">
         <button type="button" class="nudge" id="power-dec" aria-label="Power down one">◀</button>
@@ -692,7 +698,6 @@
         <option value="mirv">MIRV</option>
         <option value="missile">Guided Missile</option>
       </select>
-      <div class="ctrl-label" id="ammo-readout" style="margin-top:2px;"></div>
     </div>
     <div class="ctrl-group">
       <div class="ctrl-label" data-i18n="tanks">TANKS</div>
@@ -815,7 +820,6 @@
   const angleVal = document.getElementById('angle-val');
   const powerVal = document.getElementById('power-val');
   const weaponSelect = document.getElementById('weapon-select');
-  const ammoReadout = document.getElementById('ammo-readout');
   const fireBtn = document.getElementById('fire-btn');
   const turnBanner = document.getElementById('turn-banner');
   const buildInfo = document.getElementById('build-info');
@@ -1016,8 +1020,6 @@
     const t = tanks[currentPlayer];
     if (!t) return;
     t.weapon = weaponSelect.value; // the choice belongs to this tank, not the control
-    const remaining = t.ammo[t.weapon];
-    ammoReadout.textContent = remaining === Infinity ? txt('unlimited') : txt('nLeft', { n: remaining });
   });
 
   // ---------- World vs view ----------
@@ -1565,8 +1567,6 @@
     // (or been switched off) falls back to the standard shell.
     if (!weaponAvailable(t, t.weapon)) t.weapon = 'standard';
     weaponSelect.value = t.weapon;
-    const curRemaining = t.ammo[t.weapon];
-    ammoReadout.textContent = curRemaining === Infinity ? txt('unlimited') : txt('nLeft', { n: curRemaining });
   }
 
   angleSlider.addEventListener('input', () => {
@@ -3276,7 +3276,7 @@
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
-      powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner, ammoReadout,
+      powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner,
       nudgeBtns, cards, hpText, langCheckbox
     },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },

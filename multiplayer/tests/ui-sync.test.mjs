@@ -62,7 +62,14 @@ test('a seat holding a weapon it has run out of falls back to the shell', () => 
 
   assert.equal(t.weapon, 'standard');
   assert.equal(g.el.weaponSelect.value, 'standard');
-  assert.ok(g.el.ammoReadout.textContent.length > 0, 'the readout says something');
+
+  // The option labels are the only place the count is shown now, so they have
+  // to carry it — the separate readout under the select was removed as a
+  // duplicate of exactly this.
+  const opt = k => g.el.weaponSelect.options.find(o => o.value === k);
+  assert.match(opt('standard').textContent, /\(∞\)$/, 'unlimited ammo is spelled out');
+  assert.match(opt('mirv').textContent, /\(0\)$/, 'and an empty weapon shows zero');
+  assert.equal(opt('mirv').disabled, true, 'and cannot be chosen');
 });
 
 test('the aim arrows step angle and power inside their limits', () => {
