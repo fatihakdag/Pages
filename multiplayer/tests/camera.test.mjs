@@ -173,15 +173,25 @@ test('a deliberate pan is not yanked away, and is released on the next turn', ()
   assert.ok(g.camX < looking, 'and settles back on the active tank once released');
 });
 
-test('fitted, there is nothing to pan and the controls say so', () => {
+test('the view controls only offer what is actually possible', () => {
   const h = load();
   const { g } = h;
+
   g.camFit();
-  assert.equal(h.el('zoom-out').disabled, true);
-  assert.equal(h.el('zoom-fit').disabled, true);
+  // Nothing to zoom out of and nothing to fit: those two are not shown at all.
+  assert.equal(h.el('zoom-out').hidden, true);
+  assert.equal(h.el('zoom-fit').hidden, true);
+  assert.equal(h.el('zoom-in').hidden, false);
   assert.equal(h.el('zoom-in').disabled, false);
 
+  g.camZoomTo(2);
+  assert.equal(h.el('zoom-out').hidden, false, 'they come back once zoomed');
+  assert.equal(h.el('zoom-fit').hidden, false);
+
   g.camZoomTo(g.CAM_MAX);
-  assert.equal(h.el('zoom-in').disabled, true, 'nor in past the limit');
+  // "+" stays put, disabled: hiding it would slide "−" under a finger that is
+  // already tapping "+", so the next tap would undo the zoom.
+  assert.equal(h.el('zoom-in').hidden, false, 'still shown at the limit');
+  assert.equal(h.el('zoom-in').disabled, true, 'but does nothing');
   assert.equal(h.el('zoom-out').disabled, false);
 });

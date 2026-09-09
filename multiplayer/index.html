@@ -2655,9 +2655,17 @@
   zoomFitBtn.addEventListener('click', camFit);
 
   function refreshViewUi() {
+    const fitted = camZoom <= CAM_MIN + 1e-6;
+    // Fitted, there is nothing to zoom out of and nothing to fit, so those two
+    // go away rather than sitting there greyed: at rest the cluster is a single
+    // "+". They are to the LEFT of "+", which never moves, so nothing slides
+    // under a finger that is already on it.
+    zoomOutBtn.hidden = fitted;
+    zoomFitBtn.hidden = fitted;
+    // "+" is kept at maximum zoom, disabled. Hiding it would drag the other two
+    // rightwards mid-tap — you press "+" to the limit and the next press lands
+    // on "−", undoing what you just did.
     zoomInBtn.disabled = camZoom >= CAM_MAX - 1e-6;
-    zoomOutBtn.disabled = camZoom <= CAM_MIN + 1e-6;
-    zoomFitBtn.disabled = camZoom <= CAM_MIN + 1e-6;
   }
 
   /**
