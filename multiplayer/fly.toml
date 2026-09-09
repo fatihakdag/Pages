@@ -1,0 +1,41 @@
+# Barrage match relay.
+#
+#   fly launch --copy-config --no-deploy   (first time: picks a name and region)
+#   fly deploy
+#
+# One small machine is plenty: a turn is one message, and the relay holds only
+# room membership.
+app = "barrage-relay"
+primary_region = "fra"
+
+[build]
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  # The game is served over https, and browsers refuse ws:// from an https://
+  # page — so the relay has to be reachable as wss://, which this gives us.
+  force_https = true
+  auto_start_machines = true
+  # Machines idle down when nobody is connected and wake on the next request.
+  # Fly counts an open WebSocket as activity, so a match in progress keeps its
+  # machine up; only an empty lobby stops.
+  auto_stop_machines = "suspend"
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 200
+    soft_limit = 100
+
+[[http_service.checks]]
+  path = "/health"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

@@ -3206,9 +3206,18 @@
   // Overridable so tests can drive the protocol without a real socket.
   let socketFactory = (url) => new WebSocket(url);
 
+  // Where the relay lives when this page is not being served by it. On Pages
+  // the page is static, so there is no socket at its own origin; set this to
+  // the deployed relay's host. Empty means "same origin", which is what local
+  // development wants (`npm run relay` serves the page and relays on one port).
+  const DEFAULT_RELAY = '';
+
   function relayUrl() {
     const override = new URLSearchParams(location.search).get('relay');
     if (override) return override;
+    // Local development is http and served by the relay itself; production is
+    // https from a static host that cannot relay anything.
+    if (DEFAULT_RELAY && location.protocol === 'https:') return DEFAULT_RELAY;
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${scheme}//${location.host}`;
   }
