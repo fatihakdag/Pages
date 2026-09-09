@@ -99,6 +99,15 @@ copy of the physics to keep in sync.
 Its own package, so the game itself stays dependency-free and the root
 `npm test` still needs no install.
 
+**It idles down on its own, and the platform's autostop is off.** Fly once
+suspended a machine mid-match; more fundamentally, the platform cannot see that
+a room is being *held* for a player who might come back, and stopping then
+destroys it. So the relay decides: `IDLE_EXIT_MS` (5 minutes) with no sockets
+and no rooms at all, and it exits; `auto_start_machines` brings it back on the
+next request, in about a second. `ROOM_GRACE_MS` and `SWEEP_MS` are tunable the
+same way. Note a machine stop — or an ordinary redeploy — takes every room with
+it, since they live in memory.
+
 **It runs as exactly one machine.** Rooms are an in-memory `Map`, so a room
 exists only on the process that created it. Deployed with Fly's default of two
 machines, joins round-robin and about half get `NO_ROOM` from a machine that
