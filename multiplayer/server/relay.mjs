@@ -31,7 +31,12 @@ const CODE_LEN = 4;
 const MAX_MEMBERS = 4;        // matches MAX_PLAYERS in the game
 const MAX_FRAME = 64 * 1024;  // a terrain snapshot is a few KB; this is slack
 const MAX_MSGS_PER_SEC = 40;  // a turn is one message; this only stops floods
-const IDLE_ROOM_MS = 60 * 60 * 1000;
+// An empty room is kept this long before it is forgotten. A room used to be
+// destroyed the moment its last member left, so a brief disconnection -- a
+// tunnel, a dropped wifi, both players reloading -- lost the code and the match
+// with it. Holding it lets people come back to the same room.
+const ROOM_GRACE_MS = 5 * 60 * 1000;
+const SWEEP_MS = 30 * 1000;
 const HEARTBEAT_MS = 30 * 1000;
 
 /** @typedef {{id:number,name:string,socket:import('ws').WebSocket,room:Room|null,tokens:number,tokenAt:number}} Member */
@@ -41,15 +46,21 @@ class Room {
     this.code = code;
     this.members = [];
     this.touched = Date.now();
+    this.emptySince = null;  // when the last member left, or null while occupied
   }
   get full() { return this.members.length >= MAX_MEMBERS; }
   /** The first member still present. Clients use this to agree on seating. */
   get hostId() { return this.members.length ? this.members[0].id : null; }
-  add(m) { this.members.push(m); this.touched = Date.now(); }
+  add(m) {
+    this.members.push(m);
+    this.touched = Date.now();
+    this.emptySince = null;
+  }
   remove(m) {
     const i = this.members.indexOf(m);
     if (i >= 0) this.members.splice(i, 1);
     this.touched = Date.now();
+    if (this.members.length === 0) this.emptySince = Date.now();
   }
   /** Send to everyone except `except`. */
   broadcast(payload, except) {
@@ -61,7 +72,9 @@ class Room {
   }
 }
 
-export function createRelay({ serveGame = process.env.SERVE_GAME !== '0' } = {}) {
+export function createRelay({ serveGame = process.env.SERVE_GAME !== '0',
+                             roomGraceMs = ROOM_GRACE_MS,
+                             sweepMs = SWEEP_MS } = {}) {
   /** @type {Map<string, Room>} */
   const rooms = new Map();
   let nextId = 1;
@@ -69,7 +82,10 @@ export function createRelay({ serveGame = process.env.SERVE_GAME !== '0' } = {})
   const http = createServer(async (req, res) => {
     if (req.url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, rooms: rooms.size, protocol: PROTOCOL }));
+      const occupied = [...rooms.values()].filter(r => r.members.length).length;
+      res.end(JSON.stringify({
+        ok: true, rooms: occupied, held: rooms.size - occupied, protocol: PROTOCOL
+      }));
       return;
     }
     if (!serveGame) { res.writeHead(404).end('not found'); return; }
@@ -146,10 +162,11 @@ export function createRelay({ serveGame = process.env.SERVE_GAME !== '0' } = {})
       if (!room) return;
       room.remove(member);
       member.room = null;
-      if (room.members.length === 0) rooms.delete(room.code);
+      // An emptied room is kept for ROOM_GRACE_MS rather than dropped here, so
+      // the code still works if someone comes back. The sweep below collects it.
       // The game decides what a departure means (hand the tank to the AI, wait
       // for a rejoin); the relay only reports it.
-      else room.broadcast({ t: 'gone', id: member.id, host: room.hostId });
+      if (room.members.length) room.broadcast({ t: 'gone', id: member.id, host: room.hostId });
     });
 
     socket.on('error', () => { /* close follows */ });
@@ -169,9 +186,9 @@ export function createRelay({ serveGame = process.env.SERVE_GAME !== '0' } = {})
   const sweep = setInterval(() => {
     const now = Date.now();
     for (const [code, room] of rooms) {
-      if (room.members.length === 0 && now - room.touched > IDLE_ROOM_MS) rooms.delete(code);
+      if (room.emptySince !== null && now - room.emptySince > roomGraceMs) rooms.delete(code);
     }
-  }, IDLE_ROOM_MS);
+  }, sweepMs);
   sweep.unref?.();
 
   return {

@@ -917,6 +917,8 @@
       netPlaying: 'room {code}', netEnded: 'opponent left',
       netTheirTurn: '{name} — THEIR TURN', netYouAre: 'you are {name}',
       netAway: 'opponent is away', netAwayTurn: '{name} — AWAY',
+      netTurnLeft: '{name} — {s}s', netSkipped: '{name} ran out of time',
+      netAiTook: '{name} — CPU TAKING OVER',
       netNoRoom: 'no such room', netFull: 'room is full',
       netVersion: 'update the page', netLost: 'connection lost',
     },
@@ -948,6 +950,8 @@
       netPlaying: 'oda {code}', netEnded: 'rakip ayrıldı',
       netTheirTurn: '{name} — SIRA ONDA', netYouAre: 'sen {name}',
       netAway: 'rakip başka yerde', netAwayTurn: '{name} — BAŞKA YERDE',
+      netTurnLeft: '{name} — {s}sn', netSkipped: '{name} süreyi doldurdu',
+      netAiTook: '{name} — CPU DEVRALIYOR',
       netNoRoom: 'oda bulunamadı', netFull: 'oda dolu',
       netVersion: 'sayfayı yenileyin', netLost: 'bağlantı koptu',
       'Rust Canyon': 'Pas Kanyonu'
@@ -1627,9 +1631,13 @@
       // A hidden tab has its animation loop throttled, so that player's game
       // simply stops. Saying so beats a banner that looks like an ordinary wait.
       const theirTurnAndAway = online.peerAway && netRemoteSeat(currentPlayer);
-      turnBanner.textContent = theirTurnAndAway
-        ? txt('netAwayTurn', { name: who })
-        : txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
+      const left = netTurnSecondsLeft();
+      if (theirTurnAndAway) turnBanner.textContent = txt('netAwayTurn', { name: who });
+      // The last stretch is shown as a countdown, so running out is never a
+      // surprise — to the player thinking, or to the one waiting.
+      else if (netSeatIsAi(currentPlayer)) turnBanner.textContent = txt('netAiTook', { name: who });
+      else if (left !== null && left <= 20) turnBanner.textContent = txt('netTurnLeft', { name: who, s: left });
+      else turnBanner.textContent = txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
     }
   }
 
@@ -1761,12 +1769,15 @@
     if (state !== 'AIMING') return;
     // Sent before the shot is simulated, so the other client starts the same
     // flight at roughly the same moment rather than seeing only the aftermath.
-    if (netPlaying() && currentPlayer === online.seat) {
+    if (netWeDrive(currentPlayer)) {
+      const byAi = netSeatIsAi(currentPlayer);
+      if (!byAi) netSeatResponded(currentPlayer);   // we turned up; the clock resets
       netSend('turn', {
         seat: currentPlayer,
         angle: tanks[currentPlayer].angle,
         power: tanks[currentPlayer].power,
-        weapon: tanks[currentPlayer].weapon
+        weapon: tanks[currentPlayer].weapon,
+        ai: byAi   // so nobody mistakes the CPU playing for the player returning
       });
     }
     const shooter = tanks[currentPlayer];
@@ -1871,10 +1882,12 @@
     setWind();
     state = 'AIMING';
     camPanned = false; // a new turn releases the camera back to whoever is aiming
+    netResetTurnClock();
     updateHUD();
     syncControlsFromTank();
     // The player who took the turn is the authority on how it ended.
     netPublishTurn(actor);
+    netPlayAiTurn();
     if (online.pendingSync) {
       const held = online.pendingSync;
       online.pendingSync = null;
@@ -2447,6 +2460,7 @@
     particles = particles.filter(p => p.age < p.life);
     windPulse = Math.max(0, windPulse - dt * 1.6);
     camFollow(dt);
+    netCheckTurnClock();
     updateHeli(dt);
     updateTimer();
 
@@ -3227,6 +3241,23 @@
 
   const NET_PROTOCOL = 1;
 
+  // A turn nobody takes would otherwise hold the game up for ever: a hidden tab
+  // never disconnects, so no timeout at the socket level can ever fire. The seat
+  // gets a minute, and then it is out of the round.
+  const TURN_LIMIT_MS = 60 * 1000;
+  // Miss one and the turn is simply skipped — someone can be away from the
+  // keyboard for a minute. Miss two in a row and the CPU takes the seat over
+  // and plays it, so the game keeps moving without anyone being knocked out of
+  // it. Taking a turn at any point clears the count and hands the seat back.
+  const TURN_MISS_LIMIT = 2;
+  // A stand-in plays at a fixed level rather than at whatever the client
+  // running it happens to have selected. That control is hidden during a match,
+  // so its value is just whatever that player last chose in a local game —
+  // which would make a substitute's strength depend on which opponent's browser
+  // was doing the standing in.
+  const TURN_AI_LEVEL = 'medium';
+  let turnDeadline = 0;   // performance.now() by which the current seat must fire
+
   const online = {
     ws: null,
     room: null,
@@ -3237,6 +3268,8 @@
     status: 'offline', // offline | connecting | waiting | playing | ended
     error: null,
     vacant: null,      // a seat whose player left, kept open for whoever arrives
+    missed: [],        // consecutive turns each seat has let run out
+    aiSeats: [],       // seats the CPU is playing until their player returns
     peerAway: false,   // their window is hidden, so their game loop is stopped
 
     pendingSync: null  // a sync that arrived while a shot was still in the air
@@ -3244,6 +3277,94 @@
 
   /** True once we are in a match, as opposed to merely connected. */
   function netPlaying() { return online.status === 'playing'; }
+
+  /** Restart the clock for whoever is about to aim. */
+  function netResetTurnClock() { turnDeadline = performance.now() + TURN_LIMIT_MS; }
+
+  /** Whole seconds left, or null when no clock is running. */
+  function netTurnSecondsLeft() {
+    if (!netPlaying() || state !== 'AIMING') return null;
+    return Math.max(0, Math.ceil((turnDeadline - performance.now()) / 1000));
+  }
+
+  function netSeatIsAi(seat) { return online.aiSeats.includes(seat); }
+
+  /**
+   * Which client speaks for a seat that cannot speak for itself — enforcing its
+   * deadline, and playing it once the CPU has taken over. The lowest living
+   * seat that is still a real player and is not this one: deterministic, so
+   * everyone agrees without asking, and a four-player game does not time the
+   * same seat out three times over.
+   */
+  function netActsForSeat(seat) {
+    for (let i = 0; i < tanks.length; i++) {
+      if (i !== seat && tanks[i] && tanks[i].alive && !netSeatIsAi(i)) return i;
+    }
+    return -1;
+  }
+
+  /** Is this seat ours to play — our own, or a CPU seat we speak for? */
+  function netWeDrive(seat) {
+    if (!netPlaying()) return false;
+    return seat === online.seat || (netSeatIsAi(seat) && netActsForSeat(seat) === online.seat);
+  }
+
+  /** A seat's player has acted: the count resets and the CPU stands down. */
+  function netSeatResponded(seat) {
+    online.missed[seat] = 0;
+    const i = online.aiSeats.indexOf(seat);
+    if (i >= 0) online.aiSeats.splice(i, 1);
+  }
+
+  /** Play a CPU-held seat, on the client that speaks for it. */
+  function netPlayAiTurn() {
+    if (!netPlaying() || state !== 'AIMING') return;
+    const seat = currentPlayer;
+    if (!netSeatIsAi(seat) || !netWeDrive(seat)) return;
+    const token = turnToken;
+    const stillTheirTurn = () =>
+      turnToken === token && state === 'AIMING' && currentPlayer === seat;
+    setTimeout(() => {
+      if (!stillTheirTurn()) return;
+      const shot = chooseAiShot(TURN_AI_LEVEL);
+      const t = tanks[seat];
+      t.angle = shot.angle;
+      t.power = shot.power;
+      if (!weaponAvailable(t, t.weapon)) t.weapon = 'standard';
+      updateHUD();
+      setTimeout(() => { if (stillTheirTurn()) fire(); }, aiFireDelayMs());
+    }, 500);
+  }
+
+  /** The seat in play has run out of time, and it fell to us to say so. */
+  function netTurnRanOut(seat) {
+    const missed = (online.missed[seat] || 0) + 1;
+    online.missed[seat] = missed;
+    const takeOver = missed >= TURN_MISS_LIMIT && !netSeatIsAi(seat);
+    if (takeOver) online.aiSeats.push(seat);
+    netSend('timeout', { seat, missed, ai: takeOver });
+    updateHUD();
+    if (netSeatIsAi(seat)) {
+      // Second miss: the CPU has the seat, and plays this turn rather than
+      // letting a second one go by.
+      netPlayAiTurn();
+    } else {
+      // First miss: the turn is simply skipped. RESOLVED lets the frame loop
+      // run nextTurn, which moves play on and publishes as usual.
+      netResetTurnClock();
+      state = 'RESOLVED';
+    }
+  }
+
+  /** Called every frame: is the seat in play out of time, and is it ours to say? */
+  function netCheckTurnClock() {
+    if (!netPlaying() || state !== 'AIMING') return;
+    if (performance.now() < turnDeadline) return;
+    if (currentPlayer === online.seat) return;   // our own clock is theirs to call
+    if (netSeatIsAi(currentPlayer)) return;      // a CPU seat is played, not timed out
+    if (netActsForSeat(currentPlayer) !== online.seat) return;
+    netTurnRanOut(currentPlayer);
+  }
   /** A seat somebody else drives — locked for us exactly like a CPU seat. */
   function netRemoteSeat(i) { return netPlaying() && i !== online.seat; }
 
@@ -3404,6 +3525,8 @@
         return;
       }
       online.peerAway = false;
+      online.missed = [];
+      online.aiSeats = [];
       online.seats = d.seats;
       online.seat = d.seats.indexOf(online.id);
       online.status = 'playing';
@@ -3419,6 +3542,9 @@
     if (!netPlaying()) return;
 
     if (d.k === 'turn') {
+      // A turn the player took themselves means they are back: the clock
+      // resets and the CPU hands the seat over. A CPU-played turn does not.
+      if (!d.ai) netSeatResponded(d.seat);
       // Replay their inputs so the shot is watched, not merely reported.
       const t = tanks[d.seat];
       if (!t || state !== 'AIMING') return;
@@ -3427,6 +3553,13 @@
       t.power = d.power;
       t.weapon = d.weapon;
       fire();
+      return;
+    }
+
+    if (d.k === 'timeout') {
+      online.missed[d.seat] = d.missed;
+      if (d.ai && !netSeatIsAi(d.seat)) online.aiSeats.push(d.seat);
+      updateHUD();
       return;
     }
 
@@ -3591,6 +3724,9 @@
     clusterQueue = [];
     setWind();
     wind = snap.wind; // setWind rolls a fresh value; the snapshot is authority
+    // A snapshot hands the turn over, so the clock starts again here too --
+    // otherwise a player would inherit whatever was left of someone else's.
+    netResetTurnClock();
     updateHUD();
     syncControlsFromTank();
   }
@@ -3600,7 +3736,7 @@
    * by this point is no longer `currentPlayer` — the turn has already moved on.
    */
   function netPublishTurn(actor) {
-    if (!netPlaying() || actor !== online.seat) return;
+    if (!netPlaying() || !netWeDrive(actor)) return;
     netSend('sync', { state: netSnapshot() });
   }
 
@@ -3668,7 +3804,9 @@
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
-    netSeatCount, refreshOpponentUi,
+    netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock,
+    netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
+    netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },

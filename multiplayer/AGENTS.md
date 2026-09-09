@@ -136,6 +136,24 @@ Other things worth knowing:
   and anyone left over when it fills is told rather than parked in a lobby that
   never starts. During a match the roster controls lock and the opponents select
   reads Online, because the seats were dealt when it began.
+- **Every turn has a minute.** One miss is simply skipped — being away from the
+  keyboard for a minute is not a crime. A second miss in a row hands the seat to
+  the CPU, which plays *that* turn rather than letting another lapse, and the
+  tank stays in the game. Taking a turn at any point clears the count and hands
+  the seat back; a CPU-played turn is marked `ai: true` so it is not mistaken
+  for the player returning. A stand-in always plays at `TURN_AI_LEVEL`
+  (medium), not at the client's own difficulty setting — that control is hidden
+  during a match, so its value is only whatever that player last chose locally,
+  and a substitute's strength would otherwise depend on whose browser stood in.
+- `netActsForSeat()` decides which client speaks for a seat that cannot speak
+  for itself — calling its deadline, and playing it once the CPU has it. It is
+  the lowest living seat that is still a real player and is not this one:
+  deterministic, so everyone agrees without asking, and a four-player game does
+  not time the same seat out three times over. A client never calls time on
+  itself, which is what makes it work when your own tab is frozen.
+- **The relay holds an emptied room for five minutes.** It used to delete a room
+  the instant its last member left, so a brief disconnection lost the code and
+  the match with it. `/health` reports `rooms` in play and `held` separately.
 - `netApplyState()` rebuilds the tanks when the snapshot's roster differs from
   the local one. Without that a client that joined a four-seat match keeps its
   own two tanks and quietly drops the rest of the board.
@@ -147,37 +165,40 @@ Other things worth knowing:
 
 ## Known gaps
 
-- **A backgrounded tab stalls the match.** Browsers throttle `requestAnimation-
-  Frame` in hidden tabs, so that player's game loop stops — and because only the
-  seat that played publishes authority, the other client waits forever. A turn
-  timer, and letting the AI take an unresponsive seat, is the fix.
-- Verified end to end against the deployed relay: two browser pages join a
-  room, hold identical terrain and wind, and after a shot agree on the crater,
-  the wind roll and whose turn it is. Frames had to be pumped by hand
-  (`requestAnimationFrame` neutered, `step()` driven from a counter) because
-  headless Chrome throttles whichever page is not in front — the same
-  throttling as the backgrounded-tab gap above.
-- A backgrounded tab still stops that player's game loop, and nothing takes the
-  turn for them. It is at least no longer mysterious: `visibilitychange` fires
-  before the throttling starts and the socket still works at that instant, so
-  the tab announces itself (`away`) and the other player sees "opponent is
-  away" rather than a match that appears to hang. A turn timer with the AI
-  playing the seat is what would actually keep the game moving — and it is what
-  covers the cases that send no warning at all, like a closed laptop lid.
+- **A hidden tab still stops that player's game loop.** Browsers throttle
+  `requestAnimationFrame` in a background tab, and the socket stays open, so
+  nothing disconnects. It no longer holds the game up — the tab announces
+  itself (`away`) on the way out, a missed turn is skipped, and a second miss
+  hands the seat to the CPU — but that player cannot act until they return.
+- **If everyone drops at once, the board is lost.** The relay holds rooms, not
+  game state, so the code survives five minutes but the match only survives if
+  at least one client stayed connected to hold it. One player dropping resumes
+  exactly; everyone dropping deals a fresh game in the same room.
+- **The rules are arbitrated between clients, not by the relay.** That is why
+  `netActsForSeat()` exists: with no arbiter, exactly one client has to be
+  chosen deterministically to call a timeout or play a stand-in seat. Moving
+  turn arbitration into the relay would remove the tie-break and make the clock
+  independent of any browser being awake — see below.
+
+## Verified end to end
+
+Against the deployed relay: two pages join a room, hold identical terrain and
+wind, and after a shot agree on the crater, the wind roll and whose turn it is.
+Four pages deal four distinct seats onto one battlefield. Frames have to be
+pumped by hand in these checks (`requestAnimationFrame` neutered, `step()`
+driven from a counter) because headless Chrome throttles whichever page is not
+in front — the same throttling as the first gap above.
 
 ## Still to build
 
-- **Robustness.** A turn timer, and a disconnect handing the seat to the
-  existing AI rather than pausing the round. These are what close the
-  backgrounded-tab gap above. Rematch and rejoin are done: `netRestartMatch()`
-  deals the same seats a fresh board, and a player who drops leaves their seat
-  open (`online.vacant`) so the next arrival is handed the board as it stands
-  rather than starting over. Both go out as the ordinary `start` message.
-- **Wind** is still rolled locally by each client in `nextTurn()`. It survives
-  only because the actor's snapshot overwrites it moments later, so a lost or
-  late `sync` would leave the receiver aiming against the wrong wind. The
-  helicopter is done: `heliAuthority()` gives the seat holding the turn sole say
-  over arrivals, legs, crashes and `summonHeli()`, and the snapshot carries the
-  whole aircraft plus `heliTimer`. Movement is deliberately not gated — it is
-  the same arithmetic on both sides, and drift is erased each turn.
-- **Wind**, as above — the last thing still rolled per client.
+- **Wind** is the last thing still rolled independently by each client, in
+  `nextTurn()`. It survives only because the actor's snapshot overwrites it
+  moments later, so a lost or late `sync` would leave the receiver aiming
+  against the wrong wind. Same treatment as the helicopter: one owner per turn,
+  carried in the snapshot.
+- **Two decisions deliberately deferred**, and probably one decision rather than
+  two, since both mean the relay holding state it currently does not:
+  - arbitrating turn timeouts server-side instead of electing a client;
+  - keeping the last snapshot per room, so a match survives everyone dropping.
+- **More than four players** would need `MAX_PLAYERS` raised in the game and
+  `MAX_MEMBERS` in the relay; nothing in the protocol assumes four.

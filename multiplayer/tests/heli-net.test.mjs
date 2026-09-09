@@ -60,6 +60,10 @@ test('only the player whose turn it is brings one in', () => {
   // nothing either way.
   let hostSawOne = false, guestSawOne = false;
   for (let i = 0; i < 60; i++) {
+    // Hold the turn where it is: minutes of game time would otherwise run the
+    // turn clock out, hand play to the guest, and make it the owner fairly.
+    host.g.netResetTurnClock();
+    guest.g.netResetTurnClock();
     host.advance(5000);
     guest.advance(5000);
     if (host.g.heli) hostSawOne = true;
