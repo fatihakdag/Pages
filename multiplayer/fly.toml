@@ -30,11 +30,18 @@ primary_region = "cmh"   # US East (Columbus, Ohio)
   # page — so the relay has to be reachable as wss://, which this gives us.
   force_https = true
   auto_start_machines = true
-  # Machines idle down when nobody is connected and wake on the next request.
-  # Fly counts an open WebSocket as activity, so a match in progress keeps its
-  # machine up; only an empty lobby stops.
-  auto_stop_machines = "suspend"
-  min_machines_running = 0
+  # NO AUTOSTOP. Rooms live in this process's memory, so stopping the machine
+  # destroys every room -- including one inside its five-minute grace period,
+  # waiting for a player to come back. A stop mid-match also drops both
+  # sockets, and the code they would rejoin with no longer exists.
+  #
+  # This was previously "suspend" with min_machines_running = 0, on the
+  # assumption that Fly counts an open WebSocket as activity and so would keep
+  # a match alive. That assumption was never tested and matches stopped mid-game.
+  # One always-on shared-cpu-1x is a few dollars a month and removes the whole
+  # question.
+  auto_stop_machines = "off"
+  min_machines_running = 1
   # See the note at the top: more than one machine breaks joins.
   max_machines_running = 1
 
