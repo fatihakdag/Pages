@@ -151,9 +151,13 @@ Other things worth knowing:
   throttling as the backgrounded-tab gap above.
 - The opponents select still reads "vs CPU" during a match; it should show and
   lock to the online roster.
-- A backgrounded tab is still the one unrecoverable state: it does not
-  disconnect, so no `gone` arrives and the seat is never freed. A turn timer is
-  what closes it.
+- A backgrounded tab still stops that player's game loop, and nothing takes the
+  turn for them. It is at least no longer mysterious: `visibilitychange` fires
+  before the throttling starts and the socket still works at that instant, so
+  the tab announces itself (`away`) and the other player sees "opponent is
+  away" rather than a match that appears to hang. A turn timer with the AI
+  playing the seat is what would actually keep the game moving — and it is what
+  covers the cases that send no warning at all, like a closed laptop lid.
 
 ## Still to build
 

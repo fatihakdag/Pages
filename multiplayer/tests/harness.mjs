@@ -144,6 +144,7 @@ export function load(opts = {}) {
   const seed = opts.seed ?? DEFAULT_SEED;
 
   const rect = { width, height, left: 0, top: 0, right: width, bottom: height };
+  const documentListeners = {};
   const optionSets = selectOptions(HTML);
   const elements = new Map();
 
@@ -174,7 +175,17 @@ export function load(opts = {}) {
     createElement(tag) { return makeElement('', { tagName: tag.toUpperCase(), rect }); },
     querySelector(sel) { return makeElement(sel, { rect }); },
     querySelectorAll() { return []; },
-    addEventListener() {}
+    // Recorded rather than dropped: the game listens for visibilitychange to
+    // tell the other player its tab is about to be throttled, and a test has to
+    // be able to hide the page.
+    hidden: false,
+    listeners: documentListeners,
+    addEventListener(type, fn) { (documentListeners[type] ||= []).push(fn); },
+    removeEventListener(type, fn) {
+      const l = documentListeners[type] || [];
+      const i = l.indexOf(fn);
+      if (i >= 0) l.splice(i, 1);
+    }
   };
 
   // Fake clock. Timers and animation frames only run inside advance().
@@ -337,6 +348,12 @@ export function load(opts = {}) {
     },
 
     el(id) { return document.getElementById(id); },
+
+    /** Hide or reveal the page, firing visibilitychange the way a browser does. */
+    setHidden(hidden) {
+      document.hidden = hidden;
+      for (const fn of documentListeners.visibilitychange || []) fn({});
+    },
 
     /** Canvas transforms applied so far, most recent last. */
     transforms() { return canvasCtx.transforms; },

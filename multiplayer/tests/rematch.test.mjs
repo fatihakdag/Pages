@@ -144,3 +144,46 @@ test('a rematch is refused while a seat is still empty', () => {
   assert.equal(gs.payloads('start').length, before,
     'nothing is dealt to a board with nobody on the other side');
 });
+
+test('a tab going into the background says so before it freezes', () => {
+  const { host, guest, hs, gs } = liveMatch();
+
+  guest.setHidden(true);
+  assert.deepEqual(gs.payloads('away'), [{ k: 'away', hidden: true }],
+    'the message goes out while the page is still running normally');
+
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'away', hidden: true } });
+  assert.equal(host.g.online.peerAway, true);
+  assert.equal(host.g.el2.onlineStatus.textContent, host.g.txt('netAway'));
+
+  // On the away player's turn the banner explains the wait rather than
+  // showing an ordinary "aim and fire".
+  host.g.currentPlayer = 1;
+  host.g.state = 'AIMING';
+  host.g.updateHUD();
+  assert.match(host.g.el.turnBanner.textContent, /AWAY/);
+
+  guest.setHidden(false);
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'away', hidden: false } });
+  assert.equal(host.g.online.peerAway, false, 'and it clears when they come back');
+  host.g.updateHUD();
+  assert.doesNotMatch(host.g.el.turnBanner.textContent, /AWAY/);
+});
+
+test('nothing is announced when we are not in a match', () => {
+  const h = load();
+  const s = connect(h);
+  s.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+  h.setHidden(true);
+  assert.deepEqual(s.payloads('away'), [], 'a lobby has nobody to tell');
+});
+
+test('a player who leaves is gone, not away', () => {
+  const { host, hs } = liveMatch();
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'away', hidden: true } });
+  assert.equal(host.g.online.peerAway, true);
+
+  hs.deliver({ t: 'gone', id: 2, host: 1 });
+  assert.equal(host.g.online.peerAway, false, 'the status says left, not away');
+  assert.equal(host.g.online.status, 'ended');
+});
