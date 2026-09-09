@@ -78,11 +78,61 @@ copy of the physics to keep in sync.
 Its own package, so the game itself stays dependency-free and the root
 `npm test` still needs no install.
 
+## The client side
+
+`// ---------- Online ----------` in `index.html`. A match carries two messages
+per turn:
+
+- **`turn`** — `{seat, angle, power, weapon}`, sent by `fire()` *before* the
+  shell is simulated, so the other client watches the same flight rather than
+  having the result appear.
+- **`sync`** — the full state, sent from `nextTurn()` by the seat that just
+  played. This is what actually decides the outcome: small divergences in the
+  replay are erased every turn instead of accumulating, so the clients cannot
+  drift apart. A `sync` that lands mid-flight is held in `online.pendingSync`
+  and applied when the turn resolves — snapping immediately would cut the shot
+  off on screen.
+
+`nextTurn()` captures `actor` before advancing, because by the time the result
+is published `currentPlayer` is already the *next* seat.
+
+Other things worth knowing:
+
+- `netRemoteSeat(i)` is the counterpart to `isAi(i)`: a seat somebody else
+  drives locks the turn controls exactly like a CPU seat does.
+- The host deals seats in join order and hands out the world in the `start`
+  message, so nothing depends on the two clients generating the same terrain.
+- `netSnapshot()` maps `Infinity` ammo to `-1`, because the standard shell's
+  ammo is `Infinity` and JSON cannot carry it.
+- `socketFactory` is overridable through the seam (`setSocketFactory`), which
+  is how `tests/online.test.mjs` drives the whole protocol without a socket.
+- The relay URL is the page's own origin, overridable with `?relay=ws://…`.
+
+## Known gaps
+
+- **A backgrounded tab stalls the match.** Browsers throttle `requestAnimation-
+  Frame` in hidden tabs, so that player's game loop stops — and because only the
+  seat that played publishes authority, the other client waits forever. A turn
+  timer, and letting the AI take an unresponsive seat, is the fix.
+- Two live browsers exchanging a full turn has not been verified end to end;
+  headless Chrome throttles whichever page is not in front, which freezes one
+  side mid-shot. The connection, room join, seat dealing and shared world *are*
+  verified in real browsers, and the whole turn loop is covered by
+  `tests/online.test.mjs`. Two ordinary desktop windows do not have this
+  throttling, so it is worth playing once by hand.
+- The opponents select still reads "vs CPU" during a match; it should show and
+  lock to the online roster.
+
 ## Still to build
 
-The client net layer: connect, room-code lobby, send a turn, apply a snapshot,
-reconnect. Then robustness — turn timer, and a disconnect handing the seat to
-the existing AI. Wind and the helicopter also become authoritative rather than
-locally rolled: `setWind()`, helicopter spawning and the double-click
-`summonHeli()` are all `Math.random()` today, and the helicopter runs on a wall
-clock (`heliTimer` in seconds) that has no meaning across two machines.
+- **Robustness.** A turn timer; reconnecting to a match in progress; a
+  disconnect handing the seat to the existing AI rather than ending the round.
+  These are what close the backgrounded-tab gap above.
+- **Authority for everything a turn rolls.** `setWind()`, helicopter spawning
+  and the double-click `summonHeli()` are all `Math.random()` today. Wind
+  survives because the snapshot carries it, but the helicopter does not: it runs
+  on a wall clock (`heliTimer`, in seconds) that means nothing across two
+  machines, and a locally summoned one is a private hallucination. Tie it to
+  turn count and put it in the snapshot.
+- **More than two seats.** The protocol deals N seats already, but the host
+  hard-codes a two-player match.

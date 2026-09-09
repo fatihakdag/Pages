@@ -230,7 +230,9 @@ export function load(opts = {}) {
       removeItem(k) { this.store.delete(k); }
     },
     navigator: { language: 'en-US' },
-    performance: { now: () => now }
+    performance: { now: () => now },
+    // The online code reads these to work out which relay to dial.
+    location: { protocol: 'http:', host: 'relay.test', search: '', href: 'http://relay.test/' }
   };
 
   const sandbox = {
@@ -244,6 +246,8 @@ export function load(opts = {}) {
   sandbox.globalThis = sandbox;
   sandbox.self = sandbox;
   sandbox.navigator = windowStub.navigator;
+  sandbox.location = windowStub.location;
+  sandbox.URLSearchParams = URLSearchParams;
   sandbox.performance = windowStub.performance;
   sandbox.localStorage = windowStub.localStorage;
   sandbox.getComputedStyle = windowStub.getComputedStyle;

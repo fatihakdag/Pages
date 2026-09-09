@@ -43,6 +43,12 @@
     height: 100vh;
     height: calc(var(--vh, 1vh) * 100); /* JS-set fallback for iOS < 15.4 */
     height: 100dvh; /* dvh excludes mobile browser chrome where supported */
+    /* Last word goes to a measured value. In landscape, Chrome on Android keeps
+       an address bar that cannot be scrolled away, and 100vh is the *large*
+       viewport — the layout runs on underneath it and the FIRE button ends up
+       below the fold. visualViewport.height is the only figure that accounts
+       for browser UI overlaying the page. */
+    height: var(--app-h, 100dvh);
     width: 100vw;
     overflow: hidden;
   }
@@ -520,10 +526,16 @@
     /* the rail is only ~158px wide, so the arrows have to give some back */
     .slider-row { gap: 6px; }
     .nudge { width: 30px; height: 30px; }
+    /* Column direction with the base rule's wrap would spill the groups into a
+       second column rather than scrolling. */
+    #controls { flex-wrap: nowrap; align-content: normal; }
     #fire-btn {
       width: 100%;
       grid-column: auto;
-      margin-top: auto;
+      margin-top: auto;   /* sits at the bottom while there is room */
+      position: sticky;   /* and stays in view once there is not */
+      bottom: 0;
+      z-index: 2;
       padding: 14px 10px;
       font-size: 14px;
     }
@@ -677,11 +689,21 @@
   });
   // iOS < 15.4 has no dvh; keep a real pixel height in a CSS variable.
   function setVh() {
-    document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px');
+    var vv = window.visualViewport;
+    var h = (vv && vv.height) ? vv.height : window.innerHeight;
+    var root = document.documentElement.style;
+    root.setProperty('--vh', (h * 0.01) + 'px');
+    root.setProperty('--app-h', h + 'px');
   }
   setVh();
   window.addEventListener('resize', setVh);
   window.addEventListener('orientationchange', function () { setTimeout(setVh, 150); });
+  // The visible area changes without a window resize when browser UI slides in
+  // or out, so watch the visual viewport itself.
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setVh);
+    window.visualViewport.addEventListener('scroll', setVh);
+  }
 })();
 </script>
 <script>

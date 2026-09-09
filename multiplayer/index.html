@@ -43,6 +43,12 @@
     height: 100vh;
     height: calc(var(--vh, 1vh) * 100); /* JS-set fallback for iOS < 15.4 */
     height: 100dvh; /* dvh excludes mobile browser chrome where supported */
+    /* Last word goes to a measured value. In landscape, Chrome on Android keeps
+       an address bar that cannot be scrolled away, and 100vh is the *large*
+       viewport — the layout runs on underneath it and the FIRE button ends up
+       below the fold. visualViewport.height is the only figure that accounts
+       for browser UI overlaying the page. */
+    height: var(--app-h, 100dvh);
     width: 100vw;
     overflow: hidden;
   }
@@ -217,6 +223,39 @@
     inset: 0;
     margin: auto;
   }
+
+  /* Online lobby: host / code / join on one line, sized like the nudge rows */
+  .online-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .online-row button {
+    background: var(--panel-line);
+    color: var(--text);
+    border: 0;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font: inherit;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+  }
+  .online-row button:disabled { opacity: 0.4; cursor: default; }
+  #online-code {
+    width: 68px;
+    background: var(--input-bg, #0d0d12);
+    color: var(--text);
+    border: 1px solid var(--panel-line);
+    border-radius: 6px;
+    padding: 7px 8px;
+    font: inherit;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-align: center;
+    text-transform: uppercase;
+  }
+  #online-status { font-variant-numeric: tabular-nums; }
 
   #controls {
     background: var(--panel-bg);
@@ -539,10 +578,21 @@
     /* the rail is only ~158px wide, so the arrows have to give some back */
     .slider-row { gap: 6px; }
     .nudge { width: 30px; height: 30px; }
+    /* Column direction with the base rule's wrap would spill the groups into a
+       second column rather than scrolling. */
+    #controls { flex-wrap: nowrap; align-content: normal; }
+    /* HOST + code + JOIN do not fit across a 158px rail, so the code field
+       takes its own line above the two buttons. */
+    .online-row { flex-wrap: wrap; }
+    #online-code { order: -1; width: 100%; }
+    .online-row button { flex: 1 1 auto; }
     #fire-btn {
       width: 100%;
       grid-column: auto;
-      margin-top: auto;
+      margin-top: auto;   /* sits at the bottom while there is room */
+      position: sticky;   /* and stays in view once there is not */
+      bottom: 0;
+      z-index: 2;
       padding: 14px 10px;
       font-size: 14px;
     }
@@ -659,6 +709,16 @@
         <option value="human">All Human</option>
       </select>
     </div>
+    <div class="ctrl-group" id="online-group">
+      <div class="ctrl-label"><span data-i18n="online">ONLINE</span> <span class="val" id="online-status">off</span></div>
+      <div class="online-row">
+        <button type="button" id="online-host" data-i18n="hostGame">HOST</button>
+        <input type="text" id="online-code" maxlength="4" autocomplete="off"
+               autocapitalize="characters" spellcheck="false"
+               placeholder="CODE" aria-label="Room code">
+        <button type="button" id="online-join" data-i18n="joinGame">JOIN</button>
+      </div>
+    </div>
     <div class="ctrl-group" id="difficulty-group">
       <div class="ctrl-label" data-i18n="cpuLevel">CPU LEVEL</div>
       <select id="difficulty-select">
@@ -696,11 +756,21 @@
   });
   // iOS < 15.4 has no dvh; keep a real pixel height in a CSS variable.
   function setVh() {
-    document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px');
+    var vv = window.visualViewport;
+    var h = (vv && vv.height) ? vv.height : window.innerHeight;
+    var root = document.documentElement.style;
+    root.setProperty('--vh', (h * 0.01) + 'px');
+    root.setProperty('--app-h', h + 'px');
   }
   setVh();
   window.addEventListener('resize', setVh);
   window.addEventListener('orientationchange', function () { setTimeout(setVh, 150); });
+  // The visible area changes without a window resize when browser UI slides in
+  // or out, so watch the visual viewport itself.
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', setVh);
+    window.visualViewport.addEventListener('scroll', setVh);
+  }
 })();
 </script>
 <script>
@@ -762,6 +832,11 @@
   const modeSelect = document.getElementById('mode-select');
   const countSelect = document.getElementById('count-select');
   const difficultyGroup = document.getElementById('difficulty-group');
+  const onlineGroup = document.getElementById('online-group');
+  const onlineStatus = document.getElementById('online-status');
+  const onlineHostBtn = document.getElementById('online-host');
+  const onlineJoinBtn = document.getElementById('online-join');
+  const onlineCodeInput = document.getElementById('online-code');
 
   // ---------- Language ----------
   // Theme names are keyed by their English name so the THEMES table stays the
@@ -788,6 +863,13 @@
       easy: 'Easy', medium: 'Medium', hard: 'Hard', brutal: 'Brutal',
       aimLeft: 'Aim one degree left', aimRight: 'Aim one degree right',
       powerDown: 'Power down one', powerUp: 'Power up one',
+      online: 'ONLINE', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
+      roomCode: 'CODE', roomCodeLabel: 'Room code',
+      netOffline: 'off', netConnecting: 'connecting…', netWaiting: 'code {code} — waiting',
+      netPlaying: 'room {code}', netEnded: 'opponent left',
+      netTheirTurn: '{name} — THEIR TURN', netYouAre: 'you are {name}',
+      netNoRoom: 'no such room', netFull: 'room is full',
+      netVersion: 'update the page', netLost: 'connection lost',
     },
     tr: {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
@@ -810,6 +892,13 @@
       easy: 'Kolay', medium: 'Orta', hard: 'Zor', brutal: 'Acımasız',
       aimLeft: 'Bir derece sola nişan al', aimRight: 'Bir derece sağa nişan al',
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
+      online: 'ÇEVRİMİÇİ', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
+      roomCode: 'KOD', roomCodeLabel: 'Oda kodu',
+      netOffline: 'kapalı', netConnecting: 'bağlanıyor…', netWaiting: 'kod {code} — bekleniyor',
+      netPlaying: 'oda {code}', netEnded: 'rakip ayrıldı',
+      netTheirTurn: '{name} — SIRA ONDA', netYouAre: 'sen {name}',
+      netNoRoom: 'oda bulunamadı', netFull: 'oda dolu',
+      netVersion: 'sayfayı yenileyin', netLost: 'bağlantı koptu',
       'Rust Canyon': 'Pas Kanyonu'
     }
   };
@@ -1440,7 +1529,9 @@
     powerSlider.value = t.power;
     angleVal.textContent = t.angle + '°';
     powerVal.textContent = t.power;
-    const isAiTurn = isAi(currentPlayer);
+    // A seat we do not drive — a CPU, or the other player in a match — locks
+    // the turn controls; the settings below follow the same rule.
+    const isAiTurn = isAi(currentPlayer) || netRemoteSeat(currentPlayer);
     fireBtn.disabled = (state !== 'AIMING') || isAiTurn;
     angleSlider.disabled = isAiTurn;
     powerSlider.disabled = isAiTurn;
@@ -1547,6 +1638,16 @@
 
   function fire() {
     if (state !== 'AIMING') return;
+    // Sent before the shot is simulated, so the other client starts the same
+    // flight at roughly the same moment rather than seeing only the aftermath.
+    if (netPlaying() && currentPlayer === online.seat) {
+      netSend('turn', {
+        seat: currentPlayer,
+        angle: tanks[currentPlayer].angle,
+        power: tanks[currentPlayer].power,
+        weapon: tanks[currentPlayer].weapon
+      });
+    }
     const shooter = tanks[currentPlayer];
     let weaponKey = shooter.weapon;
     if (!weaponAvailable(shooter, weaponKey)) weaponKey = 'standard'; // safety net; syncWeaponOptions gets there first
@@ -1638,7 +1739,9 @@
   }
 
   function nextTurn() {
-    if (endTurnCheckWin()) return;
+    // Captured before the turn moves on: this is who just played.
+    const actor = currentPlayer;
+    if (endTurnCheckWin()) { netPublishTurn(actor); return; }
     // at least two tanks are alive here, so this always lands on someone else
     do { currentPlayer = (currentPlayer + 1) % tanks.length; }
     while (!tanks[currentPlayer].alive);
@@ -1648,6 +1751,13 @@
     state = 'AIMING';
     updateHUD();
     syncControlsFromTank();
+    // The player who took the turn is the authority on how it ended.
+    netPublishTurn(actor);
+    if (online.pendingSync) {
+      const held = online.pendingSync;
+      online.pendingSync = null;
+      netApplyState(held);
+    }
     maybeAiTurn();
   }
 
@@ -2840,6 +2950,283 @@
     }
   }
 
+  // ---------- Online ----------
+  // A match is carried by the relay in server/, which only moves messages
+  // between the members of a room. The game logic stays here: whoever's turn it
+  // is simulates the shot and tells the others what happened, so there is no
+  // second copy of the physics anywhere.
+  //
+  // Per turn two messages go out. `turn` carries the inputs, so the other side
+  // can watch the same shot fly rather than have the result appear. `sync`
+  // carries the state afterwards, which is what actually decides the outcome —
+  // small divergences in the replay are erased every turn instead of
+  // accumulating, so the two clients never drift apart.
+
+  const NET_PROTOCOL = 1;
+
+  const online = {
+    ws: null,
+    room: null,
+    id: null,        // our member id on the relay
+    seat: -1,        // which tank we drive; -1 until seats are dealt
+    seats: [],       // member id per tank index
+    host: false,
+    status: 'offline', // offline | connecting | waiting | playing | ended
+    error: null,
+    pendingSync: null  // a sync that arrived while a shot was still in the air
+  };
+
+  /** True once we are in a match, as opposed to merely connected. */
+  function netPlaying() { return online.status === 'playing'; }
+  /** A seat somebody else drives — locked for us exactly like a CPU seat. */
+  function netRemoteSeat(i) { return netPlaying() && i !== online.seat; }
+
+  // Overridable so tests can drive the protocol without a real socket.
+  let socketFactory = (url) => new WebSocket(url);
+
+  function relayUrl() {
+    const override = new URLSearchParams(location.search).get('relay');
+    if (override) return override;
+    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${scheme}//${location.host}`;
+  }
+
+  function netStatusText() {
+    if (online.error) return online.error;
+    if (online.status === 'connecting') return txt('netConnecting');
+    if (online.status === 'waiting') return txt('netWaiting', { code: online.room });
+    if (online.status === 'playing') return txt('netPlaying', { code: online.room });
+    if (online.status === 'ended') return txt('netEnded');
+    return txt('netOffline');
+  }
+
+  function refreshOnlineUi() {
+    onlineStatus.textContent = netStatusText();
+    const busy = online.status !== 'offline' && online.status !== 'ended';
+    onlineHostBtn.disabled = busy;
+    onlineJoinBtn.disabled = busy;
+    onlineCodeInput.disabled = busy;
+  }
+
+  function netSend(kind, extra) {
+    if (!online.ws || online.ws.readyState !== 1) return;
+    online.ws.send(JSON.stringify({ t: 'msg', d: { k: kind, ...extra } }));
+  }
+
+  function netFail(message) {
+    online.error = message;
+    online.status = 'offline';
+    refreshOnlineUi();
+  }
+
+  function netConnect(room) {
+    if (online.ws) return;
+    online.error = null;
+    online.status = 'connecting';
+    online.room = room || null;
+    refreshOnlineUi();
+
+    let ws;
+    try { ws = socketFactory(relayUrl()); }
+    catch { return netFail(txt('netLost')); }
+    online.ws = ws;
+
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify({ t: 'join', v: NET_PROTOCOL, room: room || undefined }));
+    });
+    ws.addEventListener('message', (ev) => {
+      let m;
+      try { m = JSON.parse(ev.data); } catch { return; }
+      netHandle(m);
+    });
+    ws.addEventListener('close', () => {
+      const wasPlaying = netPlaying();
+      online.ws = null;
+      online.seat = -1;
+      online.seats = [];
+      online.status = wasPlaying ? 'ended' : 'offline';
+      if (!wasPlaying && !online.error) online.error = txt('netLost');
+      refreshOnlineUi();
+      syncControlsFromTank();
+      updateHUD();
+    });
+    ws.addEventListener('error', () => { /* close follows */ });
+  }
+
+  function netHandle(m) {
+    if (m.t === 'err') {
+      const known = { NO_ROOM: 'netNoRoom', ROOM_FULL: 'netFull', BAD_VERSION: 'netVersion' };
+      netFail(known[m.code] ? txt(known[m.code]) : m.code);
+      if (online.ws) online.ws.close();
+      return;
+    }
+
+    if (m.t === 'joined') {
+      online.id = m.id;
+      online.room = m.room;
+      online.host = m.host === m.id;
+      netPeerIds = m.peers.map(p => p.id);
+      online.status = 'waiting';
+      onlineCodeInput.value = m.room;
+      // Joining a room that already has someone in it means the match is on;
+      // the host deals the seats and the world.
+      if (m.peers.length && !online.host) netSend('ready', {});
+      refreshOnlineUi();
+      return;
+    }
+
+    if (m.t === 'peer') {
+      // Someone arrived in our room. If we are the host, start the match.
+      if (!netPeerIds.includes(m.id)) netPeerIds.push(m.id);
+      if (online.host) netStartMatch();
+      return;
+    }
+
+    if (m.t === 'gone') {
+      netPeerIds = netPeerIds.filter(id => id !== m.id);
+      online.status = 'ended';
+      online.seat = -1;
+      refreshOnlineUi();
+      syncControlsFromTank();
+      updateHUD();
+      return;
+    }
+
+    if (m.t !== 'msg' || !m.d) return;
+    const d = m.d;
+
+    if (d.k === 'ready' && online.host) { netStartMatch(); return; }
+
+    if (d.k === 'start') {
+      online.seats = d.seats;
+      online.seat = d.seats.indexOf(online.id);
+      online.status = 'playing';
+      cpuMode = false;
+      playerCount = d.seats.length;
+      countSelect.value = String(playerCount);
+      refreshOpponentUi();
+      netApplyState(d.state);
+      refreshOnlineUi();
+      return;
+    }
+
+    if (!netPlaying()) return;
+
+    if (d.k === 'turn') {
+      // Replay their inputs so the shot is watched, not merely reported.
+      const t = tanks[d.seat];
+      if (!t || state !== 'AIMING') return;
+      currentPlayer = d.seat;
+      t.angle = d.angle;
+      t.power = d.power;
+      t.weapon = d.weapon;
+      fire();
+      return;
+    }
+
+    if (d.k === 'sync') {
+      // Snapping mid-flight would cut the shot off, so hold it until the local
+      // replay has finished and then correct whatever drifted.
+      if (state === 'AIMING' || state === 'GAMEOVER') netApplyState(d.state);
+      else online.pendingSync = d.state;
+      return;
+    }
+  }
+
+  /** Host only: deal seats and hand out the world everyone will play on. */
+  function netStartMatch() {
+    if (!online.host || netPlaying()) return;
+    cpuMode = false;
+    playerCount = 2;
+    countSelect.value = '2';
+    refreshOpponentUi();
+    resetGame();
+    // Seat order follows join order, so the host is player 1.
+    online.seats = [online.id, ...netOtherIds()];
+    online.seat = 0;
+    online.status = 'playing';
+    netSend('start', { seats: online.seats, state: netSnapshot() });
+    refreshOnlineUi();
+    syncControlsFromTank();
+    updateHUD();
+  }
+
+  // The relay tells us who is in the room as they arrive; we only ever need the
+  // one other player for a two-seat match.
+  let netPeerIds = [];
+  function netOtherIds() { return netPeerIds.slice(0, playerCount - 1); }
+
+  // Infinity is not JSON, and the standard shell's ammo is Infinity.
+  const AMMO_INFINITE = -1;
+  function ammoOut(a) {
+    const out = {};
+    for (const k in a) out[k] = (a[k] === Infinity) ? AMMO_INFINITE : a[k];
+    return out;
+  }
+  function ammoIn(a) {
+    const out = {};
+    for (const k in a) out[k] = (a[k] === AMMO_INFINITE) ? Infinity : a[k];
+    return out;
+  }
+
+  function netSnapshot() {
+    return {
+      terrain: Array.from(terrain),
+      tanks: tanks.map(t => ({
+        x: t.x, hp: t.hp, alive: t.alive,
+        angle: t.angle, power: t.power, weapon: t.weapon, ammo: ammoOut(t.ammo)
+      })),
+      wind, currentPlayer, state,
+      theme: THEMES.indexOf(theme),
+      heli: heli ? { x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed, falling: heli.falling } : null
+    };
+  }
+
+  function netApplyState(snap) {
+    if (!snap) return;
+    if (snap.theme >= 0 && THEMES[snap.theme] && THEMES[snap.theme] !== theme) {
+      applyTheme(THEMES[snap.theme]);
+      buildDecor();
+    }
+    terrain = snap.terrain.slice();
+    snap.tanks.forEach((s, i) => {
+      const t = tanks[i];
+      if (!t) return;
+      t.x = s.x; t.hp = s.hp; t.alive = s.alive;
+      t.angle = s.angle; t.power = s.power; t.weapon = s.weapon;
+      t.ammo = ammoIn(s.ammo);
+    });
+    wind = snap.wind;
+    currentPlayer = snap.currentPlayer;
+    state = snap.state;
+    heli = snap.heli ? { ...(heli || {}), ...snap.heli, seen: (heli && heli.seen) || new Set() } : null;
+    projectiles = [];
+    clusterQueue = [];
+    setWind();
+    wind = snap.wind; // setWind rolls a fresh value; the snapshot is authority
+    updateHUD();
+    syncControlsFromTank();
+  }
+
+  /**
+   * Publish how a turn ended. `actor` is the seat that *took* the turn, which
+   * by this point is no longer `currentPlayer` — the turn has already moved on.
+   */
+  function netPublishTurn(actor) {
+    if (!netPlaying() || actor !== online.seat) return;
+    netSend('sync', { state: netSnapshot() });
+  }
+
+  function netLeave() {
+    if (online.ws) online.ws.close();
+  }
+
+  onlineHostBtn.addEventListener('click', () => netConnect(null));
+  onlineJoinBtn.addEventListener('click', () => {
+    const code = (onlineCodeInput.value || '').trim().toUpperCase();
+    if (code.length) netConnect(code);
+  });
+
   // ---------- Boot ----------
   // The canvas is sized entirely in resize() now, so missing a size change
   // leaves the playfield visibly wrong rather than merely blurry — the old
@@ -2881,6 +3268,10 @@
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
     endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
+    online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
+    netPlaying, NET_PROTOCOL,
+    setSocketFactory(fn) { socketFactory = fn; },
+    el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     el: {
