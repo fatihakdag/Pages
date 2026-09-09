@@ -46,19 +46,62 @@ test('repeated craters stop at bedrock so tanks stay on screen', () => {
   assert.ok(g.bedrockY() < g.H, 'bedrock leaves room for a tank on screen');
 });
 
-test('terrain is rebuilt to the canvas width on resize', () => {
+test('the world is a fixed size, whatever the canvas is', () => {
+  const small = load({ width: 320, height: 480 });
+  const big = load({ width: 1600, height: 900 });
+
+  // Two players on very different screens must hold the same battlefield.
+  assert.equal(small.g.W, big.g.W);
+  assert.equal(small.g.H, big.g.H);
+  assert.equal(small.g.terrain.length, small.g.W);
+  assert.equal(big.g.terrain.length, big.g.W);
+
+  // What differs is only how large it is drawn.
+  assert.ok(small.g.viewScale < big.g.viewScale, 'the small canvas draws it smaller');
+  assert.ok(small.g.viewW <= 320 && small.g.viewH <= 480, 'the view fits its box');
+});
+
+test('resizing does not disturb the world', () => {
   const h = load({ width: 800, height: 500 });
   const { g } = h;
-  assert.equal(g.terrain.length, g.W);
 
-  const before = g.terrain.length;
+  // Blow a hole in the ground and note it.
+  const groundY = g.groundHeightAt(400);
+  g.craterAt(400, groundY, 40);
+  const cratered = Array.from(g.terrain);
+  const tankXs = g.tanks.map(t => t.x);
+
   h.el('game-wrap').getBoundingClientRect = () => ({ width: 1400, height: 500 });
   h.el('game').getBoundingClientRect = () => ({ width: 1400, height: 500 });
   g.resize();
 
-  assert.notEqual(g.terrain.length, before);
-  assert.equal(g.terrain.length, g.W);
-  assert.ok(g.terrain.every(Number.isFinite), 'resampled terrain has no gaps');
+  // The old build regenerated terrain from the seed shape here, which erased
+  // every crater and stranded the tanks; rotating a phone reset the landscape.
+  assert.equal(g.terrain.length, cratered.length);
+  assert.deepEqual(Array.from(g.terrain), cratered, 'craters survive a resize');
+  assert.deepEqual(g.tanks.map(t => t.x), tankXs, 'tanks stay put');
+});
+
+test('a shell in flight is not disturbed by a resize', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.placeTanksAt([200, 700]);
+  g.tanks[0].angle = 45;
+  g.tanks[0].power = 70;
+  g.fire();
+  h.advance(160);
+  const before = g.projectiles.map(p => ({ x: p.x, y: p.y, vx: p.vx, vy: p.vy }));
+  assert.ok(before.length, 'a shell is in the air');
+
+  h.el('game-wrap').getBoundingClientRect = () => ({ width: 1400, height: 900 });
+  g.resize();
+
+  // Velocities used to be rescaled on resize because physics was in canvas
+  // pixels. In world units there is nothing to rescale.
+  assert.deepEqual(
+    g.projectiles.map(p => ({ x: p.x, y: p.y, vx: p.vx, vy: p.vy })),
+    before
+  );
 });
 
 test('levelTankPads flattens the ground under each tank', () => {

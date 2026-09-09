@@ -17,6 +17,7 @@ index.html         the whole game (see map below)
 tests/             node:test suite; tests/README.md explains the harness
 tests/harness.mjs  boots index.html in a node:vm against a stub DOM
 tools/shots.mjs    screenshots the page at every breakpoint (npm run shots)
+server/            match relay for online play (own package; own tests)
 .claude/           permission allowlist for read-only and test commands
 .github/workflows/ CI: node --test "tests/*.test.mjs"
 .gitlab-ci.yml     same test job + a pages deploy stage
@@ -43,7 +44,7 @@ file moves. Sizes are approximate, to tell you what you are about to read.
 | `MISSILE` guided-missile tuning, with one `enabled` switch | `Guided missile: one switch` | 25 |
 | DOM element handles | `const canvas = document` | 25 |
 | Language: `STRINGS` (en/tr), `txt()`, `applyLanguage()` | `Language ---` | 165 |
-| Canvas sizing, `resize()`, `physScale` | `Canvas sizing` | 55 |
+| World-vs-view split, `resize()`, `viewScale` | `World vs view` | 75 |
 | `THEMES` (7 environments) and decor (stars/clouds/embers/snow/dust) | `Environments` | 120 |
 | Terrain heightmap, `craterAt()`, `groundHeightAt()` | `Terrain ---` | 85 |
 | `WEAPONS`, tanks, wind, HUD sync, `fire()`, damage, turns | `Game state` | 435 |
@@ -71,8 +72,17 @@ a document never is.
   `bedrockY()`.
 - **Angles** are world degrees, 0 = right, 180 = left. The angle slider is
   inverted (`angleToSlider` / `sliderToAngle`) so dragging left aims left.
-- **Scaling.** All physics constants are authored for `W_REF = 1000` and
-  multiplied by `physScale`, so gameplay is identical on any canvas size.
+- **World vs view.** The simulation lives on a fixed `SIM_W` x `SIM_H` (1000 x
+  620) battlefield in world units; the canvas is only a window onto it,
+  described by `viewScale`. Two clients on any screens hold the same terrain,
+  coordinates and physics — the prerequisite for a shared match. Draw calls are
+  in world units by default; `screenTransform()` switches to CSS pixels for
+  on-canvas UI that must stay legible (the wind gauge). Since the world's shape
+  is fixed, `#game-wrap` carries that aspect in CSS and the spare space goes to
+  `#controls`.
+- **Resizing must never touch the world.** It only recomputes `viewScale`. A
+  `ResizeObserver` on `#game-wrap` drives it, because the canvas is sized purely
+  in JS now — a missed measurement leaves the playfield visibly wrong.
 - **Weapons** live in one `WEAPONS` table; behaviour flags (`rolls`, `guides`,
   `clusterCount`, `mirvCount`) select the special paths. `startAmmo: Infinity`
   is the standard shell.

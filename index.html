@@ -195,11 +195,27 @@
     flex: 1 1 auto;
     min-height: 120px;
     overflow: hidden;
+    /* The world has one fixed shape (SIM_W x SIM_H) so that two players in a
+       match share the same battlefield. The canvas is sized to that aspect in
+       resize(), and the wrap shrinks to whatever the canvas turned out to be:
+       the space the world cannot use is handed to #controls below rather than
+       being painted as bars around the playfield. */
+    /* The wrap takes its height from the world's aspect in CSS, and the canvas
+       is taken out of the flow (absolute) so it cannot feed back into that
+       height — sizing the wrap from the canvas while the canvas is sized from
+       the wrap collapses both. */
+    flex: 0 1 auto;
+    width: 100%;
+    aspect-ratio: 1000 / 620;
+    max-height: 100%;
   }
   canvas#game {
+    /* width/height are set in resize(), to keep the world aspect; inset+margin
+       centres whatever size that came out as. */
     display: block;
-    width: 100%;
-    height: 100%;
+    position: absolute;
+    inset: 0;
+    margin: auto;
   }
 
   #controls {
@@ -214,7 +230,10 @@
     align-items: flex-start;
     gap: 22px;
     flex-wrap: wrap;
-    flex: 0 0 auto;
+    /* The world cannot use all the height on a tall screen, so the rows spread
+       down the panel instead: the slack becomes spacing between touch targets. */
+    flex: 1 1 auto;
+    align-content: space-evenly;
     z-index: 5;
   }
   .ctrl-group {
@@ -493,7 +512,7 @@
     #wind-hud { display: none; }
     .hud-pill { justify-content: flex-start; }
 
-    #game-wrap { flex: 1 1 auto; height: 100%; min-height: 0; }
+    #game-wrap { flex: 1 1 auto; height: 100%; min-height: 0; aspect-ratio: auto; }
 
     #controls {
       display: flex;
@@ -912,62 +931,85 @@
     ammoReadout.textContent = remaining === Infinity ? txt('unlimited') : txt('nLeft', { n: remaining });
   });
 
-  // ---------- Canvas sizing ----------
-  let W = 0, H = 0, DPR = 1;
+  // ---------- World vs view ----------
+  // The simulation lives in world units on a fixed-size battlefield, and the
+  // canvas is only a window onto it. That separation is what makes a match
+  // possible: two players on a 1440px desktop and a 390px phone hold the same
+  // terrain array, the same tank coordinates and the same physics, and differ
+  // only in how large it is drawn.
+  //
+  // It also removes a whole class of bug from the single-player game. The world
+  // used to be rebuilt at the new pixel width on every resize, which meant
+  // every crater was erased and the tanks had to be re-placed by fraction;
+  // rotating a phone mid-game quietly reset the landscape.
+  //
+  // The world's shape is fixed, so the canvas is sized to that aspect and the
+  // spare space goes back to the layout (see #game-wrap). Change these two
+  // numbers to reshape the battlefield; nothing else needs to know.
+  const SIM_W = 1000, SIM_H = 620;
+  let W = SIM_W, H = SIM_H;
 
-  // Tanks are placed at fractions of the width, but the physics below is in
-  // absolute pixels, so without this a shot's range would be a fixed pixel
-  // distance on every canvas: the same power crosses 72% of a phone screen and
-  // 11% of an ultrawide, and past ~1900px the enemy is out of reach at full
-  // power. Scaling every length-per-time and length-per-time^2 quantity by the
-  // canvas width makes trajectories geometrically similar at any size — the
-  // same angle and power always land on the same *relative* spot, and flight
-  // times stay put. W_REF is the width the tuning above is expressed in.
+  // The physics below is tuned in absolute units, so a shot's range is a fixed
+  // distance in the world. W_REF is the width that tuning is expressed in; with
+  // the world fixed at SIM_W this is a constant, and it stays in the formulas
+  // so that reshaping the battlefield rescales trajectories with it.
   const W_REF = 1000;
-  let physScale = 1;
+  let physScale = SIM_W / W_REF;
+
+  // How the world is drawn: `viewScale` world-units-to-CSS-pixels, and the
+  // canvas size in CSS pixels. Only rendering and pointer input use these.
+  let viewScale = 1, viewW = SIM_W, viewH = SIM_H;
+  let DPR = 1;
 
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
-    W = gameWrap.clientWidth;
-    H = gameWrap.clientHeight;
+    let availW = gameWrap.clientWidth;
+    let availH = gameWrap.clientHeight;
     // Some mobile browsers report 0 during early layout / orientation change.
     // Falling through with 0 would produce a blank canvas with no error.
-    if (!W || !H) {
+    if (!availW || !availH) {
       const r = gameWrap.getBoundingClientRect();
-      W = Math.round(r.width) || window.innerWidth || 320;
-      H = Math.round(r.height) || Math.max(160, (window.innerHeight || 480) - 200);
+      availW = Math.round(r.width) || window.innerWidth || 320;
+      availH = Math.round(r.height) || Math.max(160, (window.innerHeight || 480) - 200);
     }
-    W = Math.max(160, W);
-    H = Math.max(120, H);
-    canvas.width = Math.round(W * DPR);
-    canvas.height = Math.round(H * DPR);
-    canvas.style.width = W + 'px';
-    canvas.style.height = H + 'px';
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    const prevScale = physScale;
-    physScale = W / W_REF;
-    // A shell already in the air was launched under the old scale; rescale it
-    // so it keeps flying the arc it was aimed on.
-    if (projectiles.length && prevScale > 0) {
-      const k = physScale / prevScale;
-      for (const p of projectiles) { p.vx *= k; p.vy *= k; }
-    }
-    if (terrain.length) {
-      // Keep tanks at the same relative spot when the canvas changes size,
-      // otherwise rotating the device leaves them stranded off-screen.
-      const fracs = tanks.map(t => (prevW > 0 ? t.x / prevW : null));
-      rebuildTerrainToWidth();
-      tanks.forEach((t, i) => {
-        if (fracs[i] !== null && isFinite(fracs[i])) {
-          t.x = Math.max(20, Math.min(W - 20, fracs[i] * W));
-        }
-      });
-      levelTankPads(); // the rebuild above regenerates terrain from the seed shape
-    }
-    prevW = W;
+    availW = Math.max(160, availW);
+    availH = Math.max(120, availH);
+
+    // Contain: the largest whole world that fits the space we were given.
+    viewScale = Math.min(availW / SIM_W, availH / SIM_H);
+    viewW = Math.round(SIM_W * viewScale);
+    viewH = Math.round(SIM_H * viewScale);
+
+    canvas.width = Math.round(viewW * DPR);
+    canvas.height = Math.round(viewH * DPR);
+    canvas.style.width = viewW + 'px';
+    canvas.style.height = viewH + 'px';
+    // With this transform every draw call below is in world units.
+    worldTransform();
+
     hudWindVisible = windHud.offsetParent !== null;
   }
-  let prevW = 0;
+
+  /** Draw in world units (the default for everything on the battlefield). */
+  function worldTransform() {
+    const k = DPR * viewScale;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+  }
+
+  /** Draw in CSS pixels — for on-canvas UI that must stay legible at any size. */
+  function screenTransform() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  /** A pointer event's position in world units. */
+  function eventToWorld(e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: r.width ? (e.clientX - r.left) / r.width * SIM_W : 0,
+      y: r.height ? (e.clientY - r.top) / r.height * SIM_H : 0
+    };
+  }
+
   let hudWindVisible = false;
 
   // ---------- Environments ----------
@@ -1115,14 +1157,13 @@
     return arr;
   }
 
-  function rebuildTerrainToWidth() {
+  function buildTerrainFromShape() {
     const n = terrainSeedShape.length;
     terrain = new Array(Math.ceil(W));
 
-    // Terrain relief used to be a flat fraction of H, so a short (landscape)
-    // canvas produced almost flat ground. Scale the vertical span against the
-    // canvas aspect instead: wide-and-short viewports get proportionally more
-    // relief so hills keep the same *shape* they'd have in portrait.
+    // Relief is scaled against the world's aspect rather than being a flat
+    // fraction of H, so that reshaping the battlefield (SIM_W / SIM_H) keeps
+    // hills the same *shape* instead of flattening them.
     const aspect = W / Math.max(1, H);
     // 1.0 at a squarish 4:3 view, growing (capped) as the view gets wider
     const reliefBoost = Math.min(1.55, Math.max(1, Math.sqrt(aspect / 1.33)));
@@ -1143,7 +1184,7 @@
 
   function newTerrain() {
     terrainSeedShape = generateTerrainShape();
-    rebuildTerrainToWidth();
+    buildTerrainFromShape();
   }
 
   // Craters dig downward; without a floor, repeated hits in one spot push the
@@ -2542,9 +2583,10 @@
   }
 
   // A dark pill keeps the gauge legible over both the bright and dark skies.
+  // In CSS pixels, not world units: see drawWindGauge.
   function windGaugeRect() {
-    const w = Math.min(250, W - 24);
-    return { x: (W - w) / 2, y: 10, w: w, h: 30 };
+    const w = Math.min(250, viewW - 24);
+    return { x: (viewW - w) / 2, y: 10, w: w, h: 30 };
   }
 
   function drawWindGauge() {
@@ -2788,10 +2830,25 @@
     });
 
     // Only one wind readout at a time: the bar's pill where it fits, this otherwise.
-    if (!hudWindVisible) drawWindGauge();
+    // The gauge is UI sitting on top of the battlefield, not part of it: drawn
+    // in CSS pixels so its text stays the same readable size whether the world
+    // is 1400px wide or 390px wide.
+    if (!hudWindVisible) {
+      screenTransform();
+      drawWindGauge();
+      worldTransform();
+    }
   }
 
   // ---------- Boot ----------
+  // The canvas is sized entirely in resize() now, so missing a size change
+  // leaves the playfield visibly wrong rather than merely blurry — the old
+  // width:100% canvas used to paper over a late measurement. Watching the box
+  // itself catches every cause (orientation, browser chrome, a layout shift,
+  // a wrapping control row), not just the ones that raise a window event.
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(resize).observe(gameWrap);
+  }
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 150));
   // Mobile browsers resize the visual viewport when the address bar hides/shows
@@ -2816,8 +2873,8 @@
   // the turn machinery directly. Nothing in the game itself reads this object.
   window.__BARRAGE_TEST__ = {
     BUILD, WEAPONS, MISSILE, DIFFICULTY_SETTINGS, GRAVITY, TANK_W, TANK_H, MAX_HP,
-    WIND_MAX, MAX_PLAYERS, THEMES,
-    groundHeightAt, craterAt, bedrockY, newTerrain, rebuildTerrainToWidth,
+    WIND_MAX, MAX_PLAYERS, THEMES, SIM_W, SIM_H,
+    groundHeightAt, craterAt, bedrockY, newTerrain, buildTerrainFromShape,
     placeTanks, levelTankPads, groundGradientAt, buildTanks,
     freshAmmo, weaponEnabled, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
     fire, applyDamageAndCrater, stepProjectile, stepRoller, detonateRoller, splitMirv,
@@ -2844,6 +2901,7 @@
     get playerCount() { return playerCount; }, set playerCount(v) { playerCount = v; },
     get lang() { return lang; },
     get W() { return W; }, get H() { return H; }, get physScale() { return physScale; },
+    get viewScale() { return viewScale; }, get viewW() { return viewW; }, get viewH() { return viewH; },
     get turnToken() { return turnToken; }, get lastWinner() { return lastWinner; },
     get shotExploded() { return shotExploded; },
     get explosions() { return explosions; }, get particles() { return particles; }

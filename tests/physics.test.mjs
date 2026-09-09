@@ -94,23 +94,26 @@ test('predictLandingX agrees with the finer traceShot integrator', () => {
   }
 });
 
-test('range scales with the canvas so aim carries across screen sizes', () => {
-  const fractions = [400, 900, 1600].map(width => {
+test('the same shot lands on the same spot on every screen size', () => {
+  // The property a match depends on: physics is in world units, so the canvas
+  // it happens to be drawn on cannot change where a shell lands. (Physics used
+  // to be scaled by canvas width, which made the landing point screen-dependent
+  // and two players unable to share a world.)
+  const landings = [400, 900, 1600].map(width => {
     const h = load({ width, height: 500 });
     const { g } = h;
     g.cpuMode = false;
     g.resetGame();
     h.flatTerrain(400);
     g.wind = 0;
-    const x0 = width * 0.2;
-    return (g.predictLandingX(x0, 380, 45, 60, 0) - x0) / width;
+    return g.predictLandingX(200, 380, 45, 60, 0);
   });
 
-  // Before physics was scaled by width, a fixed-pixel range meant the same shot
-  // crossed most of a phone screen and a tenth of an ultrawide.
-  const spread = Math.max(...fractions) - Math.min(...fractions);
-  assert.ok(spread < 0.1, `landing fractions drifted too far: ${fractions.map(f => f.toFixed(3))}`);
-  assert.ok(fractions.every(f => f > 0.3), 'a 60-power shot should cross a third of any screen');
+  for (const landed of landings) {
+    assert.equal(landed, landings[0], `landing points differ across canvases: ${landings}`);
+  }
+  const range = landings[0] - 200;
+  assert.ok(range > 0.3 * 1000, `a 60-power shot should carry across the world, went ${range}`);
 });
 
 test('wind bends the shell in flight, not just in the predictor', () => {
