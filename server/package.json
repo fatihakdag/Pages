@@ -1,0 +1,15 @@
+{
+  "name": "barrage-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Room relay for Barrage online matches. Separate package so the game itself stays dependency-free.",
+  "main": "relay.mjs",
+  "scripts": {
+    "start": "node relay.mjs",
+    "test": "node --test relay.test.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}

@@ -5,6 +5,7 @@
   "description": "Barrage — a single-file artillery game. index.html is the whole app; this file exists only to run the tests and the screenshot tool.",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "shots": "node tools/shots.mjs"
+    "shots": "node tools/shots.mjs",
+    "relay": "node server/relay.mjs"
   }
 }
