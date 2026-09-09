@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import { createRelay, PROTOCOL } from './relay.mjs';
 
 /** Boot a relay on a free port; every test gets its own. */
-async function withRelay(fn) {
-  const relay = createRelay({ serveGame: true });
+async function withRelay(fn, opts = {}) {
+  const relay = createRelay({ serveGame: true, ...opts });
   const port = await relay.listen(0);
   const clients = [];
   try {
@@ -121,18 +121,47 @@ test('a departure is announced and hands the host role on', async () => {
   });
 });
 
-test('the room is forgotten once the last player leaves', async () => {
+test('an emptied room is held open, so a dropped player can come back to it', async () => {
   await withRelay(async (h) => {
     const a = await h.client();
     const { room } = await a.join();
-    assert.equal(h.relay.rooms.size, 1);
     a.close();
-    // Give the close handler a tick.
     await new Promise(r => setTimeout(r, 100));
-    assert.equal(h.relay.rooms.size, 0);
 
+    // The room used to be destroyed the instant it emptied, which lost the code
+    // to any blip in the connection.
+    assert.equal(h.relay.rooms.size, 1, 'still held');
+    const back = await h.client();
+    assert.equal((await back.join(room)).t, 'joined', 'the same code still works');
+  });
+});
+
+test('a held room is forgotten once its grace period runs out', async () => {
+  await withRelay(async (h) => {
+    const a = await h.client();
+    const { room } = await a.join();
+    a.close();
+    await new Promise(r => setTimeout(r, 300));
+
+    assert.equal(h.relay.rooms.size, 0, 'swept');
     const b = await h.client();
     assert.equal((await b.join(room)).code, 'NO_ROOM');
+  }, { roomGraceMs: 30, sweepMs: 20 });   // short enough to watch expire
+});
+
+test('health separates rooms in play from rooms merely held', async () => {
+  await withRelay(async (h) => {
+    const a = await h.client();
+    await a.join();
+    let health = await (await fetch(`http://127.0.0.1:${h.port}/health`)).json();
+    assert.equal(health.rooms, 1);
+    assert.equal(health.held, 0);
+
+    a.close();
+    await new Promise(r => setTimeout(r, 100));
+    health = await (await fetch(`http://127.0.0.1:${h.port}/health`)).json();
+    assert.equal(health.rooms, 0, 'nobody is in it');
+    assert.equal(health.held, 1, 'but it is still there to come back to');
   });
 });
 
@@ -197,7 +226,7 @@ test('a flood is throttled instead of relayed', async () => {
 test('health reports the live room count', async () => {
   await withRelay(async (h) => {
     const before = await (await fetch(`http://127.0.0.1:${h.port}/health`)).json();
-    assert.deepEqual(before, { ok: true, rooms: 0, protocol: PROTOCOL });
+    assert.deepEqual(before, { ok: true, rooms: 0, held: 0, protocol: PROTOCOL });
     const a = await h.client();
     await a.join();
     const after = await (await fetch(`http://127.0.0.1:${h.port}/health`)).json();

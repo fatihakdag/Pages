@@ -136,6 +136,14 @@ Other things worth knowing:
   and anyone left over when it fills is told rather than parked in a lobby that
   never starts. During a match the roster controls lock and the opponents select
   reads Online, because the seats were dealt when it began.
+- **Every turn has a minute.** `netCheckTurnClock()` runs each frame; when a
+  seat runs out, exactly one other client calls it — `netEnforcerFor()` picks
+  the lowest living seat that is not the one timing out, so a four-player game
+  does not forfeit the same player three times. A client never forfeits itself.
+  The banner counts down over the last 20 seconds so it is never a surprise.
+- **The relay holds an emptied room for five minutes.** It used to delete a room
+  the instant its last member left, so a brief disconnection lost the code and
+  the match with it. `/health` reports `rooms` in play and `held` separately.
 - `netApplyState()` rebuilds the tanks when the snapshot's roster differs from
   the local one. Without that a client that joined a four-seat match keeps its
   own two tanks and quietly drops the rest of the board.
@@ -157,8 +165,9 @@ Other things worth knowing:
   (`requestAnimationFrame` neutered, `step()` driven from a counter) because
   headless Chrome throttles whichever page is not in front — the same
   throttling as the backgrounded-tab gap above.
-- A backgrounded tab still stops that player's game loop, and nothing takes the
-  turn for them. It is at least no longer mysterious: `visibilitychange` fires
+- A backgrounded tab still stops that player's game loop. They now lose the seat
+  after a minute rather than holding the game up, and it is not mysterious
+  either: `visibilitychange` fires
   before the throttling starts and the socket still works at that instant, so
   the tab announces itself (`away`) and the other player sees "opponent is
   away" rather than a match that appears to hang. A turn timer with the AI
@@ -167,9 +176,7 @@ Other things worth knowing:
 
 ## Still to build
 
-- **Robustness.** A turn timer, and a disconnect handing the seat to the
-  existing AI rather than pausing the round. These are what close the
-  backgrounded-tab gap above. Rematch and rejoin are done: `netRestartMatch()`
+- **Robustness.** Rematch, rejoin and the turn deadline are done: `netRestartMatch()`
   deals the same seats a fresh board, and a player who drops leaves their seat
   open (`online.vacant`) so the next arrival is handed the board as it stands
   rather than starting over. Both go out as the ordinary `start` message.

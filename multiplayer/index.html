@@ -917,6 +917,7 @@
       netPlaying: 'room {code}', netEnded: 'opponent left',
       netTheirTurn: '{name} — THEIR TURN', netYouAre: 'you are {name}',
       netAway: 'opponent is away', netAwayTurn: '{name} — AWAY',
+      netTurnLeft: '{name} — {s}s', netForfeited: '{name} timed out',
       netNoRoom: 'no such room', netFull: 'room is full',
       netVersion: 'update the page', netLost: 'connection lost',
     },
@@ -948,6 +949,7 @@
       netPlaying: 'oda {code}', netEnded: 'rakip ayrıldı',
       netTheirTurn: '{name} — SIRA ONDA', netYouAre: 'sen {name}',
       netAway: 'rakip başka yerde', netAwayTurn: '{name} — BAŞKA YERDE',
+      netTurnLeft: '{name} — {s}sn', netForfeited: '{name} süreyi doldurdu',
       netNoRoom: 'oda bulunamadı', netFull: 'oda dolu',
       netVersion: 'sayfayı yenileyin', netLost: 'bağlantı koptu',
       'Rust Canyon': 'Pas Kanyonu'
@@ -1627,9 +1629,12 @@
       // A hidden tab has its animation loop throttled, so that player's game
       // simply stops. Saying so beats a banner that looks like an ordinary wait.
       const theirTurnAndAway = online.peerAway && netRemoteSeat(currentPlayer);
-      turnBanner.textContent = theirTurnAndAway
-        ? txt('netAwayTurn', { name: who })
-        : txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
+      const left = netTurnSecondsLeft();
+      if (theirTurnAndAway) turnBanner.textContent = txt('netAwayTurn', { name: who });
+      // The last stretch is shown as a countdown, so running out is never a
+      // surprise — to the player thinking, or to the one waiting.
+      else if (left !== null && left <= 20) turnBanner.textContent = txt('netTurnLeft', { name: who, s: left });
+      else turnBanner.textContent = txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
     }
   }
 
@@ -1871,6 +1876,7 @@
     setWind();
     state = 'AIMING';
     camPanned = false; // a new turn releases the camera back to whoever is aiming
+    netResetTurnClock();
     updateHUD();
     syncControlsFromTank();
     // The player who took the turn is the authority on how it ended.
@@ -2447,6 +2453,7 @@
     particles = particles.filter(p => p.age < p.life);
     windPulse = Math.max(0, windPulse - dt * 1.6);
     camFollow(dt);
+    netCheckTurnClock();
     updateHeli(dt);
     updateTimer();
 
@@ -3227,6 +3234,12 @@
 
   const NET_PROTOCOL = 1;
 
+  // A turn nobody takes would otherwise hold the game up for ever: a hidden tab
+  // never disconnects, so no timeout at the socket level can ever fire. The seat
+  // gets a minute, and then it is out of the round.
+  const TURN_LIMIT_MS = 60 * 1000;
+  let turnDeadline = 0;   // performance.now() by which the current seat must fire
+
   const online = {
     ws: null,
     room: null,
@@ -3244,6 +3257,51 @@
 
   /** True once we are in a match, as opposed to merely connected. */
   function netPlaying() { return online.status === 'playing'; }
+
+  /** Restart the clock for whoever is about to aim. */
+  function netResetTurnClock() { turnDeadline = performance.now() + TURN_LIMIT_MS; }
+
+  /** Whole seconds left, or null when no clock is running. */
+  function netTurnSecondsLeft() {
+    if (!netPlaying() || state !== 'AIMING') return null;
+    return Math.max(0, Math.ceil((turnDeadline - performance.now()) / 1000));
+  }
+
+  /**
+   * Exactly one client enforces a given seat's deadline, or a four-player game
+   * would forfeit the same player three times over. It is the lowest-numbered
+   * living seat that is not the one running out of time — deterministic, so
+   * everyone agrees who it is without asking.
+   */
+  function netEnforcerFor(seat) {
+    for (let i = 0; i < tanks.length; i++) {
+      if (i !== seat && tanks[i] && tanks[i].alive) return i;
+    }
+    return -1;
+  }
+
+  /** Take a seat out of the round and tell everyone, once. */
+  function netForfeitSeat(seat) {
+    const t = tanks[seat];
+    if (!t || !t.alive) return;
+    t.alive = false;
+    t.hp = 0;
+    online.lastForfeit = seat;
+    netSend('forfeit', { seat });
+    updateHUD();
+    // endTurnCheckWin ends the round if this leaves one tank standing; if not,
+    // nextTurn moves play on and publishes the new state as usual.
+    state = 'RESOLVED';
+  }
+
+  /** Called every frame: is the seat in play out of time, and is it ours to say? */
+  function netCheckTurnClock() {
+    if (!netPlaying() || state !== 'AIMING') return;
+    if (performance.now() < turnDeadline) return;
+    if (currentPlayer === online.seat) return;          // our own clock is theirs to enforce
+    if (netEnforcerFor(currentPlayer) !== online.seat) return;
+    netForfeitSeat(currentPlayer);
+  }
   /** A seat somebody else drives — locked for us exactly like a CPU seat. */
   function netRemoteSeat(i) { return netPlaying() && i !== online.seat; }
 
@@ -3430,6 +3488,14 @@
       return;
     }
 
+    if (d.k === 'forfeit') {
+      const t = tanks[d.seat];
+      if (t && t.alive) { t.alive = false; t.hp = 0; }
+      online.lastForfeit = d.seat;
+      updateHUD();
+      return;
+    }
+
     if (d.k === 'away') {
       online.peerAway = !!d.hidden;
       refreshOnlineUi();
@@ -3591,6 +3657,9 @@
     clusterQueue = [];
     setWind();
     wind = snap.wind; // setWind rolls a fresh value; the snapshot is authority
+    // A snapshot hands the turn over, so the clock starts again here too --
+    // otherwise a player would inherit whatever was left of someone else's.
+    netResetTurnClock();
     updateHUD();
     syncControlsFromTank();
   }
@@ -3668,7 +3737,8 @@
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
-    netSeatCount, refreshOpponentUi,
+    netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock,
+    netTurnSecondsLeft, netEnforcerFor, netForfeitSeat, TURN_LIMIT_MS,
     netPlaying, NET_PROTOCOL,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },
