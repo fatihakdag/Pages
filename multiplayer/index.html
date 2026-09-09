@@ -749,6 +749,9 @@
       <select id="mode-select">
         <option value="cpu" selected>vs CPU</option>
         <option value="human">All Human</option>
+        <!-- Selected while a match is on, and hidden otherwise: it is a state
+             the game is in, not a mode you can pick. -->
+        <option value="online" hidden>Online</option>
       </select>
     </div>
     <div class="ctrl-group" id="difficulty-group">
@@ -908,9 +911,9 @@
       aimLeft: 'Aim one degree left', aimRight: 'Aim one degree right',
       powerDown: 'Power down one', powerUp: 'Power up one',
       zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomFit: 'Fit the whole battlefield',
-      online: 'ONLINE', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
+      online: 'ONLINE', onlineMode: 'Online', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
       roomCode: 'CODE', roomCodeLabel: 'Room code',
-      netOffline: 'off', netConnecting: 'connecting…', netWaiting: 'code {code} — waiting',
+      netOffline: 'off', netConnecting: 'connecting…', netWaiting: 'code {code} — {n}/{total}',
       netPlaying: 'room {code}', netEnded: 'opponent left',
       netTheirTurn: '{name} — THEIR TURN', netYouAre: 'you are {name}',
       netAway: 'opponent is away', netAwayTurn: '{name} — AWAY',
@@ -939,9 +942,9 @@
       aimLeft: 'Bir derece sola nişan al', aimRight: 'Bir derece sağa nişan al',
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
       zoomIn: 'Yakınlaştır', zoomOut: 'Uzaklaştır', zoomFit: 'Tüm sahayı göster',
-      online: 'ÇEVRİMİÇİ', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
+      online: 'ÇEVRİMİÇİ', onlineMode: 'Çevrimiçi', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
       roomCode: 'KOD', roomCodeLabel: 'Oda kodu',
-      netOffline: 'kapalı', netConnecting: 'bağlanıyor…', netWaiting: 'kod {code} — bekleniyor',
+      netOffline: 'kapalı', netConnecting: 'bağlanıyor…', netWaiting: 'kod {code} — {n}/{total}',
       netPlaying: 'oda {code}', netEnded: 'rakip ayrıldı',
       netTheirTurn: '{name} — SIRA ONDA', netYouAre: 'sen {name}',
       netAway: 'rakip başka yerde', netAwayTurn: '{name} — BAŞKA YERDE',
@@ -1010,7 +1013,7 @@
       for (let i = 0; i < sel.options.length; i++) sel.options[i].textContent = txt(keys[i]);
     };
     relabel(countSelect, ['tanks2', 'tanks3', 'tanks4']);
-    relabel(modeSelect, ['vsCpu', 'allHuman']);
+    relabel(modeSelect, ['vsCpu', 'allHuman', 'onlineMode']);
     relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
     const aria = { 'zoom-in': 'zoomIn', 'zoom-out': 'zoomOut', 'zoom-fit': 'zoomFit',
                    'angle-left': 'aimLeft', 'angle-right': 'aimRight',
@@ -1039,7 +1042,14 @@
 
   function refreshOpponentUi() {
     // CPU level only matters when playing against the computer
-    difficultyGroup.style.display = cpuMode ? '' : 'none';
+    difficultyGroup.style.display = (cpuMode && !netPlaying()) ? '' : 'none';
+    // A match is neither "vs CPU" nor "All Human": say Online, and do not let
+    // the roster be edited out from under a game that is already dealt.
+    const inMatch = netPlaying();
+    const onlineOpt = [...modeSelect.options].find(o => o.value === 'online');
+    if (onlineOpt) onlineOpt.hidden = !inMatch;
+    if (inMatch) modeSelect.value = 'online';
+    else if (modeSelect.value === 'online') modeSelect.value = cpuMode ? 'cpu' : 'human';
   }
 
   modeSelect.addEventListener('change', () => {
@@ -1654,10 +1664,13 @@
     // not once the round is over — the round may well have ended on a CPU seat,
     // and the roster and difficulty are exactly what you want to change before
     // hitting Play Again.
-    const aiHoldsTurn = isAiTurn && state !== 'GAMEOVER';
-    countSelect.disabled = aiHoldsTurn;
-    modeSelect.disabled = aiHoldsTurn;
-    difficultySelect.disabled = aiHoldsTurn;
+    // In a match the roster is frozen for its whole length, not just on
+    // someone else's turn: the seats were dealt when it started, and changing
+    // the player count here would rebuild this client's tanks alone.
+    const rosterLocked = (isAiTurn && state !== 'GAMEOVER') || netPlaying();
+    countSelect.disabled = rosterLocked;
+    modeSelect.disabled = rosterLocked;
+    difficultySelect.disabled = rosterLocked;
     syncWeaponOptions(t);
   }
 
@@ -3256,7 +3269,11 @@
   function netStatusText() {
     if (online.error) return online.error;
     if (online.status === 'connecting') return txt('netConnecting');
-    if (online.status === 'waiting') return txt('netWaiting', { code: online.room });
+    if (online.status === 'waiting') {
+      // How many are here out of how many this room is waiting for, so the host
+      // can see a 4-player game filling up.
+      return txt('netWaiting', { code: online.room, n: netPeerIds.length + 1, total: netSeatCount() });
+    }
     if (online.status === 'playing') {
       return online.peerAway ? txt('netAway') : txt('netPlaying', { code: online.room });
     }
@@ -3377,6 +3394,15 @@
     if (d.k === 'rematch' && online.host) { netRestartMatch(); return; }
 
     if (d.k === 'start') {
+      // A table that filled up without us: the relay lets four into a room, but
+      // the match may have been dealt for fewer. Say so rather than sitting in
+      // a lobby that looks connected and never starts.
+      if (!d.seats.includes(online.id)) {
+        online.error = txt('netFull');
+        online.status = 'ended';
+        refreshOnlineUi();
+        return;
+      }
       online.peerAway = false;
       online.seats = d.seats;
       online.seat = d.seats.indexOf(online.id);
@@ -3423,15 +3449,20 @@
   /** Host only: deal seats and hand out the world everyone will play on. */
   function netStartMatch() {
     if (!online.host || netPlaying()) return;
+    const seats = netSeatCount();
+    // Wait for the whole table. Dealing at the first arrival is what limited
+    // this to two players.
+    if (netPeerIds.length + 1 < seats) { refreshOnlineUi(); return; }
     cpuMode = false;
-    playerCount = 2;
-    countSelect.value = '2';
-    refreshOpponentUi();
-    resetGame();
-    // Seat order follows join order, so the host is player 1.
+    playerCount = seats;
+    countSelect.value = String(seats);
+    // Seat order follows join order, so the host is player 1. Set before the UI
+    // is refreshed: refreshOpponentUi asks whether a match is on.
     online.seats = [online.id, ...netOtherIds()];
     online.seat = 0;
     online.status = 'playing';
+    refreshOpponentUi();
+    resetGame();
     netSend('start', { seats: online.seats, state: netSnapshot() });
     refreshOnlineUi();
     syncControlsFromTank();
@@ -3441,8 +3472,9 @@
   /** Host only: same seats, a fresh battlefield, both sides told at once. */
   function netRestartMatch() {
     if (!online.host || online.vacant !== null) return;
-    resetGame();
     online.status = 'playing';
+    refreshOpponentUi();
+    resetGame();
     netSend('start', { seats: online.seats, state: netSnapshot() });
     refreshOnlineUi();
     syncControlsFromTank();
@@ -3455,6 +3487,7 @@
     online.seats[online.vacant] = id;
     online.vacant = null;
     online.status = 'playing';
+    refreshOpponentUi();
     // The same message a fresh match uses — the state it carries is simply the
     // game in progress rather than a new one.
     netSend('start', { seats: online.seats, state: netSnapshot() });
@@ -3474,10 +3507,20 @@
     else netSend('rematch', {});   // the host deals it; we wait for `start`
   }
 
-  // The relay tells us who is in the room as they arrive; we only ever need the
-  // one other player for a two-seat match.
+  // The relay tells us who is in the room as they arrive.
   let netPeerIds = [];
-  function netOtherIds() { return netPeerIds.slice(0, playerCount - 1); }
+
+  /**
+   * How many seats this match is for. The host's TANKS selector decides it, so
+   * a 3- or 4-player game is set up the same way a local one is; guests adopt
+   * whatever the `start` message dealt.
+   */
+  function netSeatCount() {
+    if (netPlaying() && online.seats.length) return online.seats.length;
+    const n = parseInt(countSelect.value, 10);
+    return Math.min(MAX_PLAYERS, Math.max(2, isFinite(n) ? n : 2));
+  }
+  function netOtherIds() { return netPeerIds.slice(0, netSeatCount() - 1); }
 
   // Infinity is not JSON, and the standard shell's ammo is Infinity.
   const AMMO_INFINITE = -1;
@@ -3519,6 +3562,15 @@
     if (snap.theme >= 0 && THEMES[snap.theme] && THEMES[snap.theme] !== theme) {
       applyTheme(THEMES[snap.theme]);
       buildDecor();
+    }
+    // A client that joined a four-seat match still has its own two tanks until
+    // told otherwise, and the extra ones in the snapshot would be dropped on
+    // the floor. The roster travels with the board.
+    if (snap.tanks.length && snap.tanks.length !== tanks.length) {
+      playerCount = snap.tanks.length;
+      countSelect.value = String(playerCount);
+      buildTanks();
+      refreshOpponentUi();
     }
     terrain = snap.terrain.slice();
     snap.tanks.forEach((s, i) => {
@@ -3616,6 +3668,7 @@
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
+    netSeatCount, refreshOpponentUi,
     netPlaying, NET_PROTOCOL,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },

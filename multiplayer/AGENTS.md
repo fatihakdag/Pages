@@ -130,7 +130,15 @@ Other things worth knowing:
 - `netRemoteSeat(i)` is the counterpart to `isAi(i)`: a seat somebody else
   drives locks the turn controls exactly like a CPU seat does.
 - The host deals seats in join order and hands out the world in the `start`
-  message, so nothing depends on the two clients generating the same terrain.
+  message, so nothing depends on the clients generating the same terrain.
+- **Table size is the host's TANKS selector.** The room waits until that many
+  players are present before dealing — the lobby counts up, `code AB12 — 3/4` —
+  and anyone left over when it fills is told rather than parked in a lobby that
+  never starts. During a match the roster controls lock and the opponents select
+  reads Online, because the seats were dealt when it began.
+- `netApplyState()` rebuilds the tanks when the snapshot's roster differs from
+  the local one. Without that a client that joined a four-seat match keeps its
+  own two tanks and quietly drops the rest of the board.
 - `netSnapshot()` maps `Infinity` ammo to `-1`, because the standard shell's
   ammo is `Infinity` and JSON cannot carry it.
 - `socketFactory` is overridable through the seam (`setSocketFactory`), which
@@ -149,8 +157,6 @@ Other things worth knowing:
   (`requestAnimationFrame` neutered, `step()` driven from a counter) because
   headless Chrome throttles whichever page is not in front — the same
   throttling as the backgrounded-tab gap above.
-- The opponents select still reads "vs CPU" during a match; it should show and
-  lock to the online roster.
 - A backgrounded tab still stops that player's game loop, and nothing takes the
   turn for them. It is at least no longer mysterious: `visibilitychange` fires
   before the throttling starts and the socket still works at that instant, so
@@ -174,5 +180,4 @@ Other things worth knowing:
   over arrivals, legs, crashes and `summonHeli()`, and the snapshot carries the
   whole aircraft plus `heliTimer`. Movement is deliberately not gated — it is
   the same arithmetic on both sides, and drift is erased each turn.
-- **More than two seats.** The protocol deals N seats already, but the host
-  hard-codes a two-player match.
+- **Wind**, as above — the last thing still rolled per client.
