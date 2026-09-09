@@ -99,6 +99,14 @@ copy of the physics to keep in sync.
 Its own package, so the game itself stays dependency-free and the root
 `npm test` still needs no install.
 
+**It runs as exactly one machine.** Rooms are an in-memory `Map`, so a room
+exists only on the process that created it. Deployed with Fly's default of two
+machines, joins round-robin and about half get `NO_ROOM` from a machine that
+never heard of the room — the symptom is a lobby that works intermittently.
+`fly.toml` pins `max_machines_running = 1` and CI deploys with `--ha=false`.
+Scaling out means moving rooms out of process memory first, or pinning each
+room to a machine with `fly-replay`.
+
 ## The client side
 
 `// ---------- Online ----------` in `index.html`. A match carries two messages
@@ -135,12 +143,12 @@ Other things worth knowing:
   Frame` in hidden tabs, so that player's game loop stops — and because only the
   seat that played publishes authority, the other client waits forever. A turn
   timer, and letting the AI take an unresponsive seat, is the fix.
-- Two live browsers exchanging a full turn has not been verified end to end;
-  headless Chrome throttles whichever page is not in front, which freezes one
-  side mid-shot. The connection, room join, seat dealing and shared world *are*
-  verified in real browsers, and the whole turn loop is covered by
-  `tests/online.test.mjs`. Two ordinary desktop windows do not have this
-  throttling, so it is worth playing once by hand.
+- Verified end to end against the deployed relay: two browser pages join a
+  room, hold identical terrain and wind, and after a shot agree on the crater,
+  the wind roll and whose turn it is. Frames had to be pumped by hand
+  (`requestAnimationFrame` neutered, `step()` driven from a counter) because
+  headless Chrome throttles whichever page is not in front — the same
+  throttling as the backgrounded-tab gap above.
 - The opponents select still reads "vs CPU" during a match; it should show and
   lock to the online roster.
 
