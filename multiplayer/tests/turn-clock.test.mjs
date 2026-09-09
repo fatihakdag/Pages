@@ -46,89 +46,126 @@ function matchOf(seats, asSeat = 1) {
   return { me, ms, host, hs };
 }
 
-test('a seat that never fires is timed out and taken out of the round', () => {
+test('one missed turn is skipped, not punished', () => {
   const { me, ms } = matchOf(2, 1);
   me.g.currentPlayer = 0;          // not us: the other player is thinking
   me.g.state = 'AIMING';
   me.g.netResetTurnClock();
 
   me.advance(30000);
-  assert.equal(me.g.tanks[0].alive, true, 'half a minute is not a timeout');
-  assert.deepEqual(ms.payloads('forfeit'), []);
+  assert.deepEqual(ms.payloads('timeout'), [], 'half a minute is not a timeout');
 
-  me.advance(35000);               // past the minute
-  assert.equal(me.g.tanks[0].alive, false, 'the seat is out');
-  assert.deepEqual(ms.payloads('forfeit'), [{ k: 'forfeit', seat: 0 }],
-    'and everyone is told, once');
+  me.advance(35000);
+  assert.deepEqual(ms.payloads('timeout'), [{ k: 'timeout', seat: 0, missed: 1, ai: false }]);
+  assert.equal(me.g.tanks[0].alive, true, 'nobody is knocked out for being slow');
+  assert.equal(me.g.netSeatIsAi(0), false, 'and the CPU has not stepped in yet');
+
+  me.advanceUntil(() => me.g.currentPlayer === 1, { maxMs: 5000 });
+  assert.equal(me.g.currentPlayer, 1, 'play simply moves on');
 });
 
-test('taking your turn in time keeps you in', () => {
-  const { me } = matchOf(2, 1);
-  me.g.currentPlayer = 1;          // ours
+test('a second miss in a row hands the seat to the CPU, which shoots', () => {
+  const { me, ms } = matchOf(2, 1);
+  me.placeTanksAt([200, 700]);
+  me.g.currentPlayer = 0;
   me.g.state = 'AIMING';
   me.g.netResetTurnClock();
-  me.placeTanksAt([200, 700]);
 
-  me.advance(20000);
-  me.g.tanks[1].angle = 45;
-  me.g.tanks[1].power = 50;
-  me.fireAndSettle();
+  me.advance(65000);                                   // first miss: skipped
+  me.advanceUntil(() => me.g.currentPlayer === 1, { maxMs: 5000 });
 
-  assert.equal(me.g.tanks[1].alive, true);
-  assert.ok(me.g.netTurnSecondsLeft() > 50, 'the clock restarts for the next seat');
+  // Our turn comes and goes, then theirs again.
+  me.g.state = 'AIMING';
+  me.g.currentPlayer = 0;
+  me.g.netResetTurnClock();
+  me.advance(65000);                                   // second miss
+
+  const events = ms.payloads('timeout');
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[1], { k: 'timeout', seat: 0, missed: 2, ai: true });
+  assert.equal(me.g.netSeatIsAi(0), true, 'the CPU has the seat');
+  assert.equal(me.g.tanks[0].alive, true, 'the tank is still in the game');
+
+  // And it plays that turn rather than letting another one lapse. The shot is
+  // taken inside the advance above, so look at what went out rather than at a
+  // state that has already come back round to AIMING.
+  const played = ms.payloads('turn');
+  assert.equal(played.length, 1, 'the CPU took the shot');
+  assert.equal(played[0].seat, 0, 'for the seat that went quiet');
+  assert.equal(played[0].ai, true,
+    'marked as a CPU turn, so nobody reads it as the player returning');
 });
 
-test('we never forfeit ourselves — that is for the others to call', () => {
+test('turning up clears the count and hands the seat back', () => {
+  const { me, ms } = matchOf(2, 1);
+  me.g.currentPlayer = 0;
+  me.g.state = 'AIMING';
+  me.g.netResetTurnClock();
+  me.advance(65000);
+  assert.equal(me.g.online.missed[0], 1);
+
+  // They fire for themselves on the next turn.
+  ms.deliver({ t: 'msg', from: 1, d: { k: 'turn', seat: 0, angle: 45, power: 50, weapon: 'standard', ai: false } });
+  assert.equal(me.g.online.missed[0], 0, 'the count resets');
+  assert.equal(me.g.netSeatIsAi(0), false);
+});
+
+test('a CPU-played turn does not count as the player returning', () => {
+  const { me, ms } = matchOf(2, 1);
+  me.g.online.aiSeats.push(0);
+  me.g.online.missed[0] = 2;
+
+  ms.deliver({ t: 'msg', from: 1, d: { k: 'turn', seat: 0, angle: 45, power: 50, weapon: 'standard', ai: true } });
+
+  assert.equal(me.g.netSeatIsAi(0), true, 'the CPU keeps the seat');
+  assert.equal(me.g.online.missed[0], 2);
+});
+
+test('we never time ourselves out — that is for the others to call', () => {
   const { me, ms } = matchOf(2, 1);
   me.g.currentPlayer = 1;          // our own turn
   me.g.state = 'AIMING';
   me.g.netResetTurnClock();
 
-  me.advance(90000);               // sit on our hands well past the limit
+  me.advance(90000);
 
-  assert.equal(me.g.tanks[1].alive, true, 'our client does not remove us');
-  assert.deepEqual(ms.payloads('forfeit'), []);
+  assert.deepEqual(ms.payloads('timeout'), [], 'our client does not call time on us');
+  assert.equal(me.g.netSeatIsAi(1), false);
 });
 
 test('only one player calls it, whatever the table size', () => {
-  // Seat 0 is thinking. Seat 1 is the lowest living seat that is not seat 0, so
-  // seat 1 enforces and seats 2 and 3 stay out of it.
-  const seenFrom = (asSeat) => {
+  const calledFrom = (asSeat) => {
     const { me, ms } = matchOf(4, asSeat);
     me.g.currentPlayer = 0;
     me.g.state = 'AIMING';
     me.g.netResetTurnClock();
     me.advance(65000);
-    return ms.payloads('forfeit').length;
+    return ms.payloads('timeout').length;
   };
-  assert.equal(seenFrom(1), 1, 'the next living seat calls it');
-  assert.equal(seenFrom(2), 0, 'and nobody else does');
-  assert.equal(seenFrom(3), 0);
+  assert.equal(calledFrom(1), 1, 'the next living seat calls it');
+  assert.equal(calledFrom(2), 0, 'and nobody else does');
+  assert.equal(calledFrom(3), 0);
 });
 
-test('the enforcer skips seats already knocked out', () => {
+test('the caller skips seats that are out, and CPU-held seats', () => {
   const { me } = matchOf(4, 2);
-  me.g.tanks[1].alive = false;     // seat 1 is gone, so seat 2 is next in line
-  me.g.currentPlayer = 0;
-  me.g.state = 'AIMING';
-  me.g.netResetTurnClock();
+  me.g.tanks[1].alive = false;
+  assert.equal(me.g.netActsForSeat(0), 2, 'a dead seat cannot call time');
 
-  assert.equal(me.g.netEnforcerFor(0), 2, 'the dead seat is passed over');
-  me.advance(65000);
-  assert.equal(me.g.tanks[0].alive, false, 'and we call it instead');
+  const other = matchOf(4, 2);
+  other.me.g.online.aiSeats.push(1);
+  assert.equal(other.me.g.netActsForSeat(0), 2, 'nor can a seat the CPU is playing');
 });
 
-test('a forfeit announced by someone else is applied here too', () => {
+test('a timeout announced by someone else is applied here too', () => {
   const { me, ms } = matchOf(4, 2);
-  assert.equal(me.g.tanks[3].alive, true);
-
-  ms.deliver({ t: 'msg', from: 4, d: { k: 'forfeit', seat: 3 } });
-
-  assert.equal(me.g.tanks[3].alive, false);
-  assert.equal(me.g.tanks[3].hp, 0);
+  ms.deliver({ t: 'msg', from: 1, d: { k: 'timeout', seat: 3, missed: 2, ai: true } });
+  assert.equal(me.g.online.missed[3], 2);
+  assert.equal(me.g.netSeatIsAi(3), true);
+  assert.equal(me.g.tanks[3].alive, true, 'still in the game, just played for');
 });
 
-test('the banner counts down in the last stretch', () => {
+test('the banner counts down, then says the CPU has the seat', () => {
   const { me } = matchOf(2, 1);
   me.g.currentPlayer = 0;
   me.g.state = 'AIMING';
@@ -137,10 +174,13 @@ test('the banner counts down in the last stretch', () => {
   me.g.updateHUD();
   assert.doesNotMatch(me.g.el.turnBanner.textContent, /\d+s/, 'quiet with a minute to go');
 
-  me.advance(45000);               // 15s left
+  me.advance(45000);
   me.g.updateHUD();
-  assert.match(me.g.el.turnBanner.textContent, /1[0-9]s|[0-9]s/,
-    `expected a countdown, got "${me.g.el.turnBanner.textContent}"`);
+  assert.match(me.g.el.turnBanner.textContent, /\d+s/, 'counting down near the end');
+
+  me.g.online.aiSeats.push(0);
+  me.g.updateHUD();
+  assert.match(me.g.el.turnBanner.textContent, /CPU/, 'and then says who is playing');
 });
 
 test('offline play has no deadline at all', () => {

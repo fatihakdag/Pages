@@ -142,7 +142,9 @@ test('firing publishes the inputs before the shell is simulated', () => {
   h.g.fire();
 
   const [turn] = sock.payloads('turn');
-  assert.deepEqual(turn, { k: 'turn', seat: 0, angle: 40, power: 70, weapon: 'standard' });
+  assert.deepEqual(turn,
+    { k: 'turn', seat: 0, angle: 40, power: 70, weapon: 'standard', ai: false },
+    'ai: false marks it as the player themselves, not the CPU standing in');
 });
 
 test('their turn is replayed here, not merely reported', () => {

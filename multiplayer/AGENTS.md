@@ -136,11 +136,18 @@ Other things worth knowing:
   and anyone left over when it fills is told rather than parked in a lobby that
   never starts. During a match the roster controls lock and the opponents select
   reads Online, because the seats were dealt when it began.
-- **Every turn has a minute.** `netCheckTurnClock()` runs each frame; when a
-  seat runs out, exactly one other client calls it — `netEnforcerFor()` picks
-  the lowest living seat that is not the one timing out, so a four-player game
-  does not forfeit the same player three times. A client never forfeits itself.
-  The banner counts down over the last 20 seconds so it is never a surprise.
+- **Every turn has a minute.** One miss is simply skipped — being away from the
+  keyboard for a minute is not a crime. A second miss in a row hands the seat to
+  the CPU, which plays *that* turn rather than letting another lapse, and the
+  tank stays in the game. Taking a turn at any point clears the count and hands
+  the seat back; a CPU-played turn is marked `ai: true` so it is not mistaken
+  for the player returning.
+- `netActsForSeat()` decides which client speaks for a seat that cannot speak
+  for itself — calling its deadline, and playing it once the CPU has it. It is
+  the lowest living seat that is still a real player and is not this one:
+  deterministic, so everyone agrees without asking, and a four-player game does
+  not time the same seat out three times over. A client never calls time on
+  itself, which is what makes it work when your own tab is frozen.
 - **The relay holds an emptied room for five minutes.** It used to delete a room
   the instant its last member left, so a brief disconnection lost the code and
   the match with it. `/health` reports `rooms` in play and `held` separately.
