@@ -6,8 +6,7 @@
 # One small machine is plenty: a turn is one message, and the relay holds only
 # room membership.
 app = "barrage-relay"
-primary_region = "iad"   # US East (Ashburn). Any Fly region works:
-                         # ord Chicago, sjc San Jose, lax, dfw, sea, ewr, mia.
+primary_region = "cmh"   # US East (Columbus, Ohio)
 
 [build]
 
