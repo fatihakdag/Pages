@@ -30,7 +30,9 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@master
       # --remote-only builds on Fly's builders, so the runner needs no Docker.
       - name: deploy
-        run: flyctl deploy --remote-only
+        # --ha=false: one machine only. Rooms live in memory, so a second
+        # machine would serve joins for rooms it does not have.
+        run: flyctl deploy --remote-only --ha=false
         working-directory: multiplayer
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

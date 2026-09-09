@@ -3,8 +3,19 @@
 #   fly launch --copy-config --no-deploy   (first time: picks a name and region)
 #   fly deploy
 #
-# One small machine is plenty: a turn is one message, and the relay holds only
-# room membership.
+# EXACTLY ONE MACHINE. The relay keeps rooms in an in-memory Map, so a room
+# exists only on the machine that created it. With Fly's default of two
+# machines for redundancy, connections round-robin and roughly half of all
+# joins land on the machine that never heard of the room -- the guest gets
+# NO_ROOM and the match cannot start.
+#
+# One machine is plenty anyway: a turn is one small message and the relay holds
+# nothing but room membership. If it ever needs more, the rooms have to move
+# out of process memory (or requests be pinned per room with fly-replay);
+# scaling up alone will silently break matches.
+#
+#   fly scale count 1
+#   fly deploy --remote-only --ha=false
 app = "barrage-relay"
 primary_region = "cmh"   # US East (Columbus, Ohio)
 
@@ -24,6 +35,8 @@ primary_region = "cmh"   # US East (Columbus, Ohio)
   # machine up; only an empty lobby stops.
   auto_stop_machines = "suspend"
   min_machines_running = 0
+  # See the note at the top: more than one machine breaks joins.
+  max_machines_running = 1
 
   [http_service.concurrency]
     type = "connections"
