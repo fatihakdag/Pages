@@ -35,8 +35,17 @@ const MAX_MSGS_PER_SEC = 40;  // a turn is one message; this only stops floods
 // destroyed the moment its last member left, so a brief disconnection -- a
 // tunnel, a dropped wifi, both players reloading -- lost the code and the match
 // with it. Holding it lets people come back to the same room.
-const ROOM_GRACE_MS = 5 * 60 * 1000;
-const SWEEP_MS = 30 * 1000;
+const ROOM_GRACE_MS = Number(process.env.ROOM_GRACE_MS) || 5 * 60 * 1000;
+// Drives both room expiry and the idle check below, so it wants to be well
+// under either of them or a machine lingers a whole tick past its welcome.
+const SWEEP_MS = Number(process.env.SWEEP_MS) || 10 * 1000;
+// Idle for this long with nobody connected AND no room held, and the process
+// exits so the host can stop paying for it; the platform starts it again on the
+// next request. Nought disables it. Deciding this here rather than leaving it to
+// the platform's own idle detection is the point: only this process knows a room
+// is being kept for someone who might come back, and stopping then would destroy
+// it. Set by IDLE_EXIT_MS.
+const IDLE_EXIT_MS = Number(process.env.IDLE_EXIT_MS) || 0;
 const HEARTBEAT_MS = 30 * 1000;
 
 /** @typedef {{id:number,name:string,socket:import('ws').WebSocket,room:Room|null,tokens:number,tokenAt:number}} Member */
@@ -74,7 +83,9 @@ class Room {
 
 export function createRelay({ serveGame = process.env.SERVE_GAME !== '0',
                              roomGraceMs = ROOM_GRACE_MS,
-                             sweepMs = SWEEP_MS } = {}) {
+                             sweepMs = SWEEP_MS,
+                             idleExitMs = IDLE_EXIT_MS,
+                             onIdleExit = () => process.exit(0) } = {}) {
   /** @type {Map<string, Room>} */
   const rooms = new Map();
   let nextId = 1;
@@ -84,7 +95,8 @@ export function createRelay({ serveGame = process.env.SERVE_GAME !== '0',
       res.writeHead(200, { 'content-type': 'application/json' });
       const occupied = [...rooms.values()].filter(r => r.members.length).length;
       res.end(JSON.stringify({
-        ok: true, rooms: occupied, held: rooms.size - occupied, protocol: PROTOCOL
+        ok: true, rooms: occupied, held: rooms.size - occupied,
+        sockets: wss.clients.size, protocol: PROTOCOL
       }));
       return;
     }
@@ -183,11 +195,21 @@ export function createRelay({ serveGame = process.env.SERVE_GAME !== '0',
   }, HEARTBEAT_MS);
   heartbeat.unref?.();
 
+  let idleSince = Date.now();
+
+  /** Nothing connected and nothing being kept for anyone. */
+  function isIdle() { return wss.clients.size === 0 && rooms.size === 0; }
+
   const sweep = setInterval(() => {
     const now = Date.now();
     for (const [code, room] of rooms) {
       if (room.emptySince !== null && now - room.emptySince > roomGraceMs) rooms.delete(code);
     }
+    // Checked after the sweep, so a room only just expired still counts as
+    // activity for one more interval rather than the process leaving on the
+    // same tick it forgot someone.
+    if (!isIdle()) idleSince = now;
+    else if (idleExitMs && now - idleSince > idleExitMs) onIdleExit();
   }, sweepMs);
   sweep.unref?.();
 
@@ -195,6 +217,7 @@ export function createRelay({ serveGame = process.env.SERVE_GAME !== '0',
     http,
     wss,
     rooms,
+    isIdle,
     listen(port = Number(process.env.PORT) || 8787) {
       return new Promise((ok) => http.listen(port, () => ok(http.address().port)));
     },

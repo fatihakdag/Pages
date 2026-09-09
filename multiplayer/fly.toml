@@ -23,6 +23,12 @@ primary_region = "cmh"   # US East (Columbus, Ohio)
 
 [env]
   PORT = "8080"
+  # The relay retires itself after five minutes with nobody connected AND no
+  # room being held; auto_start_machines brings it back on the next request.
+  # It decides this rather than the platform because only it can see that a
+  # room is being kept for someone who might come back — stopping then would
+  # destroy it. Set to 0 to keep the machine up permanently.
+  IDLE_EXIT_MS = "300000"
 
 [http_service]
   internal_port = 8080
@@ -30,10 +36,15 @@ primary_region = "cmh"   # US East (Columbus, Ohio)
   # page — so the relay has to be reachable as wss://, which this gives us.
   force_https = true
   auto_start_machines = true
-  # Machines idle down when nobody is connected and wake on the next request.
-  # Fly counts an open WebSocket as activity, so a match in progress keeps its
-  # machine up; only an empty lobby stops.
-  auto_stop_machines = "suspend"
+  # The platform's own autostop stays OFF: it once suspended a machine in the
+  # middle of a match, on my untested assumption that an open WebSocket counts
+  # as activity. It also cannot see that a room is being held for someone who
+  # might come back, and stopping then destroys it.
+  #
+  # Idling down is done by the relay instead, via IDLE_EXIT_MS above -- it
+  # knows about both connections and held rooms. auto_start_machines brings it
+  # back on the next request, about a second.
+  auto_stop_machines = "off"
   min_machines_running = 0
   # See the note at the top: more than one machine breaks joins.
   max_machines_running = 1

@@ -226,7 +226,8 @@ test('a flood is throttled instead of relayed', async () => {
 test('health reports the live room count', async () => {
   await withRelay(async (h) => {
     const before = await (await fetch(`http://127.0.0.1:${h.port}/health`)).json();
-    assert.deepEqual(before, { ok: true, rooms: 0, held: 0, protocol: PROTOCOL });
+    assert.deepEqual(before,
+      { ok: true, rooms: 0, held: 0, sockets: 0, protocol: PROTOCOL });
     const a = await h.client();
     await a.join();
     const after = await (await fetch(`http://127.0.0.1:${h.port}/health`)).json();
@@ -244,4 +245,42 @@ test('the dev server serves the game but nothing above the repo', async () => {
     const escape = await fetch(`http://127.0.0.1:${h.port}/../../../etc/passwd`);
     assert.ok(escape.status === 403 || escape.status === 404, `got ${escape.status}`);
   });
+});
+
+test('an idle relay retires itself, but never while a room is being kept', async () => {
+  let exited = 0;
+  await withRelay(async (h) => {
+    const a = await h.client();
+    const { room } = await a.join();
+
+    // Someone is connected: not idle, whatever the clock says.
+    await new Promise(r => setTimeout(r, 220));
+    assert.equal(exited, 0, 'a connected client is activity');
+    assert.equal(h.relay.isIdle(), false);
+
+    a.close();
+    await new Promise(r => setTimeout(r, 220));
+    // The room is now empty but still held for whoever comes back — the whole
+    // reason this decision cannot be left to the platform, which cannot see it.
+    assert.equal(h.relay.rooms.size, 1);
+    assert.equal(h.relay.isIdle(), false, 'a held room is not idleness');
+    assert.equal(exited, 0, 'and the process must not leave under it');
+
+    // Once the grace runs out and the room is forgotten, there is nothing left.
+    await new Promise(r => setTimeout(r, 400));
+    assert.equal(h.relay.rooms.size, 0);
+    assert.equal(h.relay.isIdle(), true);
+    assert.ok(exited > 0, 'now it retires');
+
+    const back = await h.client();
+    assert.equal((await back.join(room)).code, 'NO_ROOM', 'and that code is gone');
+  }, { roomGraceMs: 250, sweepMs: 50, idleExitMs: 60, onIdleExit: () => { exited++; } });
+});
+
+test('idle exit is off unless asked for', async () => {
+  let exited = 0;
+  await withRelay(async (h) => {
+    await new Promise(r => setTimeout(r, 250));
+    assert.equal(exited, 0, 'nothing retires a relay that was not told to');
+  }, { sweepMs: 50, onIdleExit: () => { exited++; } });
 });
