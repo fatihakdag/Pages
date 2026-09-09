@@ -2650,8 +2650,13 @@
   }, { passive: false });
 
   const ZOOM_STEP = 1.5;
-  zoomInBtn.addEventListener('click', () => { camPanned = true; camZoomTo(camZoom * ZOOM_STEP); });
-  zoomOutBtn.addEventListener('click', () => { camPanned = true; camZoomTo(camZoom / ZOOM_STEP); });
+  // The buttons deliberately do NOT set camPanned. A drag or a pinch says
+  // "look here", and following must not fight that; pressing +/- only says
+  // "closer", so the view should still settle on the action. Zooming about the
+  // canvas centre without this leaves you staring at whatever happens to be in
+  // the middle of the world, which is usually empty sky.
+  zoomInBtn.addEventListener('click', () => camZoomTo(camZoom * ZOOM_STEP));
+  zoomOutBtn.addEventListener('click', () => camZoomTo(camZoom / ZOOM_STEP));
   zoomFitBtn.addEventListener('click', camFit);
 
   function refreshViewUi() {
@@ -3026,7 +3031,13 @@
   }
 
   function render() {
-    ctx.clearRect(0, 0, W, H);
+    // Every frame, because the camera can have moved since the last one. This
+    // used to be set only by resize() and by the on-canvas wind gauge, so on a
+    // screen wide enough to show the HUD wind pill — where that gauge is not
+    // drawn — zooming changed the camera and nothing on screen.
+    screenTransform();
+    ctx.clearRect(0, 0, viewW, viewH);
+    worldTransform();
 
     // sky
     const skyGrad = ctx.createLinearGradient(0, 0, 0, H);

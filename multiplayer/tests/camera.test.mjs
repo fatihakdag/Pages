@@ -195,3 +195,77 @@ test('the view controls only offer what is actually possible', () => {
   assert.equal(h.el('zoom-in').disabled, true, 'but does nothing');
   assert.equal(h.el('zoom-out').disabled, false);
 });
+
+test('zooming reaches the screen on a wide layout too', () => {
+  // Regression: worldTransform() was applied by resize() and by the on-canvas
+  // wind gauge only. On a screen wide enough for the HUD wind pill that gauge
+  // is not drawn, so the camera moved and the picture never did.
+  const h = load({ width: 1440, height: 900 });
+  const { g } = h;
+
+  // Make the HUD pill visible, the way a wide layout does.
+  h.el('wind-hud').offsetParent = {};
+  g.resize();
+
+  const scaleOf = (t) => t[0];
+  const zoomedScale = () => {
+    h.clearTransforms();
+    h.advance(32); // a frame or two
+    // The widest scale applied is the world transform; screen space is DPR.
+    return Math.max(...h.transforms().map(scaleOf));
+  };
+
+  const fitted = zoomedScale();
+  g.camZoomTo(3);
+  const zoomed = zoomedScale();
+
+  assert.ok(h.transforms().length > 0, 'the frame actually drew');
+  assert.ok(Math.abs(zoomed - fitted * 3) < 1e-6,
+    `world transform should scale with the camera: ${fitted} -> ${zoomed}`);
+});
+
+test('the world transform carries the camera offset', () => {
+  const h = load({ width: 1000, height: 620 });
+  const { g } = h;
+  g.camZoomTo(2);
+  g.camPanned = true;      // hold the camera still: following would move it mid-frame
+  g.camCenterOn(750, 400);
+  h.clearTransforms();
+  h.advance(32);
+
+  // setTransform(k, 0, 0, k, -camX*k, -camY*k) — the world transform is the
+  // one with the largest scale; screen space is just DPR.
+  const world = h.transforms().reduce((best, t) => (t[0] > best[0] ? t : best));
+  const k = world[0];
+  assert.ok(Math.abs(world[4] - (-g.camX * k)) < 1e-6, 'x offset follows the camera');
+  assert.ok(Math.abs(world[5] - (-g.camY * k)) < 1e-6, 'y offset follows the camera');
+});
+
+test('the zoom buttons keep following the action; a drag or pinch takes over', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.flatTerrain(400);
+  h.placeTanksAt([160, 840]);
+  g.currentPlayer = 0;
+  g.state = 'AIMING';
+
+  h.el('zoom-in').dispatch('click');
+  h.el('zoom-in').dispatch('click');
+  assert.equal(g.camPanned, false, 'pressing + only says "closer", not "look here"');
+  h.advance(1200);
+  const tankX = g.tanks[0].x;
+  // Zooming about the canvas centre alone would leave the view at 278..722 of
+  // a 1000-wide world, with the tank at 160 outside it. Following is what puts
+  // it back on screen; the tank sits near the left edge, so the view is
+  // clamped there rather than centred on it.
+  assert.ok(tankX >= g.camX && tankX <= g.camX + g.camViewW(),
+    `the active tank is in view: ${tankX} within ${g.camX.toFixed(0)}..${(g.camX + g.camViewW()).toFixed(0)}`);
+  assert.ok(g.camX < 278, 'and the view moved toward it rather than sitting in the middle');
+
+  // A pinch or drag, by contrast, is a deliberate choice of where to look.
+  g.camPanByPixels(-50, 0);
+  g.camPanned = true;
+  const held = g.camX;
+  g.camFollow(0.5);
+  assert.equal(g.camX, held, 'and following leaves it alone');
+});
