@@ -13,6 +13,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
-      # No install step: the suite has no dependencies. It runs the game out of
+      # No install step for the games: both suites run the page out of its own
       # index.html against a stub DOM on Node's built-in test runner.
-      - run: node --test "tests/*.test.mjs"
+      - name: single-player
+        run: node --test "tests/*.test.mjs"
+      - name: multiplayer
+        run: node --test "multiplayer/tests/*.test.mjs"
+      # The relay is the one part with a dependency, so it installs its own.
+      - name: relay
+        run: npm --prefix multiplayer/server ci && npm --prefix multiplayer/server test

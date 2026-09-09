@@ -2,10 +2,12 @@
   "name": "barrage",
   "version": "1.0.0",
   "private": true,
-  "description": "Barrage — a single-file artillery game. index.html is the whole app; this file exists only to run the tests and the screenshot tool.",
+  "description": "Barrage — a single-file artillery game. index.html is the whole app; multiplayer/ holds the online build. This file exists only to run the tests and the tooling.",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "test:mp": "node --test multiplayer/tests/*.test.mjs",
+    "test:relay": "npm --prefix multiplayer/server test",
     "shots": "node tools/shots.mjs",
-    "relay": "node server/relay.mjs"
+    "relay": "node multiplayer/server/relay.mjs"
   }
 }
