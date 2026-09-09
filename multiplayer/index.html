@@ -1735,7 +1735,7 @@
   });
 
   fireBtn.addEventListener('click', fire);
-  restartBtn.addEventListener('click', resetGame);
+  restartBtn.addEventListener('click', onRestartClicked);
 
   function fire() {
     if (state !== 'AIMING') return;
@@ -3199,6 +3199,8 @@
     host: false,
     status: 'offline', // offline | connecting | waiting | playing | ended
     error: null,
+    vacant: null,      // a seat whose player left, kept open for whoever arrives
+
     pendingSync: null  // a sync that arrived while a shot was still in the air
   };
 
@@ -3311,16 +3313,27 @@
     }
 
     if (m.t === 'peer') {
-      // Someone arrived in our room. If we are the host, start the match.
       if (!netPeerIds.includes(m.id)) netPeerIds.push(m.id);
-      if (online.host) netStartMatch();
+      if (!online.host) return;
+      // Someone left and someone has arrived: put them in the empty seat and
+      // hand them the board as it stands, rather than starting over.
+      if (online.vacant !== null) netResumeMatch(m.id);
+      else netStartMatch();
       return;
     }
 
     if (m.t === 'gone') {
       netPeerIds = netPeerIds.filter(id => id !== m.id);
-      online.status = 'ended';
-      online.seat = -1;
+      // The relay hands the host role to whoever is left. Ignoring this used to
+      // deadlock a rejoin: the remaining player still believed it was a guest,
+      // so nobody was willing to deal a new match.
+      online.host = (m.host === online.id);
+      const seat = online.seats.indexOf(m.id);
+      if (seat >= 0) {
+        online.seats[seat] = null;
+        online.vacant = seat;   // kept open, so a rejoin resumes this board
+      }
+      online.status = 'ended';  // play pauses; the board is not thrown away
       refreshOnlineUi();
       syncControlsFromTank();
       updateHUD();
@@ -3331,6 +3344,9 @@
     const d = m.d;
 
     if (d.k === 'ready' && online.host) { netStartMatch(); return; }
+    // Either player can ask for a rematch; the host is the one who deals it,
+    // so that both end up on the same new terrain.
+    if (d.k === 'rematch' && online.host) { netRestartMatch(); return; }
 
     if (d.k === 'start') {
       online.seats = d.seats;
@@ -3384,6 +3400,42 @@
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
+  }
+
+  /** Host only: same seats, a fresh battlefield, both sides told at once. */
+  function netRestartMatch() {
+    if (!online.host || online.vacant !== null) return;
+    resetGame();
+    online.status = 'playing';
+    netSend('start', { seats: online.seats, state: netSnapshot() });
+    refreshOnlineUi();
+    syncControlsFromTank();
+    updateHUD();
+  }
+
+  /** Host only: seat an arrival in the empty chair and hand them this board. */
+  function netResumeMatch(id) {
+    if (!online.host || online.vacant === null) return;
+    online.seats[online.vacant] = id;
+    online.vacant = null;
+    online.status = 'playing';
+    // The same message a fresh match uses — the state it carries is simply the
+    // game in progress rather than a new one.
+    netSend('start', { seats: online.seats, state: netSnapshot() });
+    refreshOnlineUi();
+    syncControlsFromTank();
+    updateHUD();
+  }
+
+  /**
+   * Play Again. Offline this just restarts. In a match it must not: resetting
+   * locally would roll new terrain on one screen only, and the two players
+   * would spend the next round shooting at different landscapes.
+   */
+  function onRestartClicked() {
+    if (!netPlaying()) { resetGame(); return; }
+    if (online.host) netRestartMatch();
+    else netSend('rematch', {});   // the host deals it; we wait for `start`
   }
 
   // The relay tells us who is in the room as they arrive; we only ever need the
@@ -3505,6 +3557,7 @@
     endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
+    netRestartMatch, netResumeMatch, onRestartClicked,
     netPlaying, NET_PROTOCOL,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },
@@ -3512,7 +3565,7 @@
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
-      powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner,
+      powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
       nudgeBtns, cards, hpText, langCheckbox
     },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },

@@ -154,9 +154,12 @@ Other things worth knowing:
 
 ## Still to build
 
-- **Robustness.** A turn timer; reconnecting to a match in progress; a
-  disconnect handing the seat to the existing AI rather than ending the round.
-  These are what close the backgrounded-tab gap above.
+- **Robustness.** A turn timer, and a disconnect handing the seat to the
+  existing AI rather than pausing the round. These are what close the
+  backgrounded-tab gap above. Rematch and rejoin are done: `netRestartMatch()`
+  deals the same seats a fresh board, and a player who drops leaves their seat
+  open (`online.vacant`) so the next arrival is handed the board as it stands
+  rather than starting over. Both go out as the ordinary `start` message.
 - **Authority for everything a turn rolls.** `setWind()`, helicopter spawning
   and the double-click `summonHeli()` are all `Math.random()` today. Wind
   survives because the snapshot carries it, but the helicopter does not: it runs
