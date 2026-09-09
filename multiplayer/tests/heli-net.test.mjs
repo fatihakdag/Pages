@@ -143,3 +143,58 @@ test('summoning one on somebody else’s turn does nothing', () => {
   guest.g.summonHeli();
   assert.ok(guest.g.heli, 'but we can on our own turn');
 });
+
+test('a helicopter arriving mid-turn is seen at once, not at the end of it', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  for (const c of [host, guest]) { c.g.heli = null; c.g.state = 'AIMING'; }
+  assert.equal(host.g.currentPlayer, 0, 'the host holds the turn');
+
+  // Run until the owner's timer brings one in. No shot is taken, so no sync
+  // goes out — this is exactly the window where the other player used to see
+  // nothing at all.
+  assert.ok(host.advanceUntil(() => host.g.heli !== null, { maxMs: 200000 }));
+  const announced = hs.payloads('heli');
+  assert.equal(announced.length, 1, 'it is announced when it appears');
+  assert.deepEqual(hs.payloads('sync'), [], 'and not because a turn ended');
+
+  gs.deliver({ t: 'msg', from: 1, d: announced[0] });
+  assert.ok(guest.g.heli, 'the other player can see it now');
+  assert.equal(guest.g.heli.x, host.g.heli.x);
+  assert.equal(guest.g.heliTimer, host.g.heliTimer);
+});
+
+test('a helicopter leaving is announced too', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  const airborne = {
+    x: 500, y: 120, dir: 1, speed: 400, vy: 0, falling: false, spin: 0,
+    legs: 9, seen: [0, 1]     // out of legs: the next edge retires it
+  };
+  const snap = host.g.netSnapshot();
+  snap.heli = airborne;
+  host.g.netApplyState(JSON.parse(JSON.stringify(snap)));
+  gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: airborne, heliTimer: 60 } });
+  assert.ok(guest.g.heli, 'both have it');
+
+  host.advance(4000);
+  assert.equal(host.g.heli, null, 'the owner retires it');
+
+  const last = hs.payloads('heli').slice(-1)[0];
+  assert.equal(last.heli, null, 'and says so');
+  gs.deliver({ t: 'msg', from: 1, d: last });
+  assert.equal(guest.g.heli, null, 'so it does not linger on the other screen');
+});
+
+test('a client that does not own it stays quiet', () => {
+  const { guest, gs } = liveMatch();
+  guest.g.heli = null;
+  guest.g.currentPlayer = 0;   // not our seat
+  guest.g.state = 'AIMING';
+  // Hold the turn where it is: minutes of game time would otherwise run the
+  // turn clock out and hand play — and the helicopter with it — to us fairly.
+  for (let i = 0; i < 40; i++) {
+    guest.g.netResetTurnClock();
+    guest.advance(5000);
+  }
+  assert.equal(guest.g.heli, null, 'we never spawn one on their turn');
+  assert.deepEqual(gs.payloads('heli'), [], 'nothing to announce, and no right to');
+});

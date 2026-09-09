@@ -2461,7 +2461,12 @@
     windPulse = Math.max(0, windPulse - dt * 1.6);
     camFollow(dt);
     netCheckTurnClock();
+    // Arriving, finishing its last leg, falling off the map, crashing: any of
+    // these change whether there is a helicopter, and the others need telling
+    // now rather than when the turn ends.
+    const heliBefore = heli;
     updateHeli(dt);
+    if (heli !== heliBefore) netAnnounceHeli();
     updateTimer();
 
     render();
@@ -2619,6 +2624,7 @@
     if (!heliAuthority()) return;
     spawnHeli();
     heliTimer = 120 + Math.random() * 60; // don't let a scheduled one pile in behind it
+    netAnnounceHeli();
   }
 
   windHud.addEventListener('dblclick', summonHeli);
@@ -3556,6 +3562,12 @@
       return;
     }
 
+    if (d.k === 'heli') {
+      heli = d.heli ? { ...d.heli, seen: new Set(d.heli.seen || []) } : null;
+      if (typeof d.heliTimer === 'number') heliTimer = d.heliTimer;
+      return;
+    }
+
     if (d.k === 'timeout') {
       online.missed[d.seat] = d.missed;
       if (d.ai && !netSeatIsAi(d.seat)) online.aiSeats.push(d.seat);
@@ -3668,6 +3680,25 @@
     return out;
   }
 
+  function heliOut() {
+    return heli ? {
+      x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed,
+      vy: heli.vy, falling: heli.falling, spin: heli.spin, legs: heli.legs,
+      seen: [...heli.seen]
+    } : null;
+  }
+
+  /**
+   * Tell the others the moment a helicopter arrives or leaves. The snapshot
+   * carries it too, but that only goes out when a turn ends — so a helicopter
+   * that turned up mid-turn was invisible to everyone else until the shot was
+   * taken, and they never saw it get shot down.
+   */
+  function netAnnounceHeli() {
+    if (!netPlaying() || !heliAuthority()) return;
+    netSend('heli', { heli: heliOut(), heliTimer });
+  }
+
   function netSnapshot() {
     return {
       terrain: Array.from(terrain),
@@ -3682,11 +3713,7 @@
       // leaves. heliTimer travels too, so both sides expect the next one at
       // the same moment rather than each running its own clock.
       heliTimer,
-      heli: heli ? {
-        x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed,
-        vy: heli.vy, falling: heli.falling, spin: heli.spin, legs: heli.legs,
-        seen: [...heli.seen]
-      } : null
+      heli: heliOut()
     };
   }
 
@@ -3812,6 +3839,7 @@
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
+    heliOut, netAnnounceHeli, heliAuthority,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
