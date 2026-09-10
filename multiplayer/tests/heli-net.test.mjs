@@ -213,16 +213,21 @@ test('a shot-down helicopter crashes on every screen, not just the shooter’s',
   assert.ok(guest.g.heli, 'the guest can see it coming down');
   assert.equal(guest.g.currentPlayer, 0, 'and it is not the guest’s turn');
 
-  const groundWas = guest.g.groundHeightAt(500);
   guest.advanceUntil(() => guest.g.heli === null, { maxMs: 12000 });
 
   // It used to fall through the terrain and off the bottom of the screen,
   // still airborne, until an announcement happened to remove it.
-  assert.equal(guest.g.heli, null, 'it is gone');
-  assert.ok(guest.g.groundHeightAt(500) > groundWas,
-    `it left a crater: ground ${groundWas} -> ${guest.g.groundHeightAt(500)}`);
+  assert.equal(guest.g.heli, null, 'it lands here rather than falling for ever');
   assert.ok(guest.g.explosions.length > 0 || guest.g.particles.length > 0,
-    'and made a mess doing it');
+    'and makes a mess doing it');
+
+  // What the wreck *did* is decided by the owner and arrives in a snapshot —
+  // working the blast out locally gave the two clients different answers.
+  const authoritative = host.g.netSnapshot();
+  authoritative.terrain[500] += 40;
+  guest.g.netApplyState(JSON.parse(JSON.stringify(authoritative)));
+  assert.equal(Math.round(guest.g.groundHeightAt(500)),
+    Math.round(authoritative.terrain[500]), 'the crater comes from the owner');
 });
 
 test('but only the seat holding the turn moves play on after a crash', () => {
@@ -236,7 +241,124 @@ test('but only the seat holding the turn moves play on after a crash', () => {
   guest.g.tanks[0].hp = 5;
   guest.g.heliCrash(150, guest.g.groundHeightAt(150));
 
-  assert.equal(guest.g.tanks[0].alive, false, 'the blast still lands here');
+  assert.equal(guest.g.tanks[0].alive, true,
+    'we do not work the blast out ourselves — the owner says what it did');
+  assert.equal(guest.g.tanks[0].hp, 5, 'so no damage is invented here');
   assert.equal(guest.g.currentPlayer, 0,
-    'but we do not advance the turn ourselves — that would move play twice');
+    'nor do we advance the turn — that would move play twice');
+  assert.ok(guest.g.explosions.length > 0, 'but the wreck is still drawn');
+});
+
+test('a helicopter turning at the edge comes back on every screen', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  // One leg in, about to leave by the right-hand edge.
+  const outbound = {
+    x: host.g.W + host.g.heliSize() * 1.4, y: 140, dir: 1, speed: 300,
+    vy: 0, falling: false, spin: 0, legs: 0, seen: [0]
+  };
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'heli', heli: outbound, heliTimer: 90 } });
+  host.g.heli = { ...outbound, seen: new Set(outbound.seen) };
+  gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: outbound, heliTimer: 90 } });
+  assert.equal(guest.g.heli.dir, 1, 'both have it heading right');
+
+  host.advance(500);   // the owner turns it around
+  assert.ok(host.g.heli, 'it is still flying');
+  assert.equal(host.g.heli.dir, -1, 'now heading back');
+
+  // The frame loop only notices a helicopter appearing or leaving, so a
+  // turnaround has to be announced on its own — without it the guest watched
+  // this one leave and never return.
+  const said = hs.payloads('heli').slice(-1)[0];
+  assert.ok(said, 'the turn is announced');
+  assert.equal(said.heli.dir, -1);
+
+  gs.deliver({ t: 'msg', from: 1, d: said });
+  assert.equal(guest.g.heli.dir, -1, 'and the guest turns it too');
+  assert.equal(guest.g.heli.y, host.g.heli.y, 'at the same altitude');
+  assert.equal(guest.g.heli.legs, host.g.heli.legs);
+});
+
+test('any discrete change is announced, without anyone listing the cases', () => {
+  const { host, hs } = liveMatch();
+  const said = () => hs.payloads('heli').length;
+
+  // Arriving.
+  host.g.heli = null;
+  host.g.state = 'AIMING';
+  assert.ok(host.advanceUntil(() => host.g.heli !== null, { maxMs: 200000 }));
+  const afterArrival = said();
+  assert.ok(afterArrival > 0, 'arrival');
+
+  // Turning at the edge: same aircraft, different heading. Pushed past the
+  // edge it is actually heading for — the check runs after the move, so an
+  // aircraft shoved off the edge behind it simply flies back in.
+  const wide = host.g.heliSize() * 1.4;
+  const wasHeading = host.g.heli.dir;
+  host.g.heli.speed = 300;
+  host.g.heli.x = wasHeading > 0 ? host.g.W + wide : -wide;
+  host.advance(300);
+  assert.ok(said() > afterArrival, 'turnaround');
+  assert.notEqual(host.g.heli && host.g.heli.dir, wasHeading, 'it really did turn');
+  const afterTurn = said();
+
+  // Starting to fall.
+  host.g.heli.falling = true;
+  host.g.heli.vy = 10;
+  host.advance(100);
+  assert.ok(said() > afterTurn, 'beginning to come down');
+
+  // Ordinary flight says nothing: position is the same arithmetic on both
+  // sides, so it is not news. Settled into level flight first — putting it back
+  // into level flight is itself a change, and rightly announced.
+  host.g.heli.falling = false;
+  host.g.heli.vy = 0;
+  host.g.heli.x = host.g.W / 2;
+  host.advance(100);
+  const quiet = said();
+  host.advance(600);
+  assert.equal(said(), quiet, 'flying along is not news');
+  assert.ok(host.g.heli.x !== host.g.W / 2, 'even though it moved');
+});
+
+test('a crash that ends the round is announced, including to the winner', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  for (const c of [host, guest]) { c.flatTerrain(400); c.placeTanksAt([150, 850]); }
+  host.g.currentPlayer = 0;         // the host holds the turn, so owns the wreck
+  host.g.state = 'AIMING';
+  guest.g.state = 'AIMING';
+  host.g.tanks[0].hp = 3;           // and is about to be flattened by it
+
+  host.g.heliCrash(150, host.g.groundHeightAt(150));
+
+  assert.equal(host.g.state, 'GAMEOVER', 'the round is over here');
+  const sync = hs.payloads('sync').slice(-1)[0];
+  assert.ok(sync, 'and a crash that ends the round still publishes');
+  assert.equal(sync.state.state, 'GAMEOVER');
+  assert.equal(sync.state.winner, 1, 'naming the survivor');
+
+  // The winner is seat 1 — the client that did NOT own the crash, and so would
+  // otherwise have sat there playing on, never told it had won.
+  gs.deliver({ t: 'msg', from: 1, d: sync });
+  assert.equal(guest.g.state, 'GAMEOVER');
+  assert.ok(guest.g.el.overlay.classList.contains('show'), 'the winner is shown the result');
+});
+
+test('the two sides cannot disagree about whether a tank survived', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  for (const c of [host, guest]) { c.flatTerrain(400); c.placeTanksAt([150, 850]); }
+  host.g.currentPlayer = 0;
+  host.g.state = 'AIMING';
+  guest.g.state = 'AIMING';
+  host.g.tanks[1].hp = 1;
+  guest.g.tanks[1].hp = 1;
+
+  // The same crash, but each client's own copy of the aircraft sits a little
+  // differently — which used to leave one on 1 hp and the other dead.
+  host.g.heliCrash(820, host.g.groundHeightAt(820));
+  guest.g.heliCrash(828, guest.g.groundHeightAt(828));
+
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('sync').slice(-1)[0] });
+  assert.equal(guest.g.tanks[1].hp, host.g.tanks[1].hp, 'one answer, not two');
+  assert.equal(guest.g.tanks[1].alive, host.g.tanks[1].alive);
+  assert.equal(guest.g.state, host.g.state, 'and one view of whether it is over');
 });
