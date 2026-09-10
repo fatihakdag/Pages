@@ -207,6 +207,12 @@ Other things worth knowing:
   decides — one missed turn skipped, two and the CPU plays the seat. A
   disconnect is therefore not treated as leaving for good, which matters because
   minimising a browser on iOS closes the socket within seconds.
+- **`showWind()` puts the wind on the HUD; `setWind()` rolls a new one and then
+  shows it.** They used to be one function, so applying a snapshot re-rolled the
+  wind into the HUD and *then* overwrote the variable — every screen displayed
+  its own random number while the physics quietly used the right one. Every test
+  compared `g.wind` and passed. When state and display can disagree, test the
+  display.
 - **Wind is rolled only by the client publishing the turn.** Everyone else keeps
   the wind they know until the snapshot arrives. Rolling it locally put a
   different figure on every screen for as long as the message took, and anyone

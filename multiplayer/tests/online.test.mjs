@@ -316,3 +316,29 @@ test('only the client publishing a turn rolls the new wind', () => {
   gs.deliver({ t: 'msg', from: 1, d: hs.payloads('sync').slice(-1)[0] });
   assert.equal(guest.g.wind, host.g.wind, 'and the snapshot settles it');
 });
+
+test('the wind on screen is the wind, not a number this client made up', () => {
+  const host = load();
+  const hs = hostAMatch(host);
+  const guest = load();
+  const gs = joinAMatch(guest);
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
+
+  const snap = host.g.netSnapshot();
+  snap.wind = -57.5;                       // an unmistakable value
+  guest.g.netApplyState(JSON.parse(JSON.stringify(snap)));
+
+  assert.equal(guest.g.wind, -57.5, 'the physics uses it');
+  // Applying a snapshot used to call setWind(), which rolls a *new* random wind
+  // and paints that on the HUD before the variable was overwritten. The number
+  // and arrow on screen were therefore this client's own invention, while every
+  // test that compared g.wind happily passed.
+  assert.equal(guest.el('wind-arrow').textContent, '←', 'and the arrow points the right way');
+  assert.equal(guest.el('wind-val').textContent, guest.g.windForce() + '/10',
+    'and the readout is that wind, not another one');
+
+  // The same figure on both screens, which is the whole point.
+  host.g.netApplyState(JSON.parse(JSON.stringify(snap)));
+  assert.equal(guest.el('wind-val').textContent, host.el('wind-val').textContent);
+  assert.equal(guest.el('wind-arrow').textContent, host.el('wind-arrow').textContent);
+});
