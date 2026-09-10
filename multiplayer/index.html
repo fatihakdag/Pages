@@ -2592,17 +2592,26 @@
   // blast. This is deliberately harsher than any shell in the game.
   function heliCrash(x, y) {
     const CRUSH = 26, BLAST = 74, BLAST_DMG = 80;
-    for (const t of tanks) {
-      if (!t.alive) continue;
-      if (Math.abs(t.x - x) < CRUSH) { t.hp = 0; t.alive = false; continue; }
-      const tankTopY = groundHeightAt(t.x) - TANK_H;
-      const dist = Math.sqrt((t.x - x) * (t.x - x) + (tankTopY - y) * (tankTopY - y));
-      if (dist < BLAST) {
-        t.hp -= BLAST_DMG * (1 - dist / BLAST);
-        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+    // Damage and terrain belong to one client. Only discrete state is shared,
+    // not the aircraft's position, so two clients working out the blast from
+    // their own copy get slightly different answers -- enough for one to kill a
+    // tank and the other to leave it on 1 hp, and then the two disagree about
+    // whether the round is over. The wreck is drawn everywhere; what it did is
+    // decided in one place and published.
+    const ours = heliAuthority();
+    if (ours) {
+      for (const t of tanks) {
+        if (!t.alive) continue;
+        if (Math.abs(t.x - x) < CRUSH) { t.hp = 0; t.alive = false; continue; }
+        const tankTopY = groundHeightAt(t.x) - TANK_H;
+        const dist = Math.sqrt((t.x - x) * (t.x - x) + (tankTopY - y) * (tankTopY - y));
+        if (dist < BLAST) {
+          t.hp -= BLAST_DMG * (1 - dist / BLAST);
+          if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+        }
       }
+      craterAt(x, y, BLAST * 0.7);
     }
-    craterAt(x, y, BLAST * 0.7);
     spawnExplosionFx(x, y, BLAST, '#ffb03a');
     for (let i = 0; i < 36; i++) {
       const ang = Math.random() * Math.PI * 2;
@@ -2614,15 +2623,16 @@
       });
     }
     updateHUD();
-    // A crash can kill between turns, so the round may need resolving here --
-    // but only where the turn machine is ours to move. This is the narrow thing
-    // the authority check is actually for: the blast and the crater are just
-    // arithmetic, and the snapshot corrects any drift, but every client
-    // advancing the turn on its own would move play several times over.
-    if (state === 'AIMING' && heliAuthority()) {
-      if (endTurnCheckWin()) return;
-      if (!tanks[currentPlayer].alive) nextTurn();
+    if (!ours) return;
+    // A crash can kill between turns, so the round may need resolving here.
+    if (state === 'AIMING') {
+      if (!endTurnCheckWin() && !tanks[currentPlayer].alive) nextTurn();
     }
+    // Published straight away rather than waiting for a turn to end. A crash
+    // that finishes the round produces no turn at all, so the others were never
+    // told the game was over -- the winner in particular, if the crash landed
+    // on the seat holding the turn.
+    netPublishState();
   }
 
   // Hidden: double-click the wind readout to call one in. Wherever the readout
@@ -3713,8 +3723,13 @@
     if (d.k === 'sync') {
       // Snapping mid-flight would cut the shot off, so hold it until the local
       // replay has finished and then correct whatever drifted.
-      if (state === 'AIMING' || state === 'GAMEOVER') netApplyState(d.state);
-      else online.pendingSync = d.state;
+      // A finished round is applied at once even mid-flight: there is nothing
+      // left to watch, and holding it would leave this screen playing on.
+      if (state === 'AIMING' || state === 'GAMEOVER' || d.state.state === 'GAMEOVER') {
+        netApplyState(d.state);
+      } else {
+        online.pendingSync = d.state;
+      }
       return;
     }
   }
@@ -3932,6 +3947,12 @@
    * Publish how a turn ended. `actor` is the seat that *took* the turn, which
    * by this point is no longer `currentPlayer` — the turn has already moved on.
    */
+  /** Publish the world as it stands, for a change that no turn will carry. */
+  function netPublishState() {
+    if (!netPlaying()) return;
+    netSend('sync', { state: netSnapshot() });
+  }
+
   function netPublishTurn(actor) {
     if (!netPlaying()) return;
     const ours = netWeDrive(actor) || netPublishNext;
@@ -4022,7 +4043,7 @@
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
-    netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock,
+    netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock, netPublishState,
     netScheduleRejoin, netLeave, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
