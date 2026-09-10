@@ -1879,7 +1879,12 @@
     while (!tanks[currentPlayer].alive);
     turnToken++;
     if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
-    setWind();
+    // Only the client that is about to publish this turn rolls the new wind.
+    // Everyone else keeps the old one until the snapshot arrives: rolling
+    // locally put a different figure on each screen for as long as the message
+    // took, and a player starting to aim in that window aimed against a wind
+    // that never existed.
+    if (!netPlaying() || netWeDrive(actor) || netPublishNext) setWind();
     state = 'AIMING';
     camPanned = false; // a new turn releases the camera back to whoever is aiming
     netResetTurnClock();
@@ -3262,6 +3267,10 @@
   // which would make a substitute's strength depend on which opponent's browser
   // was doing the standing in.
   const TURN_AI_LEVEL = 'medium';
+  // Set when this client resolves a turn on somebody else's behalf — a skip it
+  // called. Without it netPublishTurn stays silent, because the seat is not
+  // ours to drive, and the others never learn the turn moved at all.
+  let netPublishNext = false;
   let turnDeadline = 0;   // performance.now() by which the current seat must fire
 
   const online = {
@@ -3383,8 +3392,10 @@
       netPlayAiTurn();
     } else {
       // First miss: the turn is simply skipped. RESOLVED lets the frame loop
-      // run nextTurn, which moves play on and publishes as usual.
+      // run nextTurn, which moves play on — and this says to publish the
+      // result, since the seat that lapsed is not one we drive.
       netResetTurnClock();
+      netPublishNext = true;
       state = 'RESOLVED';
     }
   }
@@ -3870,7 +3881,10 @@
    * by this point is no longer `currentPlayer` — the turn has already moved on.
    */
   function netPublishTurn(actor) {
-    if (!netPlaying() || !netWeDrive(actor)) return;
+    if (!netPlaying()) return;
+    const ours = netWeDrive(actor) || netPublishNext;
+    netPublishNext = false;
+    if (!ours) return;
     netSend('sync', { state: netSnapshot() });
   }
 

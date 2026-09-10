@@ -200,6 +200,15 @@ Other things worth knowing:
   decides — one missed turn skipped, two and the CPU plays the seat. A
   disconnect is therefore not treated as leaving for good, which matters because
   minimising a browser on iOS closes the socket within seconds.
+- **Wind is rolled only by the client publishing the turn.** Everyone else keeps
+  the wind they know until the snapshot arrives. Rolling it locally put a
+  different figure on every screen for as long as the message took, and anyone
+  who started aiming in that window aimed against a wind that existed nowhere.
+- **A turn resolved on somebody else's behalf still has to be published.**
+  `netPublishTurn()` is gated on driving the seat, so a skip called by the turn
+  clock published nothing — the caller advanced and everyone else did not,
+  leaving the two sides on different turns permanently. `netPublishNext` marks
+  that case.
 - **The end of a round has to be published like anything else.** The overlay is
   raised inside `endTurnCheckWin()`, which only runs on the client that resolved
   the shot; everyone else had `state` set to `GAMEOVER` and were shown nothing —
@@ -237,11 +246,6 @@ in front — the same throttling as the first gap above.
 
 ## Still to build
 
-- **Wind** is the last thing still rolled independently by each client, in
-  `nextTurn()`. It survives only because the actor's snapshot overwrites it
-  moments later, so a lost or late `sync` would leave the receiver aiming
-  against the wrong wind. Same treatment as the helicopter: one owner per turn,
-  carried in the snapshot.
 - **Two decisions deliberately deferred**, and probably one decision rather than
   two, since both mean the relay holding state it currently does not:
   - arbitrating turn timeouts server-side instead of electing a client;
