@@ -144,7 +144,11 @@ Other things worth knowing:
   remembers nothing across one, so identity is the game's job: each client holds
   a per-room token in `sessionStorage` (surviving the reload a waking phone
   often amounts to), presents it in `ready`, and the `start` message carries the
-  seat/token table. **Seats are locked to the players the match was dealt to.**
+  seat/token table. The token comes from `crypto.randomUUID()` where available:
+  a seat claim must not rest on two clients never drawing the same
+  `Math.random()`, which under the tests' seeded PRNG is exactly what they do —
+  and what hid a seat-swapping bug until the harness gave each client its own
+  identity. **Seats are locked to the players the match was dealt to.**
   An empty one is held for its owner and nobody else — a stranger with the code
   is told the room is full, because taking over a seat means inheriting someone
   else's damage, ammo and position. A player who never comes back has their seat
@@ -156,6 +160,9 @@ Other things worth knowing:
 - Losing the token (cleared storage, a different browser) means losing the seat:
   it stays empty and the CPU plays it. That is the cost of locking seats, and
   the alternative is letting strangers inherit tanks.
+- `netDealSeats()` keeps anyone the room remembers in the seat they had. Dealing
+  purely in join order meant that if everyone dropped and reconnected in a
+  different order, players swapped tanks and colours for no visible reason.
 - `online.vacancies` is a list. It was a single seat, which orphaned the earlier
   one whenever two players were away at once — nobody could fill it and its tank
   sat there played by nothing.
@@ -200,6 +207,15 @@ Other things worth knowing:
   decides — one missed turn skipped, two and the CPU plays the seat. A
   disconnect is therefore not treated as leaving for good, which matters because
   minimising a browser on iOS closes the socket within seconds.
+- **Wind is rolled only by the client publishing the turn.** Everyone else keeps
+  the wind they know until the snapshot arrives. Rolling it locally put a
+  different figure on every screen for as long as the message took, and anyone
+  who started aiming in that window aimed against a wind that existed nowhere.
+- **A turn resolved on somebody else's behalf still has to be published.**
+  `netPublishTurn()` is gated on driving the seat, so a skip called by the turn
+  clock published nothing — the caller advanced and everyone else did not,
+  leaving the two sides on different turns permanently. `netPublishNext` marks
+  that case.
 - **The end of a round has to be published like anything else.** The overlay is
   raised inside `endTurnCheckWin()`, which only runs on the client that resolved
   the shot; everyone else had `state` set to `GAMEOVER` and were shown nothing —
@@ -237,11 +253,6 @@ in front — the same throttling as the first gap above.
 
 ## Still to build
 
-- **Wind** is the last thing still rolled independently by each client, in
-  `nextTurn()`. It survives only because the actor's snapshot overwrites it
-  moments later, so a lost or late `sync` would leave the receiver aiming
-  against the wrong wind. Same treatment as the helicopter: one owner per turn,
-  carried in the snapshot.
 - **Two decisions deliberately deferred**, and probably one decision rather than
   two, since both mean the relay holding state it currently does not:
   - arbitrating turn timeouts server-side instead of electing a client;

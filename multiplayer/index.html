@@ -1879,7 +1879,12 @@
     while (!tanks[currentPlayer].alive);
     turnToken++;
     if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
-    setWind();
+    // Only the client that is about to publish this turn rolls the new wind.
+    // Everyone else keeps the old one until the snapshot arrives: rolling
+    // locally put a different figure on each screen for as long as the message
+    // took, and a player starting to aim in that window aimed against a wind
+    // that never existed.
+    if (!netPlaying() || netWeDrive(actor) || netPublishNext) setWind();
     state = 'AIMING';
     camPanned = false; // a new turn releases the camera back to whoever is aiming
     netResetTurnClock();
@@ -2608,8 +2613,12 @@
       });
     }
     updateHUD();
-    // A crash can kill between turns, so the round may need resolving here.
-    if (state === 'AIMING') {
+    // A crash can kill between turns, so the round may need resolving here --
+    // but only where the turn machine is ours to move. This is the narrow thing
+    // the authority check is actually for: the blast and the crater are just
+    // arithmetic, and the snapshot corrects any drift, but every client
+    // advancing the turn on its own would move play several times over.
+    if (state === 'AIMING' && heliAuthority()) {
       if (endTurnCheckWin()) return;
       if (!tanks[currentPlayer].alive) nextTurn();
     }
@@ -2802,7 +2811,10 @@
         color: Math.random() < 0.5 ? '#59606b' : '#ff7a45'
       });
     }
-    if (!heliAuthority()) return; // the wreck is theirs to report
+    // Everyone lands it. Gating the whole descent meant the other screens
+    // watched a helicopter fall straight through the ground and off the bottom,
+    // never crashing, until an announcement happened to remove it. The wreck
+    // is the same arithmetic from the same state, like the rest of its flight.
     if (heli.x < -60 || heli.x > W + 60) { heli = null; return; } // fell off the map
     if (heli.y >= groundHeightAt(heli.x) - 4) {
       const cx = Math.max(0, Math.min(W - 1, heli.x));
@@ -3262,6 +3274,10 @@
   // which would make a substitute's strength depend on which opponent's browser
   // was doing the standing in.
   const TURN_AI_LEVEL = 'medium';
+  // Set when this client resolves a turn on somebody else's behalf — a skip it
+  // called. Without it netPublishTurn stays silent, because the seat is not
+  // ours to drive, and the others never learn the turn moved at all.
+  let netPublishNext = false;
   let turnDeadline = 0;   // performance.now() by which the current seat must fire
 
   const online = {
@@ -3297,9 +3313,37 @@
       const held = sessionStorage.getItem(key);
       if (held) return held;
     } catch { /* private mode, or storage disabled */ }
-    const made = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    // randomUUID where it exists: a seat claim should not rest on two clients
+    // never drawing the same Math.random, which is exactly what they do under a
+    // seeded PRNG — and what hid a seat-swapping bug in these tests.
+    const made = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36) +
+        Math.random().toString(36).slice(2);
     try { sessionStorage.setItem(key, made); } catch { /* not fatal */ }
     return made;
+  }
+
+  /**
+   * Lay members out in seats, keeping anyone this room already remembers where
+   * they were. Dealing purely in join order meant that if everyone dropped and
+   * came back in a different order, players swapped tanks and colours for no
+   * reason they could see.
+   */
+  function netDealSeats(ids) {
+    const n = ids.length;
+    const seats = new Array(n).fill(null);
+    const spare = [];
+    for (const id of ids) {
+      const token = (id === online.id) ? online.token : netTokensById[id];
+      const was = token ? online.seatTokens.indexOf(token) : -1;
+      if (was >= 0 && was < n && seats[was] === null) seats[was] = id;
+      else spare.push(id);
+    }
+    for (let i = 0; i < n && spare.length; i++) {
+      if (seats[i] === null) seats[i] = spare.shift();
+    }
+    return seats;
   }
 
   /** Which seat this token belongs to, if any of the empty ones remember it. */
@@ -3383,8 +3427,10 @@
       netPlayAiTurn();
     } else {
       // First miss: the turn is simply skipped. RESOLVED lets the frame loop
-      // run nextTurn, which moves play on and publishes as usual.
+      // run nextTurn, which moves play on — and this says to publish the
+      // result, since the seat that lapsed is not one we drive.
       netResetTurnClock();
+      netPublishNext = true;
       state = 'RESOLVED';
     }
   }
@@ -3682,11 +3728,11 @@
     countSelect.value = String(seats);
     // Seat order follows join order, so the host is player 1. Set before the UI
     // is refreshed: refreshOpponentUi asks whether a match is on.
-    online.seats = [online.id, ...netOtherIds()];
+    online.seats = netDealSeats([online.id, ...netOtherIds()]);
     online.seatTokens = online.seats.map(
       id => (id === online.id ? online.token : (netTokensById[id] || null)));
     online.vacancies = [];
-    online.seat = 0;
+    online.seat = online.seats.indexOf(online.id);
     online.status = 'playing';
     refreshOpponentUi();
     resetGame();
@@ -3870,7 +3916,10 @@
    * by this point is no longer `currentPlayer` — the turn has already moved on.
    */
   function netPublishTurn(actor) {
-    if (!netPlaying() || !netWeDrive(actor)) return;
+    if (!netPlaying()) return;
+    const ours = netWeDrive(actor) || netPublishNext;
+    netPublishNext = false;
+    if (!ours) return;
     netSend('sync', { state: netSnapshot() });
   }
 
@@ -3957,7 +4006,7 @@
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock,
-    netScheduleRejoin, netLeave, REJOIN_DELAYS_MS, netToken, netSeatForToken,
+    netScheduleRejoin, netLeave, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL,

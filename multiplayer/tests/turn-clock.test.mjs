@@ -265,3 +265,25 @@ test('a match with an empty seat still moves; it used to deadlock', () => {
   }
   assert.ok(turnsSeen.size > 1, `play moved on; saw turns ${[...turnsSeen]}`);
 });
+
+test('a skipped turn is published, or the two sides end up on different turns', () => {
+  const { me, ms, host, hs } = matchOf(2, 1);
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'ready', token: 'x' } });   // ignored; already dealt
+  me.g.currentPlayer = 0;
+  me.g.state = 'AIMING';
+  me.g.netResetTurnClock();
+
+  me.advance(65000);                       // we call time on the empty seat
+
+  // We are not the seat that lapsed, so netPublishTurn used to stay silent —
+  // and the others never learned the turn had moved at all.
+  const sync = ms.payloads('sync').slice(-1)[0];
+  assert.ok(sync, 'the client that called time publishes the result');
+  assert.equal(sync.state.currentPlayer, me.g.currentPlayer, 'saying whose turn it now is');
+  assert.equal(sync.state.wind, me.g.wind, 'and carrying the wind with it');
+
+  // Applying it puts another client on the same turn and the same wind.
+  host.g.netApplyState(JSON.parse(JSON.stringify(sync.state)));
+  assert.equal(host.g.currentPlayer, me.g.currentPlayer);
+  assert.equal(host.g.wind, me.g.wind);
+});

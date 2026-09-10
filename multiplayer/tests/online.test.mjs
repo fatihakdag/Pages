@@ -284,3 +284,35 @@ test('every online string has a Turkish counterpart', () => {
     assert.notEqual(h.g.txt(k), k, `${k} falls through to the key in Turkish`);
   }
 });
+
+test('only the client publishing a turn rolls the new wind', () => {
+  const host = load();
+  const hs = hostAMatch(host);
+  const guest = load();
+  const gs = joinAMatch(guest);
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
+  const shared = guest.g.wind;
+  assert.equal(host.g.wind, shared, 'the same to begin with');
+
+  host.flatTerrain(400);
+  host.placeTanksAt([200, 700]);
+  guest.flatTerrain(400);
+  guest.placeTanksAt([200, 700]);
+
+  host.g.currentPlayer = 0;
+  host.g.tanks[0].angle = 45;
+  host.g.tanks[0].power = 60;
+  host.g.state = 'AIMING';
+  host.g.fire();
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('turn').slice(-1)[0] });
+  host.advanceUntil(() => host.g.state === 'AIMING' || host.g.state === 'GAMEOVER');
+  guest.advanceUntil(() => guest.g.state === 'AIMING' || guest.g.state === 'GAMEOVER');
+
+  // Rolling locally showed a figure on the guest's wind gauge that existed
+  // nowhere else — and anyone starting to aim in that window aimed against it.
+  assert.equal(guest.g.wind, shared, 'the guest keeps the wind it knows about');
+  assert.notEqual(host.g.wind, shared, 'the publisher rolled a new one');
+
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('sync').slice(-1)[0] });
+  assert.equal(guest.g.wind, host.g.wind, 'and the snapshot settles it');
+});
