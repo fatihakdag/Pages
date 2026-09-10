@@ -3431,6 +3431,7 @@
       return txt('netWaiting', { code: online.room, n: netPeerIds.length + 1, total: netSeatCount() });
     }
     if (online.status === 'playing') {
+      if (online.vacancies.length) return txt('netEnded');   // someone dropped out
       return online.peerAway ? txt('netAway') : txt('netPlaying', { code: online.room });
     }
     if (online.status === 'ended') return txt('netEnded');
@@ -3549,7 +3550,16 @@
         // that is how the right person gets this chair back.
         if (!online.vacancies.includes(seat)) online.vacancies.push(seat);
       }
-      online.status = 'ended';  // play pauses; the board is not thrown away
+      // Play carries on. Pausing here deadlocked the match: with the status
+      // no longer 'playing' the turn clock stopped, so the CPU could never take
+      // the empty seat and nothing could ever happen again.
+      //
+      // Nor is a disconnect treated as leaving for good. Their seat is held,
+      // they may well be reconnecting, and the ordinary clock decides: one
+      // missed turn is skipped, two in a row and the CPU plays it. Minimising
+      // a browser for a few seconds costs nothing.
+      if (!online.seats.some(id => id !== null)) online.status = 'ended';
+      netResetTurnClock();
       refreshOnlineUi();
       syncControlsFromTank();
       updateHUD();
@@ -3789,6 +3799,10 @@
         angle: t.angle, power: t.power, weapon: t.weapon, ammo: ammoOut(t.ammo)
       })),
       wind, currentPlayer, state,
+      // Who won. The overlay is raised by endTurnCheckWin(), which only ever
+      // runs on the client that resolved the shot — everyone else had the state
+      // set to GAMEOVER and no idea, so the round ended in silence for them.
+      winner: lastWinner,
       theme: THEMES.indexOf(theme),
       // The whole helicopter, not a sketch of it: a falling one that loses vy
       // and spin lands somewhere different, and legs/seen decide when it
@@ -3836,6 +3850,17 @@
     // A snapshot hands the turn over, so the clock starts again here too --
     // otherwise a player would inherit whatever was left of someone else's.
     netResetTurnClock();
+    // The overlay is raised inside endTurnCheckWin(), which only ever runs on
+    // the client that resolved the shot. Everyone else had their state set to
+    // GAMEOVER and were shown nothing at all -- a board that had simply stopped
+    // responding, with no idea who had won.
+    if (state === 'GAMEOVER') {
+      if (typeof snap.winner === 'number') lastWinner = snap.winner;
+      refreshOverlayText();
+      overlay.classList.add('show');
+    } else {
+      overlay.classList.remove('show');
+    }
     updateHUD();
     syncControlsFromTank();
   }

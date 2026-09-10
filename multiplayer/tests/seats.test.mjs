@@ -127,17 +127,25 @@ test('the opponents control reads Online during a match, and locks', () => {
   assert.equal(h.g.el.difficultySelect.disabled, true);
 });
 
-test('the roster comes back when the match ends', () => {
+test('the roster stays locked while a match is still running', () => {
   const { h, s } = hostFor(2);
   arrive(s, 2);
   assert.equal(h.g.el.modeSelect.value, 'online');
 
+  // Someone dropping does not end the match, so the roster is still not ours
+  // to edit — their seat is being held and the CPU may be about to play it.
   s.deliver({ t: 'gone', id: 2, host: 1 });
   h.g.refreshOpponentUi();
   h.g.syncControlsFromTank();
+  assert.equal(h.g.el.modeSelect.value, 'online');
+  assert.equal(h.g.el.countSelect.disabled, true);
 
+  // Everyone gone is a different matter: there is no match left.
+  h.g.online.seats = [null, null];
+  s.deliver({ t: 'gone', id: 1, host: null });
+  h.g.refreshOpponentUi();
+  h.g.syncControlsFromTank();
   assert.notEqual(h.g.el.modeSelect.value, 'online', 'back to a real mode');
-  assert.equal(h.g.el.modeSelect.options.find(o => o.value === 'online').hidden, true);
   assert.equal(h.g.el.countSelect.disabled, false, 'and editable again');
 });
 

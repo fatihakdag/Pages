@@ -250,19 +250,18 @@ test('a client on the wrong protocol is told to update, not silently desynced', 
   assert.equal(h.g.el2.onlineStatus.textContent, h.g.txt('netVersion'));
 });
 
-test('an opponent leaving ends the match and hands the controls back', () => {
+test('an opponent leaving does not stop the match', () => {
   const h = load();
   const sock = hostAMatch(h);
   assert.equal(h.g.online.status, 'playing');
 
   sock.deliver({ t: 'gone', id: 2, host: 1 });
 
-  assert.equal(h.g.online.status, 'ended');
-  assert.equal(h.g.el2.onlineStatus.textContent, h.g.txt('netEnded'));
-  h.g.currentPlayer = 1;
-  h.g.state = 'AIMING';
-  h.g.syncControlsFromTank();
-  assert.equal(h.g.el.angleSlider.disabled, false, 'the seat is no longer somebody else’s');
+  // Play carries on: stopping here used to deadlock the game, because the turn
+  // clock only runs during a match and so the CPU could never take the seat.
+  assert.equal(h.g.online.status, 'playing');
+  assert.equal(h.g.el2.onlineStatus.textContent, h.g.txt('netEnded'), 'but it says so');
+  assert.deepEqual(Array.from(h.g.online.vacancies), [1], 'their seat is held for them');
 });
 
 test('a dropped connection is reported', () => {

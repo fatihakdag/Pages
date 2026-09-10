@@ -220,3 +220,48 @@ test('a stand-in plays at a fixed level, not the local difficulty setting', () =
   assert.deepEqual(shotFrom('easy'), shotFrom('brutal'),
     'the substitute is the same whoever is standing in');
 });
+
+test('a dropped player is not replaced instantly — the clock still decides', () => {
+  const { me, ms } = matchOf(2, 1);
+  me.placeTanksAt([200, 700]);
+  me.g.currentPlayer = 0;
+  me.g.state = 'AIMING';
+  me.g.netResetTurnClock();
+
+  ms.deliver({ t: 'gone', id: 1, host: 2 });   // their socket died, e.g. a phone minimised
+  assert.equal(me.g.online.status, 'playing', 'the match carries on');
+  assert.equal(me.g.netSeatIsAi(0), false, 'nobody is replaced on the spot');
+
+  me.advance(65000);                           // first miss: skipped, still theirs
+  assert.equal(me.g.netSeatIsAi(0), false, 'one missed turn is not enough');
+
+  // The skip hands play to us; we have to actually take our turn for theirs to
+  // come round again.
+  me.advanceUntil(() => me.g.currentPlayer === 1 && me.g.state === 'AIMING', { maxMs: 20000 });
+  me.g.tanks[1].angle = 45;
+  me.g.tanks[1].power = 30;
+  me.fireAndSettle();
+  assert.equal(me.g.currentPlayer, 0, 'back to the empty seat');
+
+  me.g.netResetTurnClock();
+  me.advance(65000);                           // second miss
+  assert.equal(me.g.netSeatIsAi(0), true, 'now the CPU plays it');
+});
+
+test('a match with an empty seat still moves; it used to deadlock', () => {
+  const { me, ms } = matchOf(2, 1);
+  me.placeTanksAt([200, 700]);
+  me.g.currentPlayer = 0;
+  me.g.state = 'AIMING';
+  me.g.netResetTurnClock();
+  ms.deliver({ t: 'gone', id: 1, host: 2 });
+
+  // Pausing on a departure stopped the turn clock, so nothing could ever
+  // happen again — the banner sat on their name for ever.
+  const turnsSeen = new Set();
+  for (let i = 0; i < 12; i++) {
+    me.advance(20000);
+    turnsSeen.add(me.g.currentPlayer);
+  }
+  assert.ok(turnsSeen.size > 1, `play moved on; saw turns ${[...turnsSeen]}`);
+});
