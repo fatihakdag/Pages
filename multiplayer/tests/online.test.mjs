@@ -41,6 +41,7 @@ function hostAMatch(h) {
   const sock = connect(h);
   sock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
   sock.deliver({ t: 'peer', id: 2, name: '' });
+  sock.deliver({ t: 'msg', from: 2, d: { k: 'ready', token: 'tok2' } });
   return sock;
 }
 

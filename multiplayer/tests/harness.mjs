@@ -244,6 +244,13 @@ export function load(opts = {}) {
       setItem(k, v) { this.store.set(k, String(v)); },
       removeItem(k) { this.store.delete(k); }
     },
+    // Per-room seat tokens live here, so a reload keeps its seat.
+    sessionStorage: {
+      store: new Map(),
+      getItem(k) { return this.store.has(k) ? this.store.get(k) : null; },
+      setItem(k, v) { this.store.set(k, String(v)); },
+      removeItem(k) { this.store.delete(k); }
+    },
     navigator: { language: 'en-US' },
     performance: { now: () => now },
     // The online code reads these to work out which relay to dial.
@@ -265,6 +272,7 @@ export function load(opts = {}) {
   sandbox.URLSearchParams = URLSearchParams;
   sandbox.performance = windowStub.performance;
   sandbox.localStorage = windowStub.localStorage;
+  sandbox.sessionStorage = windowStub.sessionStorage;
   sandbox.getComputedStyle = windowStub.getComputedStyle;
   sandbox.requestAnimationFrame = clock.requestAnimationFrame;
   sandbox.cancelAnimationFrame = () => {};

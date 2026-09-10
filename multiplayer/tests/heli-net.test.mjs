@@ -37,6 +37,7 @@ function liveMatch(opts = {}) {
   hs.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
   gs.deliver({ t: 'joined', room: 'ABCD', id: 2, host: 1, peers: [{ id: 1, name: '' }] });
   hs.deliver({ t: 'peer', id: 2, name: '' });
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'ready', token: 'tok2' } });
   gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
   return { host, guest, hs, gs };
 }

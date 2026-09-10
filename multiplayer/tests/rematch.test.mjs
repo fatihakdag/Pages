@@ -35,6 +35,7 @@ function liveMatch() {
   hs.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
   gs.deliver({ t: 'joined', room: 'ABCD', id: 2, host: 1, peers: [{ id: 1, name: '' }] });
   hs.deliver({ t: 'peer', id: 2, name: '' });
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'ready', token: 'tok2' } });
   gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
   return { host, guest, hs, gs };
 }
@@ -89,7 +90,7 @@ test('someone leaving hands on the host role and keeps their seat open', () => {
   gs.deliver({ t: 'gone', id: 1, host: 2 });
 
   assert.equal(guest.g.online.host, true, 'the relay handed the role on and we took it');
-  assert.equal(guest.g.online.vacant, 0, 'seat 0 is being kept open');
+  assert.deepEqual(Array.from(guest.g.online.vacancies), [0], 'seat 0 is kept open');
   assert.equal(guest.g.online.status, 'ended');
 });
 
@@ -105,16 +106,19 @@ test('a rejoin resumes the board in progress rather than starting over', () => {
 
   // The host drops, then someone joins the room again.
   gs.deliver({ t: 'gone', id: 1, host: 2 });
+  // They come back presenting the token that owns seat 0 — the only way in.
+  const seat0 = guest.g.online.seatTokens[0];
   gs.deliver({ t: 'peer', id: 3, name: '' });
+  gs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: seat0 } });
 
   const starts = gs.payloads('start');
-  assert.equal(starts.length, 1, 'the remaining player deals them in');
+  assert.equal(starts.length, 1, 'the remaining player deals them back in');
   assert.deepEqual(starts[0].seats, [3, 2], 'the newcomer takes the empty seat');
   assert.deepEqual(Array.from(starts[0].state.terrain), midMatch,
     'and is handed the board as it stands, craters and all');
   assert.equal(starts[0].state.tanks[1].hp, 48, 'damage is not undone');
   assert.equal(guest.g.online.status, 'playing');
-  assert.equal(guest.g.online.vacant, null);
+  assert.equal(guest.g.online.vacancies.length, 0, 'the chair is filled');
 });
 
 test('the rejoining player lands on that board, in that seat', () => {
@@ -122,7 +126,9 @@ test('the rejoining player lands on that board, in that seat', () => {
   host.g.craterAt(400, host.g.groundHeightAt(400), 44);
   gs.deliver({ t: 'msg', from: 1, d: { k: 'sync', state: host.g.netSnapshot() } });
   gs.deliver({ t: 'gone', id: 1, host: 2 });
+  const seat0 = guest.g.online.seatTokens[0];
   gs.deliver({ t: 'peer', id: 3, name: '' });
+  gs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: seat0 } });
 
   const rejoiner = load();
   const rs = connect(rejoiner, 'ABCD');
@@ -186,4 +192,71 @@ test('a player who leaves is gone, not away', () => {
   hs.deliver({ t: 'gone', id: 2, host: 1 });
   assert.equal(host.g.online.peerAway, false, 'the status says left, not away');
   assert.equal(host.g.online.status, 'ended');
+});
+
+test('a connection lost mid-match comes back on its own', () => {
+  const { guest, gs } = liveMatch();
+  const sockets = [];
+  guest.g.setSocketFactory(() => {
+    const s = fakeSocket();
+    sockets.push(s);
+    // A real socket opens asynchronously; this one is driven by the test.
+    return s;
+  });
+
+  gs.close();                       // the phone switched apps, the socket died
+  assert.equal(guest.g.online.status, 'ended');
+  // Compared field by field: the object comes out of the vm context, so a
+  // deepStrictEqual fails on its prototype however equal the values are.
+  assert.equal(guest.g.online.rejoin.code, 'ABCD', 'queued for the room we were in');
+  assert.equal(guest.g.online.rejoin.tries, 1);
+
+  guest.advance(1500);              // past the first backoff
+  assert.equal(sockets.length, 1, 'it dialled again by itself');
+  sockets[0].emit('open');
+  assert.deepEqual(sockets[0].sent[0], { t: 'join', v: guest.g.NET_PROTOCOL, room: 'ABCD' },
+    'and asked for the same room, so the held seat is ours again');
+
+  sockets[0].deliver({ t: 'joined', room: 'ABCD', id: 9, host: 1, peers: [{ id: 1 }] });
+  assert.equal(guest.g.online.rejoin, null, 'the attempt is over once we are in');
+});
+
+test('it keeps trying, backing off, rather than giving up at the first failure', () => {
+  const { guest, gs } = liveMatch();
+  const sockets = [];
+  guest.g.setSocketFactory(() => { const s = fakeSocket(); sockets.push(s); return s; });
+
+  gs.close();
+  for (let i = 1; i <= 3; i++) {
+    guest.advance(guest.g.REJOIN_DELAYS_MS[i - 1] + 100);
+    assert.equal(sockets.length, i, `attempt ${i} was made`);
+    sockets[i - 1].close();          // the relay is still unreachable
+  }
+  assert.equal(guest.g.online.rejoin.tries, 4, 'and it is still trying');
+});
+
+test('a room that is gone is not chased', () => {
+  const { guest, gs } = liveMatch();
+  const sockets = [];
+  guest.g.setSocketFactory(() => { const s = fakeSocket(); sockets.push(s); return s; });
+
+  gs.close();
+  guest.advance(1500);
+  sockets[0].emit('open');
+  sockets[0].deliver({ t: 'err', code: 'NO_ROOM', msg: 'no room ABCD' });
+
+  assert.equal(guest.g.online.rejoin, null, 'the grace period ran out; stop');
+  guest.advance(120000);
+  assert.equal(sockets.length, 1, 'and no further attempts');
+});
+
+test('leaving on purpose does not reconnect us', () => {
+  const { guest, gs } = liveMatch();
+  const sockets = [];
+  guest.g.setSocketFactory(() => { const s = fakeSocket(); sockets.push(s); return s; });
+
+  guest.g.netLeave();               // the player chose to go
+  assert.equal(guest.g.online.rejoin, null);
+  guest.advance(120000);
+  assert.equal(sockets.length, 0, 'we do not drag them back in');
 });
