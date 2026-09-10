@@ -22,6 +22,11 @@ const HTML = readFileSync(join(ROOT, 'index.html'), 'utf8');
 // failure rather than passing forever by luck.
 const DEFAULT_SEED = Number(process.env.BARRAGE_SEED) || 12345;
 
+// Every load() is a separate person as far as identity goes. Seeding Math.random
+// identically per instance is deliberate and makes physics reproducible, but it
+// also made two clients mint the same seat token.
+let instanceCount = 0;
+
 // The game script is the one that declares BUILD; the other <script> in the
 // page is the tiny pre-boot error reporter.
 function gameSource(html) {
@@ -270,6 +275,10 @@ export function load(opts = {}) {
   sandbox.navigator = windowStub.navigator;
   sandbox.location = windowStub.location;
   sandbox.URLSearchParams = URLSearchParams;
+  const who = ++instanceCount;
+  let uuidCount = 0;
+  sandbox.crypto = { randomUUID: () => `client${who}-id${++uuidCount}` };
+  windowStub.crypto = sandbox.crypto;
   sandbox.performance = windowStub.performance;
   sandbox.localStorage = windowStub.localStorage;
   sandbox.sessionStorage = windowStub.sessionStorage;

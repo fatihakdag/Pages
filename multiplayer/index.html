@@ -3313,9 +3313,37 @@
       const held = sessionStorage.getItem(key);
       if (held) return held;
     } catch { /* private mode, or storage disabled */ }
-    const made = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    // randomUUID where it exists: a seat claim should not rest on two clients
+    // never drawing the same Math.random, which is exactly what they do under a
+    // seeded PRNG — and what hid a seat-swapping bug in these tests.
+    const made = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36) +
+        Math.random().toString(36).slice(2);
     try { sessionStorage.setItem(key, made); } catch { /* not fatal */ }
     return made;
+  }
+
+  /**
+   * Lay members out in seats, keeping anyone this room already remembers where
+   * they were. Dealing purely in join order meant that if everyone dropped and
+   * came back in a different order, players swapped tanks and colours for no
+   * reason they could see.
+   */
+  function netDealSeats(ids) {
+    const n = ids.length;
+    const seats = new Array(n).fill(null);
+    const spare = [];
+    for (const id of ids) {
+      const token = (id === online.id) ? online.token : netTokensById[id];
+      const was = token ? online.seatTokens.indexOf(token) : -1;
+      if (was >= 0 && was < n && seats[was] === null) seats[was] = id;
+      else spare.push(id);
+    }
+    for (let i = 0; i < n && spare.length; i++) {
+      if (seats[i] === null) seats[i] = spare.shift();
+    }
+    return seats;
   }
 
   /** Which seat this token belongs to, if any of the empty ones remember it. */
@@ -3700,11 +3728,11 @@
     countSelect.value = String(seats);
     // Seat order follows join order, so the host is player 1. Set before the UI
     // is refreshed: refreshOpponentUi asks whether a match is on.
-    online.seats = [online.id, ...netOtherIds()];
+    online.seats = netDealSeats([online.id, ...netOtherIds()]);
     online.seatTokens = online.seats.map(
       id => (id === online.id ? online.token : (netTokensById[id] || null)));
     online.vacancies = [];
-    online.seat = 0;
+    online.seat = online.seats.indexOf(online.id);
     online.status = 'playing';
     refreshOpponentUi();
     resetGame();
@@ -3978,7 +4006,7 @@
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock,
-    netScheduleRejoin, netLeave, REJOIN_DELAYS_MS, netToken, netSeatForToken,
+    netScheduleRejoin, netLeave, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL,

@@ -144,7 +144,11 @@ Other things worth knowing:
   remembers nothing across one, so identity is the game's job: each client holds
   a per-room token in `sessionStorage` (surviving the reload a waking phone
   often amounts to), presents it in `ready`, and the `start` message carries the
-  seat/token table. **Seats are locked to the players the match was dealt to.**
+  seat/token table. The token comes from `crypto.randomUUID()` where available:
+  a seat claim must not rest on two clients never drawing the same
+  `Math.random()`, which under the tests' seeded PRNG is exactly what they do —
+  and what hid a seat-swapping bug until the harness gave each client its own
+  identity. **Seats are locked to the players the match was dealt to.**
   An empty one is held for its owner and nobody else — a stranger with the code
   is told the room is full, because taking over a seat means inheriting someone
   else's damage, ammo and position. A player who never comes back has their seat
@@ -156,6 +160,9 @@ Other things worth knowing:
 - Losing the token (cleared storage, a different browser) means losing the seat:
   it stays empty and the CPU plays it. That is the cost of locking seats, and
   the alternative is letting strangers inherit tanks.
+- `netDealSeats()` keeps anyone the room remembers in the seat they had. Dealing
+  purely in join order meant that if everyone dropped and reconnected in a
+  different order, players swapped tanks and colours for no visible reason.
 - `online.vacancies` is a list. It was a single seat, which orphaned the earlier
   one whenever two players were away at once — nobody could fill it and its tank
   sat there played by nothing.

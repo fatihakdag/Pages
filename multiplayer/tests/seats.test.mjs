@@ -256,3 +256,51 @@ test('a seat token survives a reload, because it is not held in memory', () => {
   assert.equal(h.g.netToken(h.g.online.room), mine, 'and it is the same one');
   assert.notEqual(h.g.netToken('OTHER'), mine, 'but not shared between rooms');
 });
+
+test('seats do not change hands mid-match', () => {
+  const { h, s } = hostFor(2);
+  arrive(s, 2, 'bo');
+  assert.equal(h.g.online.seat, 0);
+  const before = Array.from(h.g.online.seats);
+
+  // A rematch keeps them.
+  h.g.el.restartBtn.dispatch('click');
+  assert.deepEqual(Array.from(h.g.online.seats), before, 'a rematch is the same table');
+  assert.equal(h.g.online.seat, 0);
+
+  // So does someone dropping and returning.
+  s.deliver({ t: 'gone', id: 2, host: 1 });
+  arrive(s, 6, 'bo');
+  assert.equal(h.g.online.seat, 0, 'ours is untouched');
+  assert.equal(s.payloads('start').slice(-1)[0].seats[1], 6, 'and theirs is theirs');
+});
+
+test('everyone dropping and returning in another order keeps their seats', () => {
+  // Two clients, a real match, then both connections die and they come back the
+  // other way round. Dealing purely in join order made whoever reconnected
+  // first seat 0, so the players swapped tanks and colours with no explanation.
+  const A = load(), B = load();
+  let as_ = connect(A), bs = connect(B, 'ABCD');
+  as_.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+  bs.deliver({ t: 'joined', room: 'ABCD', id: 2, host: 1, peers: [{ id: 1, name: '' }] });
+  as_.deliver({ t: 'peer', id: 2, name: '' });
+  as_.deliver({ t: 'msg', from: 2, d: { k: 'ready', token: B.g.online.token } });
+  bs.deliver({ t: 'msg', from: 1, d: as_.payloads('start')[0] });
+  assert.equal(A.g.online.seat, 0);
+  assert.equal(B.g.online.seat, 1);
+
+  as_.close();
+  bs.close();
+
+  // B is back first, so the relay makes B host of the room it still holds.
+  const bs2 = connect(B, 'ABCD');
+  bs2.deliver({ t: 'joined', room: 'ABCD', id: 7, host: 7, peers: [] });
+  const as2 = connect(A, 'ABCD');
+  as2.deliver({ t: 'joined', room: 'ABCD', id: 8, host: 7, peers: [{ id: 7, name: '' }] });
+  bs2.deliver({ t: 'peer', id: 8, name: '' });
+  bs2.deliver({ t: 'msg', from: 8, d: { k: 'ready', token: A.g.online.token } });
+  as2.deliver({ t: 'msg', from: 7, d: bs2.payloads('start').slice(-1)[0] });
+
+  assert.equal(A.g.online.seat, 0, 'A is still player 1');
+  assert.equal(B.g.online.seat, 1, 'and B is still player 2');
+});
