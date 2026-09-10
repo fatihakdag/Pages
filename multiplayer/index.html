@@ -2613,8 +2613,12 @@
       });
     }
     updateHUD();
-    // A crash can kill between turns, so the round may need resolving here.
-    if (state === 'AIMING') {
+    // A crash can kill between turns, so the round may need resolving here --
+    // but only where the turn machine is ours to move. This is the narrow thing
+    // the authority check is actually for: the blast and the crater are just
+    // arithmetic, and the snapshot corrects any drift, but every client
+    // advancing the turn on its own would move play several times over.
+    if (state === 'AIMING' && heliAuthority()) {
       if (endTurnCheckWin()) return;
       if (!tanks[currentPlayer].alive) nextTurn();
     }
@@ -2807,7 +2811,10 @@
         color: Math.random() < 0.5 ? '#59606b' : '#ff7a45'
       });
     }
-    if (!heliAuthority()) return; // the wreck is theirs to report
+    // Everyone lands it. Gating the whole descent meant the other screens
+    // watched a helicopter fall straight through the ground and off the bottom,
+    // never crashing, until an announcement happened to remove it. The wreck
+    // is the same arithmetic from the same state, like the rest of its flight.
     if (heli.x < -60 || heli.x > W + 60) { heli = null; return; } // fell off the map
     if (heli.y >= groundHeightAt(heli.x) - 4) {
       const cx = Math.max(0, Math.min(W - 1, heli.x));

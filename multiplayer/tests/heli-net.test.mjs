@@ -199,3 +199,44 @@ test('a client that does not own it stays quiet', () => {
   assert.equal(guest.g.heli, null, 'we never spawn one on their turn');
   assert.deepEqual(gs.payloads('heli'), [], 'nothing to announce, and no right to');
 });
+
+test('a shot-down helicopter crashes on every screen, not just the shooter’s', () => {
+  const { host, guest, gs } = liveMatch();
+  for (const c of [host, guest]) { c.flatTerrain(400); c.placeTanksAt([150, 850]); }
+
+  // Falling, over open ground, well clear of both tanks.
+  const falling = {
+    x: 500, y: 200, dir: 1, speed: 60, vy: 120,
+    falling: true, spin: 0, legs: 1, seen: [0, 1]
+  };
+  gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: falling, heliTimer: 90 } });
+  assert.ok(guest.g.heli, 'the guest can see it coming down');
+  assert.equal(guest.g.currentPlayer, 0, 'and it is not the guest’s turn');
+
+  const groundWas = guest.g.groundHeightAt(500);
+  guest.advanceUntil(() => guest.g.heli === null, { maxMs: 12000 });
+
+  // It used to fall through the terrain and off the bottom of the screen,
+  // still airborne, until an announcement happened to remove it.
+  assert.equal(guest.g.heli, null, 'it is gone');
+  assert.ok(guest.g.groundHeightAt(500) > groundWas,
+    `it left a crater: ground ${groundWas} -> ${guest.g.groundHeightAt(500)}`);
+  assert.ok(guest.g.explosions.length > 0 || guest.g.particles.length > 0,
+    'and made a mess doing it');
+});
+
+test('but only the seat holding the turn moves play on after a crash', () => {
+  const { guest, gs } = liveMatch();
+  guest.flatTerrain(400);
+  guest.placeTanksAt([150, 850]);
+  guest.g.currentPlayer = 0;          // the host's turn, not ours
+  guest.g.state = 'AIMING';
+
+  // A crash right on top of the seat whose turn it is.
+  guest.g.tanks[0].hp = 5;
+  guest.g.heliCrash(150, guest.g.groundHeightAt(150));
+
+  assert.equal(guest.g.tanks[0].alive, false, 'the blast still lands here');
+  assert.equal(guest.g.currentPlayer, 0,
+    'but we do not advance the turn ourselves — that would move play twice');
+});
