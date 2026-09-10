@@ -240,3 +240,74 @@ test('but only the seat holding the turn moves play on after a crash', () => {
   assert.equal(guest.g.currentPlayer, 0,
     'but we do not advance the turn ourselves — that would move play twice');
 });
+
+test('a helicopter turning at the edge comes back on every screen', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  // One leg in, about to leave by the right-hand edge.
+  const outbound = {
+    x: host.g.W + host.g.heliSize() * 1.4, y: 140, dir: 1, speed: 300,
+    vy: 0, falling: false, spin: 0, legs: 0, seen: [0]
+  };
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'heli', heli: outbound, heliTimer: 90 } });
+  host.g.heli = { ...outbound, seen: new Set(outbound.seen) };
+  gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: outbound, heliTimer: 90 } });
+  assert.equal(guest.g.heli.dir, 1, 'both have it heading right');
+
+  host.advance(500);   // the owner turns it around
+  assert.ok(host.g.heli, 'it is still flying');
+  assert.equal(host.g.heli.dir, -1, 'now heading back');
+
+  // The frame loop only notices a helicopter appearing or leaving, so a
+  // turnaround has to be announced on its own — without it the guest watched
+  // this one leave and never return.
+  const said = hs.payloads('heli').slice(-1)[0];
+  assert.ok(said, 'the turn is announced');
+  assert.equal(said.heli.dir, -1);
+
+  gs.deliver({ t: 'msg', from: 1, d: said });
+  assert.equal(guest.g.heli.dir, -1, 'and the guest turns it too');
+  assert.equal(guest.g.heli.y, host.g.heli.y, 'at the same altitude');
+  assert.equal(guest.g.heli.legs, host.g.heli.legs);
+});
+
+test('any discrete change is announced, without anyone listing the cases', () => {
+  const { host, hs } = liveMatch();
+  const said = () => hs.payloads('heli').length;
+
+  // Arriving.
+  host.g.heli = null;
+  host.g.state = 'AIMING';
+  assert.ok(host.advanceUntil(() => host.g.heli !== null, { maxMs: 200000 }));
+  const afterArrival = said();
+  assert.ok(afterArrival > 0, 'arrival');
+
+  // Turning at the edge: same aircraft, different heading. Pushed past the
+  // edge it is actually heading for — the check runs after the move, so an
+  // aircraft shoved off the edge behind it simply flies back in.
+  const wide = host.g.heliSize() * 1.4;
+  const wasHeading = host.g.heli.dir;
+  host.g.heli.speed = 300;
+  host.g.heli.x = wasHeading > 0 ? host.g.W + wide : -wide;
+  host.advance(300);
+  assert.ok(said() > afterArrival, 'turnaround');
+  assert.notEqual(host.g.heli && host.g.heli.dir, wasHeading, 'it really did turn');
+  const afterTurn = said();
+
+  // Starting to fall.
+  host.g.heli.falling = true;
+  host.g.heli.vy = 10;
+  host.advance(100);
+  assert.ok(said() > afterTurn, 'beginning to come down');
+
+  // Ordinary flight says nothing: position is the same arithmetic on both
+  // sides, so it is not news. Settled into level flight first — putting it back
+  // into level flight is itself a change, and rightly announced.
+  host.g.heli.falling = false;
+  host.g.heli.vy = 0;
+  host.g.heli.x = host.g.W / 2;
+  host.advance(100);
+  const quiet = said();
+  host.advance(600);
+  assert.equal(said(), quiet, 'flying along is not news');
+  assert.ok(host.g.heli.x !== host.g.W / 2, 'even though it moved');
+});

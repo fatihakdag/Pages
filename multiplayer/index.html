@@ -2466,13 +2466,14 @@
     windPulse = Math.max(0, windPulse - dt * 1.6);
     camFollow(dt);
     netCheckTurnClock();
-    // Arriving, finishing its last leg, falling off the map, crashing: any of
-    // these change whether there is a helicopter, and the others need telling
-    // now rather than when the turn ends.
-    const heliBefore = heli;
     updateHeli(dt);
-    if (heli !== heliBefore) netAnnounceHeli();
     updateTimer();
+
+    // Compared against what was last *announced*, not against the start of this
+    // frame: that way a change is caught wherever it came from — updateHeli, a
+    // shell knocking it out of the sky in stepProjectile, anywhere. Four
+    // separate bugs came from announcing at a list of call sites instead.
+    if (heliSignature() !== heliAnnounced) netAnnounceHeli();
 
     render();
     requestAnimationFrame(step);
@@ -2783,7 +2784,9 @@
     if (!heli.falling) {
       heli.x += heli.dir * heli.speed * dt;
       if (heli.x < -w * 1.5 || heli.x > W + w * 1.5) {
-        if (!heliAuthority()) return; // our copy waits off-screen for the sync
+        // The turnaround rerolls an altitude and may retire the aircraft, so it
+        // belongs to one client. Everyone else parks off-screen until told.
+        if (!heliAuthority()) return;
         heli.legs++;
         const allHadATurn = tanks.every((t, i) => !t.alive || heli.seen.has(i));
         if ((allHadATurn && heli.legs >= HELI_MIN_LEGS) || heli.legs >= HELI_MAX_LEGS) {
@@ -3818,6 +3821,16 @@
     return out;
   }
 
+  /**
+   * Everything discrete about the helicopter: whether there is one, which way
+   * it is going, how many legs it has flown, whether it is coming down. A
+   * change in any of these is something the other clients cannot work out for
+   * themselves, because it comes from a roll or a decision made here.
+   */
+  function heliSignature() {
+    return heli ? `${heli.dir}|${heli.legs}|${heli.falling ? 1 : 0}` : 'none';
+  }
+
   function heliOut() {
     return heli ? {
       x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed,
@@ -3832,7 +3845,11 @@
    * that turned up mid-turn was invisible to everyone else until the shot was
    * taken, and they never saw it get shot down.
    */
+  let heliAnnounced = 'none';
   function netAnnounceHeli() {
+    // Recorded even when there is nobody to tell, so a client that is only
+    // receiving does not keep deciding it has news.
+    heliAnnounced = heliSignature();
     if (!netPlaying() || !heliAuthority()) return;
     netSend('heli', { heli: heliOut(), heliTimer });
   }
@@ -4014,7 +4031,7 @@
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
-    heliOut, netAnnounceHeli, heliAuthority,
+    heliOut, netAnnounceHeli, heliAuthority, heliSignature,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
