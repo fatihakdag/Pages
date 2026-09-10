@@ -174,6 +174,12 @@ Other things worth knowing:
 
 ## Known gaps
 
+- **A dropped connection reconnects itself** (`netScheduleRejoin`), backing off
+  over roughly the room's grace period, and the held seat means it resumes the
+  live board rather than starting over. A deliberate `netLeave()` sets
+  `online.left` so the player is not dragged back in, and `NO_ROOM`/`ROOM_FULL`
+  stop the attempts — those are not coming back. This matters most on a phone,
+  where switching apps for long enough has the OS tear the socket down.
 - **A hidden tab still stops that player's game loop.** Browsers throttle
   `requestAnimationFrame` in a background tab, and the socket stays open, so
   nothing disconnects. It no longer holds the game up — the tab announces

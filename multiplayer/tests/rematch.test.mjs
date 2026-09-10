@@ -187,3 +187,70 @@ test('a player who leaves is gone, not away', () => {
   assert.equal(host.g.online.peerAway, false, 'the status says left, not away');
   assert.equal(host.g.online.status, 'ended');
 });
+
+test('a connection lost mid-match comes back on its own', () => {
+  const { guest, gs } = liveMatch();
+  const sockets = [];
+  guest.g.setSocketFactory(() => {
+    const s = fakeSocket();
+    sockets.push(s);
+    // A real socket opens asynchronously; this one is driven by the test.
+    return s;
+  });
+
+  gs.close();                       // the phone switched apps, the socket died
+  assert.equal(guest.g.online.status, 'ended');
+  // Compared field by field: the object comes out of the vm context, so a
+  // deepStrictEqual fails on its prototype however equal the values are.
+  assert.equal(guest.g.online.rejoin.code, 'ABCD', 'queued for the room we were in');
+  assert.equal(guest.g.online.rejoin.tries, 1);
+
+  guest.advance(1500);              // past the first backoff
+  assert.equal(sockets.length, 1, 'it dialled again by itself');
+  sockets[0].emit('open');
+  assert.deepEqual(sockets[0].sent[0], { t: 'join', v: guest.g.NET_PROTOCOL, room: 'ABCD' },
+    'and asked for the same room, so the held seat is ours again');
+
+  sockets[0].deliver({ t: 'joined', room: 'ABCD', id: 9, host: 1, peers: [{ id: 1 }] });
+  assert.equal(guest.g.online.rejoin, null, 'the attempt is over once we are in');
+});
+
+test('it keeps trying, backing off, rather than giving up at the first failure', () => {
+  const { guest, gs } = liveMatch();
+  const sockets = [];
+  guest.g.setSocketFactory(() => { const s = fakeSocket(); sockets.push(s); return s; });
+
+  gs.close();
+  for (let i = 1; i <= 3; i++) {
+    guest.advance(guest.g.REJOIN_DELAYS_MS[i - 1] + 100);
+    assert.equal(sockets.length, i, `attempt ${i} was made`);
+    sockets[i - 1].close();          // the relay is still unreachable
+  }
+  assert.equal(guest.g.online.rejoin.tries, 4, 'and it is still trying');
+});
+
+test('a room that is gone is not chased', () => {
+  const { guest, gs } = liveMatch();
+  const sockets = [];
+  guest.g.setSocketFactory(() => { const s = fakeSocket(); sockets.push(s); return s; });
+
+  gs.close();
+  guest.advance(1500);
+  sockets[0].emit('open');
+  sockets[0].deliver({ t: 'err', code: 'NO_ROOM', msg: 'no room ABCD' });
+
+  assert.equal(guest.g.online.rejoin, null, 'the grace period ran out; stop');
+  guest.advance(120000);
+  assert.equal(sockets.length, 1, 'and no further attempts');
+});
+
+test('leaving on purpose does not reconnect us', () => {
+  const { guest, gs } = liveMatch();
+  const sockets = [];
+  guest.g.setSocketFactory(() => { const s = fakeSocket(); sockets.push(s); return s; });
+
+  guest.g.netLeave();               // the player chose to go
+  assert.equal(guest.g.online.rejoin, null);
+  guest.advance(120000);
+  assert.equal(sockets.length, 0, 'we do not drag them back in');
+});

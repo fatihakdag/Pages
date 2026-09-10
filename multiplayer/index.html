@@ -913,7 +913,7 @@
       zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomFit: 'Fit the whole battlefield',
       online: 'ONLINE', onlineMode: 'Online', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
       roomCode: 'CODE', roomCodeLabel: 'Room code',
-      netOffline: 'off', netConnecting: 'connecting…', netWaiting: 'code {code} — {n}/{total}',
+      netOffline: 'off', netConnecting: 'connecting…', netRejoining: 'reconnecting…', netWaiting: 'code {code} — {n}/{total}',
       netPlaying: 'room {code}', netEnded: 'opponent left',
       netTheirTurn: '{name} — THEIR TURN', netYouAre: 'you are {name}',
       netAway: 'opponent is away', netAwayTurn: '{name} — AWAY',
@@ -946,7 +946,7 @@
       zoomIn: 'Yakınlaştır', zoomOut: 'Uzaklaştır', zoomFit: 'Tüm sahayı göster',
       online: 'ÇEVRİMİÇİ', onlineMode: 'Çevrimiçi', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
       roomCode: 'KOD', roomCodeLabel: 'Oda kodu',
-      netOffline: 'kapalı', netConnecting: 'bağlanıyor…', netWaiting: 'kod {code} — {n}/{total}',
+      netOffline: 'kapalı', netConnecting: 'bağlanıyor…', netRejoining: 'yeniden bağlanıyor…', netWaiting: 'kod {code} — {n}/{total}',
       netPlaying: 'oda {code}', netEnded: 'rakip ayrıldı',
       netTheirTurn: '{name} — SIRA ONDA', netYouAre: 'sen {name}',
       netAway: 'rakip başka yerde', netAwayTurn: '{name} — BAŞKA YERDE',
@@ -3274,6 +3274,7 @@
     status: 'offline', // offline | connecting | waiting | playing | ended
     error: null,
     vacant: null,      // a seat whose player left, kept open for whoever arrives
+    rejoin: null,      // { code, tries } while we are trying to get back in
     missed: [],        // consecutive turns each seat has let run out
     aiSeats: [],       // seats the CPU is playing until their player returns
     peerAway: false,   // their window is hidden, so their game loop is stopped
@@ -3395,7 +3396,9 @@
 
   function netStatusText() {
     if (online.error) return online.error;
-    if (online.status === 'connecting') return txt('netConnecting');
+    if (online.status === 'connecting') {
+      return online.rejoin ? txt('netRejoining') : txt('netConnecting');
+    }
     if (online.status === 'waiting') {
       // How many are here out of how many this room is waiting for, so the host
       // can see a 4-player game filling up.
@@ -3429,6 +3432,7 @@
 
   function netConnect(room) {
     if (online.ws) return;
+    online.left = false;
     online.error = null;
     online.status = 'connecting';
     online.room = room || null;
@@ -3449,6 +3453,7 @@
     });
     ws.addEventListener('close', () => {
       const wasPlaying = netPlaying();
+      const room = online.room;
       online.ws = null;
       online.seat = -1;
       online.seats = [];
@@ -3457,6 +3462,14 @@
       refreshOnlineUi();
       syncControlsFromTank();
       updateHUD();
+      // Losing the connection mid-match is usually temporary — a phone
+      // switching apps, a tunnel, a wifi handover — and the relay holds the
+      // seat open for five minutes. Get back in without making anyone retype
+      // the code; the seat is still there, so we resume the live board.
+      // `wasPlaying` is only true of the first drop — by the second attempt the
+      // status is already 'ended', so an attempt in progress has to keep the
+      // chain alive itself or a single failed retry would end it.
+      if (!online.left && room && (wasPlaying || online.rejoin)) netScheduleRejoin(room);
     });
     ws.addEventListener('error', () => { /* close follows */ });
   }
@@ -3464,12 +3477,15 @@
   function netHandle(m) {
     if (m.t === 'err') {
       const known = { NO_ROOM: 'netNoRoom', ROOM_FULL: 'netFull', BAD_VERSION: 'netVersion' };
+      // A room that is gone or full is not coming back: stop trying.
+      if (m.code === 'NO_ROOM' || m.code === 'ROOM_FULL') online.rejoin = null;
       netFail(known[m.code] ? txt(known[m.code]) : m.code);
       if (online.ws) online.ws.close();
       return;
     }
 
     if (m.t === 'joined') {
+      online.rejoin = null;   // we are back in
       online.id = m.id;
       online.room = m.room;
       online.host = m.host === m.id;
@@ -3777,7 +3793,25 @@
   }
   document.addEventListener('visibilitychange', netReportVisibility);
 
+  // Spread over roughly the room's grace period, backing off so a relay that
+  // is down does not get hammered — and the last try lands before the seat is
+  // given up rather than after it.
+  const REJOIN_DELAYS_MS = [1000, 2000, 5000, 10000, 20000, 40000, 60000, 60000, 60000];
+
+  function netScheduleRejoin(room) {
+    const tries = online.rejoin ? online.rejoin.tries : 0;
+    if (tries >= REJOIN_DELAYS_MS.length) { online.rejoin = null; return; }
+    online.rejoin = { code: room, tries: tries + 1 };
+    setTimeout(() => {
+      if (!online.rejoin || online.ws || online.left) return;
+      netConnect(online.rejoin.code);
+    }, REJOIN_DELAYS_MS[tries]);
+  }
+
+  /** A deliberate departure, so we do not fight the player by rejoining. */
   function netLeave() {
+    online.left = true;
+    online.rejoin = null;
     if (online.ws) online.ws.close();
   }
 
@@ -3832,6 +3866,7 @@
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock,
+    netScheduleRejoin, netLeave, REJOIN_DELAYS_MS,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL,
