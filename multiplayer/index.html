@@ -3561,10 +3561,26 @@
 
     if (d.k === 'ready' && online.host) {
       netTokensById[m.from] = d.token || null;
-      // An empty chair means a match is in progress: seat them in it — theirs
-      // if the token says so — rather than dealing a new game.
-      if (online.vacancies.length) netResumeMatch(m.from, d.token);
-      else netStartMatch();
+      if (netPlaying() || online.vacancies.length) {
+        // The seats belong to the players the match was dealt to. A vacant one
+        // is held for its owner and nobody else: taking over a stranger's tank
+        // means inheriting their damage, their ammo and their position, which
+        // is not a thing anyone should be handed. No token, no seat.
+        const seat = netSeatForToken(d.token);
+        if (seat >= 0) netResumeMatch(m.from, d.token);
+        else netSend('denied', { to: m.from, reason: 'full' });
+      } else {
+        netStartMatch();
+      }
+      return;
+    }
+
+    if (d.k === 'denied' && d.to === online.id) {
+      // Not our match. Say so plainly and stop trying to get in.
+      online.rejoin = null;
+      online.error = txt('netFull');
+      online.status = 'ended';
+      refreshOnlineUi();
       return;
     }
     // Either player can ask for a rematch; the host is the one who deals it,
@@ -3664,7 +3680,7 @@
     online.status = 'playing';
     refreshOpponentUi();
     resetGame();
-    netSend('start', { seats: online.seats, state: netSnapshot() });
+    netSend('start', { seats: online.seats, tokens: online.seatTokens, state: netSnapshot() });
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
@@ -3684,13 +3700,14 @@
 
   /** Host only: seat an arrival in the empty chair and hand them this board. */
   function netResumeMatch(id, token) {
-    if (!online.host || !online.vacancies.length) return;
-    // Their own seat if this room remembers them, otherwise the one that has
-    // been empty longest. Coming back to your own tank matters: the seats hold
-    // different damage, different ammo and different ground.
-    const own = netSeatForToken(token);
-    const seat = own >= 0 ? own : online.vacancies[0];
+    if (!online.host) return;
+    // Only into the seat this token owns. There is no "any free chair" case:
+    // the seats were locked to their players when the match was dealt.
+    const seat = netSeatForToken(token);
+    if (seat < 0) return;
     online.vacancies = online.vacancies.filter(v => v !== seat);
+    // They are back, so the stand-in stands down.
+    netSeatResponded(seat);
     online.seats[seat] = id;
     online.seatTokens[seat] = token || null;
     online.status = 'playing';

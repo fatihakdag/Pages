@@ -144,13 +144,18 @@ Other things worth knowing:
   remembers nothing across one, so identity is the game's job: each client holds
   a per-room token in `sessionStorage` (surviving the reload a waking phone
   often amounts to), presents it in `ready`, and the `start` message carries the
-  seat/token table. A seat that empties keeps its token, so its player gets
-  *that* seat back rather than any free one — seats differ in damage, ammo and
-  ground. Someone with the code but no matching token takes the chair that
-  emptied first; possession of a four-character code is the whole security
-  model.
+  seat/token table. **Seats are locked to the players the match was dealt to.**
+  An empty one is held for its owner and nobody else — a stranger with the code
+  is told the room is full, because taking over a seat means inheriting someone
+  else's damage, ammo and position. A player who never comes back has their seat
+  played by the CPU after two missed turns, which is the existing turn-clock
+  path; their chair is simply never reassigned.
 - **Seating happens on `ready`, not on `peer`**, because `ready` is what carries
-  the token.
+  the token. A `ready` with no matching seat gets a `denied`, which also stops
+  that client's reconnect attempts — it is not a match it can join.
+- Losing the token (cleared storage, a different browser) means losing the seat:
+  it stays empty and the CPU plays it. That is the cost of locking seats, and
+  the alternative is letting strangers inherit tanks.
 - `online.vacancies` is a list. It was a single seat, which orphaned the earlier
   one whenever two players were away at once — nobody could fill it and its tank
   sat there played by nothing.

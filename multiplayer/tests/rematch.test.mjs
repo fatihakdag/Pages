@@ -106,11 +106,13 @@ test('a rejoin resumes the board in progress rather than starting over', () => {
 
   // The host drops, then someone joins the room again.
   gs.deliver({ t: 'gone', id: 1, host: 2 });
+  // They come back presenting the token that owns seat 0 — the only way in.
+  const seat0 = guest.g.online.seatTokens[0];
   gs.deliver({ t: 'peer', id: 3, name: '' });
-  gs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: 'tok3' } });
+  gs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: seat0 } });
 
   const starts = gs.payloads('start');
-  assert.equal(starts.length, 1, 'the remaining player deals them in');
+  assert.equal(starts.length, 1, 'the remaining player deals them back in');
   assert.deepEqual(starts[0].seats, [3, 2], 'the newcomer takes the empty seat');
   assert.deepEqual(Array.from(starts[0].state.terrain), midMatch,
     'and is handed the board as it stands, craters and all');
@@ -124,8 +126,9 @@ test('the rejoining player lands on that board, in that seat', () => {
   host.g.craterAt(400, host.g.groundHeightAt(400), 44);
   gs.deliver({ t: 'msg', from: 1, d: { k: 'sync', state: host.g.netSnapshot() } });
   gs.deliver({ t: 'gone', id: 1, host: 2 });
+  const seat0 = guest.g.online.seatTokens[0];
   gs.deliver({ t: 'peer', id: 3, name: '' });
-  gs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: 'tok3' } });
+  gs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: seat0 } });
 
   const rejoiner = load();
   const rs = connect(rejoiner, 'ABCD');
