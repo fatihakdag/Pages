@@ -40,7 +40,10 @@ function matchOf(seats, asSeat = 1) {
     t: 'joined', room: 'ABCD', id: ids[asSeat], host: 1,
     peers: ids.slice(0, asSeat).map(id => ({ id, name: '' }))
   });
-  for (const id of ids.slice(1)) hs.deliver({ t: 'peer', id, name: '' });
+  for (const id of ids.slice(1)) {
+    hs.deliver({ t: 'peer', id, name: '' });
+    hs.deliver({ t: 'msg', from: id, d: { k: 'ready', token: 'tok' + id } });
+  }
   ms.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
   me.flatTerrain(400);
   return { me, ms, host, hs };

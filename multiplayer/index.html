@@ -3273,7 +3273,9 @@
     host: false,
     status: 'offline', // offline | connecting | waiting | playing | ended
     error: null,
-    vacant: null,      // a seat whose player left, kept open for whoever arrives
+    token: null,       // who we are, so a rejoin gets its own seat back
+    seatTokens: [],    // the token that belongs in each seat, remembered when empty
+    vacancies: [],     // seats whose player left, in the order they emptied
     rejoin: null,      // { code, tries } while we are trying to get back in
     missed: [],        // consecutive turns each seat has let run out
     aiSeats: [],       // seats the CPU is playing until their player returns
@@ -3284,6 +3286,30 @@
 
   /** True once we are in a match, as opposed to merely connected. */
   function netPlaying() { return online.status === 'playing'; }
+
+  // The relay hands out a fresh member id on every connection and remembers
+  // nobody, so a reconnecting player is a stranger to it. This is what makes a
+  // seat ours: kept per room in sessionStorage, so it survives the page reload
+  // that a phone waking up often amounts to.
+  function netToken(room) {
+    const key = 'barrage:token:' + room;
+    try {
+      const held = sessionStorage.getItem(key);
+      if (held) return held;
+    } catch { /* private mode, or storage disabled */ }
+    const made = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { sessionStorage.setItem(key, made); } catch { /* not fatal */ }
+    return made;
+  }
+
+  /** Which seat this token belongs to, if any of the empty ones remember it. */
+  function netSeatForToken(token) {
+    if (!token) return -1;
+    for (const seat of online.vacancies) {
+      if (online.seatTokens[seat] === token) return seat;
+    }
+    return -1;
+  }
 
   /** Restart the clock for whoever is about to aim. */
   function netResetTurnClock() { turnDeadline = performance.now() + TURN_LIMIT_MS; }
@@ -3491,21 +3517,19 @@
       online.host = m.host === m.id;
       netPeerIds = m.peers.map(p => p.id);
       online.status = 'waiting';
+      online.token = netToken(m.room);
       onlineCodeInput.value = m.room;
-      // Joining a room that already has someone in it means the match is on;
-      // the host deals the seats and the world.
-      if (m.peers.length && !online.host) netSend('ready', {});
+      // Announcing ourselves carries the token, which is what lets whoever
+      // holds the board give us back the seat we had rather than any free one.
+      if (m.peers.length && !online.host) netSend('ready', { token: online.token });
       refreshOnlineUi();
       return;
     }
 
     if (m.t === 'peer') {
+      // Recorded only: seating waits for their `ready`, which carries the token
+      // that says which seat is theirs.
       if (!netPeerIds.includes(m.id)) netPeerIds.push(m.id);
-      if (!online.host) return;
-      // Someone left and someone has arrived: put them in the empty seat and
-      // hand them the board as it stands, rather than starting over.
-      if (online.vacant !== null) netResumeMatch(m.id);
-      else netStartMatch();
       return;
     }
 
@@ -3519,7 +3543,11 @@
       const seat = online.seats.indexOf(m.id);
       if (seat >= 0) {
         online.seats[seat] = null;
-        online.vacant = seat;   // kept open, so a rejoin resumes this board
+        // Every empty seat is remembered, not just the most recent one: with
+        // four players two can be empty at once, and tracking a single seat
+        // orphaned the earlier one for good. seatTokens[seat] is left alone —
+        // that is how the right person gets this chair back.
+        if (!online.vacancies.includes(seat)) online.vacancies.push(seat);
       }
       online.status = 'ended';  // play pauses; the board is not thrown away
       refreshOnlineUi();
@@ -3531,7 +3559,14 @@
     if (m.t !== 'msg' || !m.d) return;
     const d = m.d;
 
-    if (d.k === 'ready' && online.host) { netStartMatch(); return; }
+    if (d.k === 'ready' && online.host) {
+      netTokensById[m.from] = d.token || null;
+      // An empty chair means a match is in progress: seat them in it — theirs
+      // if the token says so — rather than dealing a new game.
+      if (online.vacancies.length) netResumeMatch(m.from, d.token);
+      else netStartMatch();
+      return;
+    }
     // Either player can ask for a rematch; the host is the one who deals it,
     // so that both end up on the same new terrain.
     if (d.k === 'rematch' && online.host) { netRestartMatch(); return; }
@@ -3549,7 +3584,9 @@
       online.peerAway = false;
       online.missed = [];
       online.aiSeats = [];
+      online.vacancies = [];
       online.seats = d.seats;
+      online.seatTokens = d.tokens || [];
       online.seat = d.seats.indexOf(online.id);
       online.status = 'playing';
       cpuMode = false;
@@ -3620,6 +3657,9 @@
     // Seat order follows join order, so the host is player 1. Set before the UI
     // is refreshed: refreshOpponentUi asks whether a match is on.
     online.seats = [online.id, ...netOtherIds()];
+    online.seatTokens = online.seats.map(
+      id => (id === online.id ? online.token : (netTokensById[id] || null)));
+    online.vacancies = [];
     online.seat = 0;
     online.status = 'playing';
     refreshOpponentUi();
@@ -3632,26 +3672,32 @@
 
   /** Host only: same seats, a fresh battlefield, both sides told at once. */
   function netRestartMatch() {
-    if (!online.host || online.vacant !== null) return;
+    if (!online.host || online.vacancies.length) return;
     online.status = 'playing';
     refreshOpponentUi();
     resetGame();
-    netSend('start', { seats: online.seats, state: netSnapshot() });
+    netSend('start', { seats: online.seats, tokens: online.seatTokens, state: netSnapshot() });
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
   }
 
   /** Host only: seat an arrival in the empty chair and hand them this board. */
-  function netResumeMatch(id) {
-    if (!online.host || online.vacant === null) return;
-    online.seats[online.vacant] = id;
-    online.vacant = null;
+  function netResumeMatch(id, token) {
+    if (!online.host || !online.vacancies.length) return;
+    // Their own seat if this room remembers them, otherwise the one that has
+    // been empty longest. Coming back to your own tank matters: the seats hold
+    // different damage, different ammo and different ground.
+    const own = netSeatForToken(token);
+    const seat = own >= 0 ? own : online.vacancies[0];
+    online.vacancies = online.vacancies.filter(v => v !== seat);
+    online.seats[seat] = id;
+    online.seatTokens[seat] = token || null;
     online.status = 'playing';
     refreshOpponentUi();
     // The same message a fresh match uses — the state it carries is simply the
     // game in progress rather than a new one.
-    netSend('start', { seats: online.seats, state: netSnapshot() });
+    netSend('start', { seats: online.seats, tokens: online.seatTokens, state: netSnapshot() });
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
@@ -3670,6 +3716,9 @@
 
   // The relay tells us who is in the room as they arrive.
   let netPeerIds = [];
+  // Tokens by member id, collected from `ready`, so the host can write the
+  // seat/token table into the `start` it deals.
+  const netTokensById = {};
 
   /**
    * How many seats this match is for. The host's TANKS selector decides it, so
@@ -3866,7 +3915,7 @@
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock,
-    netScheduleRejoin, netLeave, REJOIN_DELAYS_MS,
+    netScheduleRejoin, netLeave, REJOIN_DELAYS_MS, netToken, netSeatForToken,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL,

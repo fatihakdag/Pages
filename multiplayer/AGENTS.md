@@ -140,6 +140,20 @@ Other things worth knowing:
   drives locks the turn controls exactly like a CPU seat does.
 - The host deals seats in join order and hands out the world in the `start`
   message, so nothing depends on the clients generating the same terrain.
+- **The relay knows nobody.** It issues a fresh member id per connection and
+  remembers nothing across one, so identity is the game's job: each client holds
+  a per-room token in `sessionStorage` (surviving the reload a waking phone
+  often amounts to), presents it in `ready`, and the `start` message carries the
+  seat/token table. A seat that empties keeps its token, so its player gets
+  *that* seat back rather than any free one — seats differ in damage, ammo and
+  ground. Someone with the code but no matching token takes the chair that
+  emptied first; possession of a four-character code is the whole security
+  model.
+- **Seating happens on `ready`, not on `peer`**, because `ready` is what carries
+  the token.
+- `online.vacancies` is a list. It was a single seat, which orphaned the earlier
+  one whenever two players were away at once — nobody could fill it and its tank
+  sat there played by nothing.
 - **Table size is the host's TANKS selector.** The room waits until that many
   players are present before dealing — the lobby counts up, `code AB12 — 3/4` —
   and anyone left over when it fills is told rather than parked in a lobby that

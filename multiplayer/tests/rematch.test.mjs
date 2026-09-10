@@ -35,6 +35,7 @@ function liveMatch() {
   hs.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
   gs.deliver({ t: 'joined', room: 'ABCD', id: 2, host: 1, peers: [{ id: 1, name: '' }] });
   hs.deliver({ t: 'peer', id: 2, name: '' });
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'ready', token: 'tok2' } });
   gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
   return { host, guest, hs, gs };
 }
@@ -89,7 +90,7 @@ test('someone leaving hands on the host role and keeps their seat open', () => {
   gs.deliver({ t: 'gone', id: 1, host: 2 });
 
   assert.equal(guest.g.online.host, true, 'the relay handed the role on and we took it');
-  assert.equal(guest.g.online.vacant, 0, 'seat 0 is being kept open');
+  assert.deepEqual(Array.from(guest.g.online.vacancies), [0], 'seat 0 is kept open');
   assert.equal(guest.g.online.status, 'ended');
 });
 
@@ -106,6 +107,7 @@ test('a rejoin resumes the board in progress rather than starting over', () => {
   // The host drops, then someone joins the room again.
   gs.deliver({ t: 'gone', id: 1, host: 2 });
   gs.deliver({ t: 'peer', id: 3, name: '' });
+  gs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: 'tok3' } });
 
   const starts = gs.payloads('start');
   assert.equal(starts.length, 1, 'the remaining player deals them in');
@@ -114,7 +116,7 @@ test('a rejoin resumes the board in progress rather than starting over', () => {
     'and is handed the board as it stands, craters and all');
   assert.equal(starts[0].state.tanks[1].hp, 48, 'damage is not undone');
   assert.equal(guest.g.online.status, 'playing');
-  assert.equal(guest.g.online.vacant, null);
+  assert.equal(guest.g.online.vacancies.length, 0, 'the chair is filled');
 });
 
 test('the rejoining player lands on that board, in that seat', () => {
@@ -123,6 +125,7 @@ test('the rejoining player lands on that board, in that seat', () => {
   gs.deliver({ t: 'msg', from: 1, d: { k: 'sync', state: host.g.netSnapshot() } });
   gs.deliver({ t: 'gone', id: 1, host: 2 });
   gs.deliver({ t: 'peer', id: 3, name: '' });
+  gs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: 'tok3' } });
 
   const rejoiner = load();
   const rs = connect(rejoiner, 'ABCD');
