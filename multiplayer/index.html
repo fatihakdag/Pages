@@ -1576,14 +1576,22 @@
     if (s !== lastTimerText) { lastTimerText = s; timerVal.textContent = s; }
   }
 
-  function setWind() {
-    wind = (Math.random() * 2 - 1) * WIND_MAX;
+  /** Put the current wind on the HUD. Separate from rolling one, because a
+   *  wind that arrived in a snapshot has to be shown without being re-rolled —
+   *  doing both in one function left every client displaying its own random
+   *  number while the physics quietly used the right one. */
+  function showWind() {
     const col = windColor();
     windVal.textContent = windForce() + '/10';
     windArrow.textContent = wind >= 0 ? '→' : '←';
     windArrow.style.color = col;
     windVal.style.color = col;
     windPulse = 1; // flash the on-canvas gauge so a new wind isn't missed
+  }
+
+  function setWind() {
+    wind = (Math.random() * 2 - 1) * WIND_MAX;
+    showWind();
   }
 
   function resetGame() {
@@ -3923,8 +3931,8 @@
     if (typeof snap.heliTimer === 'number') heliTimer = snap.heliTimer;
     projectiles = [];
     clusterQueue = [];
-    setWind();
-    wind = snap.wind; // setWind rolls a fresh value; the snapshot is authority
+    wind = snap.wind;
+    showWind();       // shown, not re-rolled: the snapshot is the authority
     // A snapshot hands the turn over, so the clock starts again here too --
     // otherwise a player would inherit whatever was left of someone else's.
     netResetTurnClock();
@@ -4040,7 +4048,7 @@
     fire, applyDamageAndCrater, stepProjectile, stepRoller, detonateRoller, splitMirv,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
     endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
-    setWind, windStrength, windForce, isAi, txt, upper, playerName,
+    setWind, showWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock, netPublishState,
