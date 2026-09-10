@@ -91,7 +91,7 @@ test('someone leaving hands on the host role and keeps their seat open', () => {
 
   assert.equal(guest.g.online.host, true, 'the relay handed the role on and we took it');
   assert.deepEqual(Array.from(guest.g.online.vacancies), [0], 'seat 0 is kept open');
-  assert.equal(guest.g.online.status, 'ended');
+  assert.equal(guest.g.online.status, 'playing', 'and the match carries on without them');
 });
 
 test('a rejoin resumes the board in progress rather than starting over', () => {
@@ -191,7 +191,7 @@ test('a player who leaves is gone, not away', () => {
 
   hs.deliver({ t: 'gone', id: 2, host: 1 });
   assert.equal(host.g.online.peerAway, false, 'the status says left, not away');
-  assert.equal(host.g.online.status, 'ended');
+  assert.equal(host.g.el2.onlineStatus.textContent, host.g.txt('netEnded'));
 });
 
 test('a connection lost mid-match comes back on its own', () => {
@@ -259,4 +259,29 @@ test('leaving on purpose does not reconnect us', () => {
   assert.equal(guest.g.online.rejoin, null);
   guest.advance(120000);
   assert.equal(sockets.length, 0, 'we do not drag them back in');
+});
+
+test('the end of the round reaches every screen, not just the winner’s', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  host.flatTerrain(400);
+  host.placeTanksAt([200, 700]);
+
+  // The host's turn ends with the other tank destroyed, so only the host runs
+  // endTurnCheckWin(). Killed outright rather than shot at, so the test does
+  // not depend on a particular arc connecting.
+  host.g.currentPlayer = 0;
+  host.g.tanks[1].alive = false;
+  host.g.tanks[1].hp = 0;
+  host.g.nextTurn();
+  assert.equal(host.g.state, 'GAMEOVER', 'the host sees the round end');
+
+  const sync = hs.payloads('sync').slice(-1)[0];
+  assert.equal(sync.state.state, 'GAMEOVER');
+  assert.equal(sync.state.winner, 0, 'and the snapshot says who won');
+
+  gs.deliver({ t: 'msg', from: 1, d: sync });
+  assert.equal(guest.g.state, 'GAMEOVER');
+  assert.ok(guest.g.el.overlay.classList.contains('show'),
+    'the loser is shown the result rather than left staring at a dead game');
+  assert.match(guest.g.el.overlay.textContent + guest.g.txt('wins', { name: 'x' }), /wins|kazan/i);
 });

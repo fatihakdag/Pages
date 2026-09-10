@@ -193,6 +193,18 @@ Other things worth knowing:
 
 ## Known gaps
 
+- **A departure does not stop the match.** Setting the status away from
+  'playing' on `gone` deadlocked it: the turn clock only runs during a match, so
+  the CPU could never take the empty seat and nothing could happen again. Play
+  carries on, the status line says "opponent left", and the ordinary clock
+  decides — one missed turn skipped, two and the CPU plays the seat. A
+  disconnect is therefore not treated as leaving for good, which matters because
+  minimising a browser on iOS closes the socket within seconds.
+- **The end of a round has to be published like anything else.** The overlay is
+  raised inside `endTurnCheckWin()`, which only runs on the client that resolved
+  the shot; everyone else had `state` set to `GAMEOVER` and were shown nothing —
+  a board that had stopped responding, with no idea who won. The snapshot
+  carries `winner`, and `netApplyState()` raises and clears the overlay.
 - **A dropped connection reconnects itself** (`netScheduleRejoin`), backing off
   over roughly the room's grace period, and the held seat means it resumes the
   live board rather than starting over. A deliberate `netLeave()` sets
