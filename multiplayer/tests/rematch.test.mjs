@@ -191,7 +191,8 @@ test('a player who leaves is gone, not away', () => {
 
   hs.deliver({ t: 'gone', id: 2, host: 1 });
   assert.equal(host.g.online.peerAway, false, 'the status says left, not away');
-  assert.equal(host.g.el2.onlineStatus.textContent, host.g.txt('netEnded'));
+  assert.equal(host.g.el2.onlineStatus.textContent,
+    host.g.txt('netEnded', { name: host.g.txt('playerName', { n: 2 }) }));
 });
 
 test('a connection lost mid-match comes back on its own', () => {
