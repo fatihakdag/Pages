@@ -273,11 +273,67 @@ test('a dropped connection is reported', () => {
   assert.equal(h.g.el2.onlineStatus.textContent, h.g.txt('netLost'));
 });
 
+test('the main screen mirrors the online status, and hides when offline', () => {
+  const h = load();
+  assert.equal(h.g.el2.netPill.hidden, true, 'a local game carries no online furniture');
+
+  const sock = connect(h);
+  sock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+
+  assert.equal(h.g.el2.netPill.hidden, false, 'once online it is on screen');
+  assert.equal(h.g.el2.netStatusEl.textContent, h.g.el2.onlineStatus.textContent,
+    'and says the same thing as the panel inside Settings');
+  assert.match(h.g.el2.netStatusEl.textContent, /ABCD/);
+});
+
+test('a lost connection offers a way back once retrying has given up', () => {
+  const h = load();
+  const sock = hostAMatch(h);   // dropping out of a live match is what retries
+  sock.close();
+
+  // While the automatic attempts are still running there is nothing to ask of
+  // the player, so the button stays out of the way.
+  assert.equal(h.g.el2.netRejoinBtn.hidden, true, 'not while it is retrying by itself');
+
+  // Exhaust the schedule: each attempt fails to produce a socket and re-arms.
+  for (let i = 0; i < h.g.REJOIN_DELAYS_MS.length; i++) h.g.netScheduleRejoin('ABCD');
+
+  assert.equal(h.g.online.rejoin, null, 'it stops trying');
+  assert.equal(h.g.el2.netRejoinBtn.hidden, false, 'and hands the decision over');
+  assert.equal(h.g.el2.netPill.hidden, false, 'with the status still visible');
+});
+
+test('rejoining goes back to the room we were in, without retyping it', () => {
+  const h = load();
+  const sock = hostAMatch(h);
+  sock.close();
+  for (let i = 0; i < h.g.REJOIN_DELAYS_MS.length; i++) h.g.netScheduleRejoin('ABCD');
+
+  const next = [];
+  h.g.setSocketFactory(() => { const s = fakeSocket(); next.push(s); return s; });
+  h.g.el2.netRejoinBtn.dispatch('click');
+
+  assert.equal(next.length, 1, 'it opens a connection');
+  next[0].emit('open');
+  assert.deepEqual(next[0].sent[0], { t: 'join', v: h.g.NET_PROTOCOL, room: 'ABCD' },
+    'to the same room');
+});
+
+test('a room we left on purpose is not one we are offered back into', () => {
+  const h = load();
+  const sock = connect(h);
+  sock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+  h.g.netLeave();
+
+  assert.equal(h.g.el2.netRejoinBtn.hidden, true, 'leaving is a decision, not a fault');
+  assert.equal(h.g.el2.netPill.hidden, true, 'and the HUD goes quiet again');
+});
+
 test('every online string has a Turkish counterpart', () => {
   const h = load();
   const keys = ['online', 'hostGame', 'joinGame', 'netOffline', 'netConnecting',
     'netWaiting', 'netPlaying', 'netEnded', 'netNoRoom', 'netFull',
-    'netVersion', 'netLost'];
+    'netVersion', 'netLost', 'rejoin'];
   h.g.el.langCheckbox.checked = true;
   h.g.el.langCheckbox.dispatch('change');
   for (const k of keys) {

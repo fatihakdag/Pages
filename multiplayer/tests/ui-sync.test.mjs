@@ -147,7 +147,9 @@ test('the banner says whose turn it is, and what the round is doing', () => {
   g.currentPlayer = 0;
   g.state = 'AIMING';
   g.updateHUD();
-  assert.ok(banner.textContent.includes('AIM'), banner.textContent);
+  // On your own turn the banner names you and stops there: the controls beside
+  // it are the instruction, so "AIM & FIRE" only ever cost the rail width.
+  assert.match(banner.textContent, /PLAYER 1/i, banner.textContent);
 
   g.state = 'FIRING';
   g.updateHUD();
