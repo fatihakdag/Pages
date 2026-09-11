@@ -275,6 +275,7 @@
   .online-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
   }
   .online-row button {
@@ -289,6 +290,16 @@
     cursor: pointer;
   }
   .online-row button:disabled { opacity: 0.4; cursor: default; }
+  #online-status {
+    /* Takes what is left of the row, and drops onto its own line rather than
+       squeezing the buttons when there is not enough of it. */
+    flex: 1 1 92px;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--text-main);
+    overflow-wrap: anywhere;
+  }
   #online-code {
     width: 68px;
     background: var(--input-bg, #0d0d12);
@@ -302,7 +313,6 @@
     text-align: center;
     text-transform: uppercase;
   }
-  #online-status { font-variant-numeric: tabular-nums; }
 
   #controls {
     background: var(--panel-bg);
@@ -533,9 +543,39 @@
   /* The online group needs HOST + CODE + JOIN across one line. */
   #settings-grid #online-group { grid-column: 1 / -1; }
 
-  #net-pill { display: inline-flex; align-items: center; gap: 6px; }
+  #net-group {
+    /* Every other group in the bar is a label over a control. This one is only
+       the control, so without this it lines up with the labels and sits a row
+       too high; flex-end puts it on the dropdowns' line instead. */
+    align-self: flex-end;
+    justify-content: flex-end;
+    /* Ordered after FIRE on the wide bar, though it sits before it in the
+       markup where mobile wants it. The status changes width as it changes —
+       "off", then a room code, then "connection lost" — and anything after it
+       in the row would slide about with it. FIRE is the one control that must
+       never move under a thumb about to press it. */
+    order: 1;
+  }
+  #keys-hint { order: 2; }
+  /* Same box as a <select>, so the alignment holds rather than nearly holds. */
+  #net-invite, #net-pill { min-height: 30px; }
+  #net-pill { display: inline-flex; align-items: center; gap: 6px; white-space: normal; }
   #net-pill[hidden] { display: none; }
-  #net-status { font-variant-numeric: tabular-nums; }
+  #net-invite {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px dashed var(--panel-line);
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    padding: 6px 8px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #net-invite:hover { color: var(--text-main); border-color: #55526a; }
+  #net-invite[hidden] { display: none; }
+  #net-status, #online-status { font-variant-numeric: tabular-nums; }
   #net-rejoin {
     background: var(--accent-p1);
     color: #1a1a1a;
@@ -682,6 +722,8 @@
        here: aiming is the thing you touch every turn, and a half-width slider
        between two arrow buttons is a cramped target. Give each its own row. */
     #angle-group, #power-group { grid-column: 1 / -1; }
+    /* Stacked, so there is nothing beside FIRE for the status to shove. */
+    #net-group { order: 0; align-self: auto; }
     /* With setup moved into Settings the weapon picker is the only thing left
        on its row, so it takes the whole width rather than leaving a gap. */
     #weapon-group { grid-column: 1 / -1; }
@@ -817,10 +859,24 @@
     /* Column direction with the base rule's wrap would spill the groups into a
        second column rather than scrolling. */
     #controls { flex-wrap: nowrap; align-content: normal; }
+    /* The rail is a column, so flex-end would push this to the right-hand edge
+       rather than down. It spans the rail like everything else here, and its
+       auto margins take the leftover height evenly — centring it between the
+       weapon picker and FIRE instead of leaving a hole underneath it. When the
+       rail overflows there is no leftover height and they collapse to nothing. */
+    #net-group {
+      order: 0;
+      align-self: stretch;
+      margin-top: auto;
+      margin-bottom: auto;
+    }
+
     #fire-btn {
       width: 100%;
       grid-column: auto;
-      margin-top: auto;   /* sits at the bottom while there is room */
+      /* #net-group's auto margins already push this to the bottom; a second
+         auto margin here would take a third of the space and un-centre it. */
+      margin-top: 0;
       position: sticky;   /* and stays in view once there is not */
       bottom: 0;
       z-index: 2;
@@ -881,14 +937,6 @@
       <div id="turn-banner">—</div>
       <div id="info-row">
         <span id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
-        <!-- Hosting and joining moved into Settings, but a match you are in —
-             or have just dropped out of — has to be readable without opening a
-             dialog, and getting back in has to be one tap. Hidden entirely
-             while offline, so a local game carries no online furniture. -->
-        <span id="net-pill" class="hud-pill" hidden>
-          <span id="net-status">off</span>
-          <button type="button" id="net-rejoin" data-i18n="rejoin" hidden>REJOIN</button>
-        </span>
         <button type="button" id="settings-btn" aria-haspopup="dialog">
           <span aria-hidden="true">⚙</span><span data-i18n="settings">SETTINGS</span>
         </button>
@@ -938,6 +986,17 @@
         <option value="missile">Guided Missile</option>
       </select>
     </div>
+    <!-- Hosting and joining live in Settings, but this is the space under the
+         weapon picker that the rail was wasting, and it is where online
+         belongs: an invitation in when nothing is going on, and what the
+         connection is doing once something is. One or the other, never both. -->
+    <div class="ctrl-group" id="net-group">
+      <button type="button" id="net-invite" data-i18n="playWithOthers">PLAY WITH OTHERS</button>
+      <span id="net-pill" class="hud-pill" hidden>
+        <span id="net-status">off</span>
+        <button type="button" id="net-rejoin" data-i18n="rejoin" hidden>REJOIN</button>
+      </span>
+    </div>
     <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div id="keys-hint">
       <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
@@ -981,13 +1040,18 @@
           </select>
         </div>
         <div class="ctrl-group" id="online-group">
-          <div class="ctrl-label"><span data-i18n="online">ONLINE</span> <span class="val" id="online-status">off</span></div>
+          <div class="ctrl-label"><span data-i18n="online">ONLINE</span></div>
           <div class="online-row">
             <button type="button" id="online-host" data-i18n="hostGame">HOST</button>
             <input type="text" id="online-code" maxlength="4" autocomplete="off"
                    autocapitalize="characters" spellcheck="false"
                    placeholder="CODE" aria-label="Room code">
             <button type="button" id="online-join" data-i18n="joinGame">JOIN</button>
+            <!-- Beside the buttons rather than out at the end of the label row:
+                 what the connection is doing is about these controls, and a
+                 status pinned to the opposite edge of the panel read as
+                 belonging to nothing. -->
+            <span id="online-status" role="status">off</span>
           </div>
         </div>
         <div class="ctrl-group">
@@ -1117,6 +1181,7 @@ if ('serviceWorker' in navigator) {
   const netPill = document.getElementById('net-pill');
   const netStatusEl = document.getElementById('net-status');
   const netRejoinBtn = document.getElementById('net-rejoin');
+  const netInviteBtn = document.getElementById('net-invite');
   const onlineHostBtn = document.getElementById('online-host');
   const onlineJoinBtn = document.getElementById('online-join');
   const onlineCodeInput = document.getElementById('online-code');
@@ -1151,8 +1216,9 @@ if ('serviceWorker' in navigator) {
       zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomFit: 'Fit the whole battlefield',
       online: 'ONLINE', onlineMode: 'Online', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
       roomCode: 'CODE', roomCodeLabel: 'Room code', rejoin: 'REJOIN',
+      playWithOthers: 'PLAY WITH OTHERS',
       netOffline: 'off', netConnecting: 'connecting…', netRejoining: 'reconnecting…', netWaiting: 'code {code} — {n}/{total}',
-      netPlaying: 'room {code}', netEnded: 'opponent left',
+      netPlaying: 'room {code}', netEnded: '{name} left',
       netTheirTurn: '{name} — THEIR TURN', netYouAre: 'you are {name}',
       netAway: 'opponent is away', netAwayTurn: '{name} — AWAY',
       netTurnLeft: '{name} — {s}s', netSkipped: '{name} ran out of time',
@@ -1186,8 +1252,9 @@ if ('serviceWorker' in navigator) {
       zoomIn: 'Yakınlaştır', zoomOut: 'Uzaklaştır', zoomFit: 'Tüm sahayı göster',
       online: 'ÇEVRİMİÇİ', onlineMode: 'Çevrimiçi', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
       roomCode: 'KOD', roomCodeLabel: 'Oda kodu', rejoin: 'YENİDEN BAĞLAN',
-      netOffline: 'kapalı', netConnecting: 'bağlanıyor…', netRejoining: 'yeniden bağlanıyor…', netWaiting: 'kod {code} — {n}/{total}',
-      netPlaying: 'oda {code}', netEnded: 'rakip ayrıldı',
+      playWithOthers: 'ÇEVRİMİÇİ OYNA',
+      netOffline: 'bağlı değil', netConnecting: 'bağlanıyor…', netRejoining: 'yeniden bağlanıyor…', netWaiting: 'kod {code} — {n}/{total}',
+      netPlaying: 'oda {code}', netEnded: '{name} ayrıldı',
       netTheirTurn: '{name} — SIRA ONDA', netYouAre: 'sen {name}',
       netAway: 'rakip başka yerde', netAwayTurn: '{name} — BAŞKA YERDE',
       netTurnLeft: '{name} — {s}sn', netSkipped: '{name} süreyi doldurdu',
@@ -1264,9 +1331,18 @@ if ('serviceWorker' in navigator) {
                    'power-dec': 'powerDown', 'power-inc': 'powerUp',
                    'settings-close': 'closeSettings' };
     for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
+    // The room code field carries its label in attributes, which the data-i18n
+    // sweep above cannot see: both strings existed in Turkish but nothing ever
+    // put them on the element.
+    onlineCodeInput.placeholder = txt('roomCode');
+    onlineCodeInput.setAttribute('aria-label', txt('roomCodeLabel'));
     lastTimerText = ''; // force the clock to redraw in the new language
     // the weapon <option> labels and ammo readout are rebuilt from here
     if (tanks.length) { updateHUD(); syncControlsFromTank(); }
+    // The connection status is composed in code rather than carried by a
+    // data-i18n attribute, so the loop above cannot reach it: without this it
+    // keeps whatever language it was last written in until the next net event.
+    refreshOnlineUi();
     refreshOverlayText();
   }
 
@@ -2019,6 +2095,9 @@ if ('serviceWorker' in navigator) {
   }
 
   settingsBtn.addEventListener('click', openSettings);
+  // The invitation is a shortcut to the same panel: hosting and joining live
+  // there, and this saves hunting for them.
+  netInviteBtn.addEventListener('click', openSettings);
   settingsCloseBtn.addEventListener('click', closeSettings);
   // The dimmed backdrop closes; a click that lands inside the panel does not.
   settingsModal.addEventListener('click', (e) => {
@@ -3759,6 +3838,17 @@ if ('serviceWorker' in navigator) {
     return `${scheme}//${location.host}`;
   }
 
+  /**
+   * The empty seats, named: "Player 2", or "Player 2, Player 3".
+   *
+   * Named as the player rather than through playerName(), which would call the
+   * seat "CPU 2" once the CPU has taken it over — the message is about which
+   * person went, not who is playing the chair now.
+   */
+  function netWhoLeft() {
+    return online.vacancies.map(seat => txt('playerName', { n: seat + 1 })).join(', ');
+  }
+
   function netStatusText() {
     if (online.error) return online.error;
     if (online.status === 'connecting') {
@@ -3770,10 +3860,16 @@ if ('serviceWorker' in navigator) {
       return txt('netWaiting', { code: online.room, n: netPeerIds.length + 1, total: netSeatCount() });
     }
     if (online.status === 'playing') {
-      if (online.vacancies.length) return txt('netEnded');   // someone dropped out
+      // Who left, not just that somebody did: with four seats "opponent left"
+      // does not say whose chair is now empty.
+      if (online.vacancies.length) return txt('netEnded', { name: netWhoLeft() });
       return online.peerAway ? txt('netAway') : txt('netPlaying', { code: online.room });
     }
-    if (online.status === 'ended') return txt('netEnded');
+    if (online.status === 'ended') {
+      // Our own connection going is not somebody leaving, so only name a player
+      // when there is an empty seat to point at.
+      return online.vacancies.length ? txt('netEnded', { name: netWhoLeft() }) : txt('netLost');
+    }
     return txt('netOffline');
   }
 
@@ -3798,10 +3894,12 @@ if ('serviceWorker' in navigator) {
     onlineJoinBtn.disabled = busy;
     onlineCodeInput.disabled = busy;
 
-    // The main-screen mirror. It appears the moment online is in play and goes
-    // away again when it is not, so an offline game keeps a clean HUD.
+    // The main screen shows exactly one of the two: what the connection is
+    // doing, or — when there is no connection to report — the way to start one.
     netStatusEl.textContent = text;
-    netPill.hidden = online.status === 'offline' && !online.error && !online.rejoin;
+    const engaged = !(online.status === 'offline' && !online.error && !online.rejoin);
+    netPill.hidden = !engaged;
+    netInviteBtn.hidden = engaged;
     netRejoinBtn.hidden = !netCanRejoin();
   }
 
@@ -4363,19 +4461,20 @@ if ('serviceWorker' in navigator) {
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock, netPublishState,
-    netScheduleRejoin, netLeave, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
+    netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus,
-           netPill, netStatusEl, netRejoinBtn },
+           netPill, netStatusEl, netRejoinBtn, netInviteBtn },
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     heliOut, netAnnounceHeli, heliAuthority, heliSignature,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
+      settingsModal, settingsBtn,
       nudgeBtns, cards, hpText, langCheckbox
     },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },

@@ -260,7 +260,9 @@ test('an opponent leaving does not stop the match', () => {
   // Play carries on: stopping here used to deadlock the game, because the turn
   // clock only runs during a match and so the CPU could never take the seat.
   assert.equal(h.g.online.status, 'playing');
-  assert.equal(h.g.el2.onlineStatus.textContent, h.g.txt('netEnded'), 'but it says so');
+  assert.equal(h.g.el2.onlineStatus.textContent,
+    h.g.txt('netEnded', { name: h.g.txt('playerName', { n: 2 }) }),
+    'and it says which seat emptied, not just that one did');
   assert.deepEqual(Array.from(h.g.online.vacancies), [1], 'their seat is held for them');
 });
 
@@ -284,6 +286,30 @@ test('the main screen mirrors the online status, and hides when offline', () => 
   assert.equal(h.g.el2.netStatusEl.textContent, h.g.el2.onlineStatus.textContent,
     'and says the same thing as the panel inside Settings');
   assert.match(h.g.el2.netStatusEl.textContent, /ABCD/);
+});
+
+test('the main screen offers a way in when there is no connection to report', () => {
+  const h = load();
+  assert.equal(h.g.el2.netInviteBtn.hidden, false, 'an offline game invites you to play online');
+  assert.equal(h.g.el2.netPill.hidden, true, 'and shows no status, because there is none');
+
+  const sock = connect(h);
+  sock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+
+  // One or the other, never both: the invitation would be noise next to a
+  // live room code.
+  assert.equal(h.g.el2.netInviteBtn.hidden, true, 'once online the invitation goes');
+  assert.equal(h.g.el2.netPill.hidden, false, 'and the status takes its place');
+
+  h.g.netLeave();
+  assert.equal(h.g.el2.netInviteBtn.hidden, false, 'leaving offers the way back in');
+});
+
+test('the invitation opens the panel that hosts and joins', () => {
+  const h = load();
+  h.g.el2.netInviteBtn.dispatch('click');
+  assert.ok(h.g.el.settingsModal.classList.contains('show'),
+    'it is a shortcut to Settings, not a second lobby');
 });
 
 test('a lost connection offers a way back once retrying has given up', () => {
@@ -329,11 +355,87 @@ test('a room we left on purpose is not one we are offered back into', () => {
   assert.equal(h.g.el2.netPill.hidden, true, 'and the HUD goes quiet again');
 });
 
+test('with four seats the status names every player who left', () => {
+  const h = load();
+  h.g.el.countSelect.value = '4';
+  h.g.el.countSelect.dispatch('change');
+
+  const sock = connect(h);
+  sock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+  for (const id of [2, 3, 4]) {
+    sock.deliver({ t: 'peer', id, name: '' });
+    sock.deliver({ t: 'msg', from: id, d: { k: 'ready', token: `tok${id}` } });
+  }
+  assert.equal(h.g.online.status, 'playing', 'a four-seat match is under way');
+
+  sock.deliver({ t: 'gone', id: 2, host: 1 });
+  sock.deliver({ t: 'gone', id: 4, host: 1 });
+
+  const seats = Array.from(h.g.online.vacancies);
+  assert.equal(seats.length, 2, 'two chairs are empty');
+  // Both, in the order they emptied: naming only the most recent one would
+  // leave the earlier seat unaccounted for.
+  assert.equal(h.g.netWhoLeft(),
+    seats.map(seat => h.g.txt('playerName', { n: seat + 1 })).join(', '));
+  assert.equal(h.g.el2.onlineStatus.textContent,
+    h.g.txt('netEnded', { name: h.g.netWhoLeft() }));
+});
+
+test('losing our own connection is not reported as somebody leaving', () => {
+  const h = load();
+  const sock = hostAMatch(h);
+  sock.close();
+
+  assert.equal(h.g.online.status, 'ended');
+  assert.deepEqual(Array.from(h.g.online.vacancies), [], 'nobody left a seat');
+  assert.equal(h.g.el2.onlineStatus.textContent, h.g.txt('netLost'),
+    'it was our line that went, so it does not accuse a player of leaving');
+});
+
+test('switching language re-renders the status, not just the string table', () => {
+  const h = load();
+  assert.equal(h.g.el2.onlineStatus.textContent, h.g.txt('netOffline'));
+
+  h.g.el.langCheckbox.checked = true;
+  h.g.el.langCheckbox.dispatch('change');
+
+  // Having the Turkish string is not the same as showing it: this text is
+  // composed in code, so nothing redraws it unless applyLanguage says so.
+  assert.equal(h.g.el2.onlineStatus.textContent, h.g.txt('netOffline'));
+  assert.equal(h.g.el2.netStatusEl.textContent, h.g.txt('netOffline'));
+  assert.notEqual(h.g.txt('netOffline'), 'off', 'and Turkish is not English');
+});
+
+test('the room code field is labelled in the chosen language too', () => {
+  const h = load();
+  assert.equal(h.g.el2.onlineCodeInput.placeholder, h.g.txt('roomCode'));
+
+  h.g.el.langCheckbox.checked = true;
+  h.g.el.langCheckbox.dispatch('change');
+
+  // These live in attributes, where the data-i18n sweep cannot reach them.
+  assert.equal(h.g.el2.onlineCodeInput.placeholder, h.g.txt('roomCode'));
+  assert.notEqual(h.g.txt('roomCode'), 'CODE', 'and Turkish is not English');
+});
+
+test('a live room reads in the language the player picked', () => {
+  const h = load();
+  const sock = connect(h);
+  sock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+
+  h.g.el.langCheckbox.checked = true;
+  h.g.el.langCheckbox.dispatch('change');
+
+  assert.equal(h.g.el2.onlineStatus.textContent,
+    h.g.txt('netWaiting', { code: 'ABCD', n: 1, total: 2 }));
+});
+
 test('every online string has a Turkish counterpart', () => {
   const h = load();
   const keys = ['online', 'hostGame', 'joinGame', 'netOffline', 'netConnecting',
     'netWaiting', 'netPlaying', 'netEnded', 'netNoRoom', 'netFull',
-    'netVersion', 'netLost', 'rejoin'];
+    'netVersion', 'netLost', 'rejoin', 'roomCode', 'roomCodeLabel',
+    'playWithOthers'];
   h.g.el.langCheckbox.checked = true;
   h.g.el.langCheckbox.dispatch('change');
   for (const k of keys) {
