@@ -247,6 +247,23 @@ test('the dev server serves the game but nothing above the repo', async () => {
   });
 });
 
+test('the game and the worker are always revalidated; the icons are not', async () => {
+  await withRelay(async (h) => {
+    const base = `http://127.0.0.1:${h.port}`;
+    // Without this a deploy can stay invisible on a phone: the page's
+    // <meta http-equiv="Cache-Control"> tags do nothing for HTTP caching, and
+    // an installed copy would keep serving the build before last.
+    for (const path of ['/', '/sw.js', '/manifest.webmanifest']) {
+      const res = await fetch(base + path);
+      assert.equal(res.headers.get('cache-control'), 'no-cache', path);
+    }
+    // Icons change only when the generator is re-run, and the worker's cache
+    // version changes with them, so they are worth keeping.
+    const icon = await fetch(`${base}/icon-192.png`);
+    assert.match(icon.headers.get('cache-control'), /max-age=\d+/);
+  });
+});
+
 test('an idle relay retires itself, but never while a room is being kept', async () => {
   let exited = 0;
   await withRelay(async (h) => {

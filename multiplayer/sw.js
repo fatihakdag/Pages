@@ -19,7 +19,7 @@
 // there is no offline mode for an online match. /health is the relay's, so it
 // is left alone too.
 
-const VERSION = 'barrage-online-v2';
+const VERSION = 'barrage-online-v3';
 
 const SHELL = [
   './',
@@ -31,7 +31,18 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // Precached from the network rather than from the HTTP cache, for the same
+  // reason: the point of a new VERSION is to hold the new files.
+  e.waitUntil(
+    caches.open(VERSION)
+      .then((c) => Promise.all(SHELL.map((url) =>
+        fetch(url, { cache: 'no-store' }).then((res) => {
+          if (res.ok) return c.put(url, res);
+          throw new Error(`could not precache ${url}: ${res.status}`);
+        })
+      )))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -51,7 +62,11 @@ self.addEventListener('fetch', (e) => {
   // Navigations: try the network, fall back to whatever copy we have.
   if (e.request.mode === 'navigate') {
     e.respondWith(
-      fetch(e.request)
+      // `cache: no-store` is the whole point of going to the network here.
+      // A plain fetch() is served by the browser's own HTTP cache, so
+      // "network first" would happily hand back the build before last and a
+      // deploy would not show up on a reload.
+      fetch(e.request.url, { cache: 'no-store', credentials: 'same-origin' })
         .then((res) => {
           const copy = res.clone();
           caches.open(VERSION).then((c) => c.put('./index.html', copy));

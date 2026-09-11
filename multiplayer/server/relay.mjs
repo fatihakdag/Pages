@@ -255,6 +255,23 @@ function freshCode(rooms) {
   throw new Error('could not find a free room code');
 }
 
+// How long a browser may reuse a file without asking. The game is one HTML
+// file that changes on every deploy, and the service worker is what would pin
+// an old one in place, so both are always revalidated; the icons change only
+// when tools/icons.mjs is re-run, so they can sit in the cache for a week.
+//
+// This has to be sent as a real header. The page carries <meta
+// http-equiv="Cache-Control"> tags, but browsers do not honour those for HTTP
+// caching — with no header at all a deploy could be invisible for hours.
+const CACHE = {
+  '.html': 'no-cache',
+  '.js': 'no-cache',
+  '.mjs': 'no-cache',
+  '.webmanifest': 'no-cache',
+  '.png': 'public, max-age=604800',
+  '.svg': 'public, max-age=604800'
+};
+
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -275,7 +292,10 @@ async function serveStatic(req, res) {
   if (file !== ROOT && !file.startsWith(ROOT + sep)) { res.writeHead(403).end('nope'); return; }
   try {
     const body = await readFile(file);
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'content-type': TYPES[extname(file)] || 'application/octet-stream',
+      'cache-control': CACHE[extname(file)] || 'no-cache'
+    });
     res.end(body);
   } catch {
     res.writeHead(404).end('not found');

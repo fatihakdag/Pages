@@ -1009,7 +1009,9 @@
 // page opened over file://, plays exactly the same.
 if ('serviceWorker' in navigator) {
   addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    // updateViaCache:'none' keeps the worker script itself out of the HTTP
+    // cache, so a deploy is always noticed rather than up to a day late.
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
   });
 }
 // Surface any startup failure on screen — a blank canvas is otherwise silent.

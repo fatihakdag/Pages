@@ -11,6 +11,12 @@ on:
     paths:
       - 'multiplayer/server/**'
       - 'multiplayer/index.html'
+      # The service worker, the manifest and the icons ship with the game and
+      # are easy to forget here: a change to only those used to merge without
+      # ever reaching production.
+      - 'multiplayer/sw.js'
+      - 'multiplayer/manifest.webmanifest'
+      - 'multiplayer/icon-*.png'
       - 'multiplayer/Dockerfile'
       - 'multiplayer/fly.toml'
       - '.github/workflows/deploy-relay.yml'
