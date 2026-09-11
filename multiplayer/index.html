@@ -628,9 +628,31 @@
       width: 24px; height: 24px; margin-top: -9px;
     }
     input[type=range]::-moz-range-thumb { width: 24px; height: 24px; }
-    /* the rail is only ~158px wide, so the arrows have to give some back */
-    .slider-row { gap: 6px; }
-    .nudge { width: 30px; height: 30px; }
+    /* The rail is only ~158px wide, and with an arrow button on each side the
+       slider was left about 52px of track — a whole firing arc inside a
+       thumb's width, which is not aimable. So in the side rail the arrows move
+       up onto the label line, which has room to spare, and the slider takes
+       the full width of the rail on its own line.
+
+       `display: contents` is what allows it without a second copy of the
+       markup: it drops .slider-row as a box and promotes its children into the
+       group's own grid, so the arrows and the slider can be placed
+       independently. */
+    #angle-group, #power-group {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      column-gap: 6px;
+      row-gap: 2px;
+    }
+    #angle-group > .ctrl-label, #power-group > .ctrl-label { grid-column: 1; grid-row: 1; }
+    #angle-group > .slider-row, #power-group > .slider-row { display: contents; }
+    .slider-row input[type=range] { grid-column: 1 / -1; grid-row: 2; width: 100%; }
+    .slider-row .nudge:first-child { grid-column: 2; grid-row: 1; }
+    .slider-row .nudge:last-child { grid-column: 3; grid-row: 1; }
+    /* Back to the base size: on the label line they no longer cost the slider
+       any width, and a 28px target is the comfortable one. */
+    .nudge { width: 28px; height: 28px; }
     /* Column direction with the base rule's wrap would spill the groups into a
        second column rather than scrolling. */
     #controls { flex-wrap: nowrap; align-content: normal; }
