@@ -503,6 +503,117 @@
     border-radius: 3px;
     font-size: 13px;
   }
+  /* ---------- Settings ---------- */
+  /* Match setup — how many tanks, who plays them, how hard the CPU is — is
+     picked once and then not touched again for the rest of the match, while
+     angle, power and weapon change every single turn. Sharing one rail between
+     the two crowded the phone layouts and squeezed the controls that matter,
+     so setup moved behind a button. The controls themselves are unchanged:
+     the same <select> elements, moved, so every behaviour wired to them and
+     every translation still applies. */
+  #settings-btn {
+    background: #12111a;
+    color: var(--text-main);
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    line-height: 1;
+    padding: 5px 7px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #settings-btn:hover { background: #1e1c29; border-color: #55526a; }
+  #settings-btn:active { background: #2a2739; }
+
+  /* The online group needs HOST + CODE + JOIN across one line. */
+  #settings-grid #online-group { grid-column: 1 / -1; }
+
+  #net-pill { display: inline-flex; align-items: center; gap: 6px; }
+  #net-pill[hidden] { display: none; }
+  #net-status { font-variant-numeric: tabular-nums; }
+  #net-rejoin {
+    background: var(--accent-p1);
+    color: #1a1a1a;
+    border: none;
+    border-radius: 2px;
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    padding: 3px 6px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #net-rejoin[hidden] { display: none; }
+
+  #settings-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(8,7,12,0.86);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 30;    /* above the win overlay, which sits inside #game-wrap */
+    padding: 14px;
+  }
+  #settings-modal.show { display: flex; }
+  #settings-panel {
+    background: var(--panel-bg);
+    border: 2px solid var(--panel-line);
+    border-radius: 4px;
+    padding: 14px;
+    width: min(440px, 100%);
+    max-height: 100%;
+    overflow-y: auto;   /* short landscape: the panel scrolls, not the page */
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #settings-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  #settings-title { font-size: 13px; letter-spacing: 1px; font-weight: bold; }
+  #settings-close {
+    flex: 0 0 auto;
+    width: 32px; height: 32px;
+    background: #12111a;
+    color: var(--text-main);
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #settings-close:hover { background: #1e1c29; border-color: #55526a; }
+  /* Two columns where there is room, one where there is not — a 320px phone
+     and a 390px-tall landscape both end up readable without their own rule. */
+  #settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  #settings-grid .ctrl-group { min-width: 0; }
+  #settings-grid select { width: 100%; }
+  #settings-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-top: 1px solid var(--panel-line);
+    padding-top: 10px;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
   .ai-badge {
     font-size: 9px;
     color: var(--text-dim);
@@ -527,8 +638,36 @@
     .health-bar-track { max-width: 110px; height: 8px; }
     /* four cards on a phone leave ~50px each — keep "100 / 100" on one line */
     .health-text { font-size: 8px; white-space: nowrap; }
-    #center-info { min-width: 0; flex: 0 0 auto; font-size: 10px; }
-    #turn-banner { font-size: 10px; }
+    /* The bar used to be one row holding every player card, the turn banner,
+       the clock and the settings button, all competing for ~390px. Two rows
+       instead: the tanks keep the top to themselves, and whose turn it is, the
+       clock and settings sit under them. It costs a few pixels of playfield
+       and buys back a bar you can actually read. */
+    #hud { flex-direction: column; align-items: stretch; }
+    #players-row { flex: 0 0 auto; }
+    #center-info {
+      min-width: 0;
+      flex: 0 0 auto;
+      font-size: 10px;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      text-align: left;
+      border-top: 1px solid var(--panel-line);
+      padding-top: 5px;
+    }
+    /* Whose turn it is gives way first: the clock and settings are fixed-width
+       and must not be pushed off the end by a long name. */
+    #turn-banner {
+      font-size: 10px;
+      margin-bottom: 0;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #info-row { flex: 0 0 auto; flex-wrap: nowrap; }
     .ai-badge { font-size: 8px; margin-left: 3px; padding: 0 3px; }
 
     #controls {
@@ -543,6 +682,9 @@
        here: aiming is the thing you touch every turn, and a half-width slider
        between two arrow buttons is a cramped target. Give each its own row. */
     #angle-group, #power-group { grid-column: 1 / -1; }
+    /* With setup moved into Settings the weapon picker is the only thing left
+       on its row, so it takes the whole width rather than leaving a gap. */
+    #weapon-group { grid-column: 1 / -1; }
     .ctrl-label { font-size: 9px; }
     #controls select {
       width: 100%;
@@ -600,9 +742,28 @@
       text-align: left;
       border-top: 1px solid var(--panel-line);
       padding-top: 8px;
+      /* Without this the 160px min-width from the wide bar survives into a
+         112px rail: the banner cannot wrap, so it is clipped mid-word. */
+      min-width: 0;
+      max-width: 100%;
+    }
+    /* Long states — a countdown, a CPU taking over — wrap onto a second line
+       rather than running off the edge, and at rail size the banner does not
+       need to shout. */
+    #turn-banner {
+      font-size: 10px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      max-width: 100%;
+      overflow-wrap: anywhere;
     }
     #wind-hud { display: none; }
     .hud-pill { justify-content: flex-start; }
+    /* The rail is ~120px wide: the clock, the online status and the settings
+       button each take a line rather than fighting over one and clipping. */
+    #info-row { flex-direction: column; align-items: stretch; gap: 4px; }
+    #settings-btn { justify-content: center; }
+    #net-pill { flex-wrap: wrap; justify-content: flex-start; }
 
     #game-wrap { flex: 1 1 auto; height: 100%; min-height: 0; aspect-ratio: auto; }
 
@@ -656,11 +817,6 @@
     /* Column direction with the base rule's wrap would spill the groups into a
        second column rather than scrolling. */
     #controls { flex-wrap: nowrap; align-content: normal; }
-    /* HOST + code + JOIN do not fit across a 158px rail, so the code field
-       takes its own line above the two buttons. */
-    .online-row { flex-wrap: wrap; }
-    #online-code { order: -1; width: 100%; }
-    .online-row button { flex: 1 1 auto; }
     #fire-btn {
       width: 100%;
       grid-column: auto;
@@ -724,9 +880,18 @@
     <div id="center-info">
       <div id="turn-banner">—</div>
       <div id="info-row">
-        <span id="build-info">—</span>
         <span id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
-        <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
+        <!-- Hosting and joining moved into Settings, but a match you are in —
+             or have just dropped out of — has to be readable without opening a
+             dialog, and getting back in has to be one tap. Hidden entirely
+             while offline, so a local game carries no online furniture. -->
+        <span id="net-pill" class="hud-pill" hidden>
+          <span id="net-status">off</span>
+          <button type="button" id="net-rejoin" data-i18n="rejoin" hidden>REJOIN</button>
+        </span>
+        <button type="button" id="settings-btn" aria-haspopup="dialog">
+          <span aria-hidden="true">⚙</span><span data-i18n="settings">SETTINGS</span>
+        </button>
       </div>
     </div>
   </div>
@@ -762,7 +927,7 @@
         <button type="button" class="nudge" id="power-inc" aria-label="Power up one">▶</button>
       </div>
     </div>
-    <div class="ctrl-group">
+    <div class="ctrl-group" id="weapon-group">
       <div class="ctrl-label" data-i18n="weapon">WEAPON</div>
       <select id="weapon-select">
         <option value="standard">Standard Shell</option>
@@ -773,46 +938,67 @@
         <option value="missile">Guided Missile</option>
       </select>
     </div>
-    <div class="ctrl-group">
-      <div class="ctrl-label" data-i18n="tanks">TANKS</div>
-      <select id="count-select">
-        <option value="2" selected>2 Players</option>
-        <option value="3">3 Players</option>
-        <option value="4">4 Players</option>
-      </select>
-    </div>
-    <div class="ctrl-group">
-      <div class="ctrl-label" data-i18n="opponents">OPPONENTS</div>
-      <select id="mode-select">
-        <option value="cpu" selected>vs CPU</option>
-        <option value="human">All Human</option>
-        <!-- Selected while a match is on, and hidden otherwise: it is a state
-             the game is in, not a mode you can pick. -->
-        <option value="online" hidden>Online</option>
-      </select>
-    </div>
-    <div class="ctrl-group" id="difficulty-group">
-      <div class="ctrl-label" data-i18n="cpuLevel">CPU LEVEL</div>
-      <select id="difficulty-select">
-        <option value="easy">Easy</option>
-        <option value="medium" selected>Medium</option>
-        <option value="hard">Hard</option>
-        <option value="brutal">Brutal</option>
-      </select>
-    </div>
-    <div class="ctrl-group" id="online-group">
-      <div class="ctrl-label"><span data-i18n="online">ONLINE</span> <span class="val" id="online-status">off</span></div>
-      <div class="online-row">
-        <button type="button" id="online-host" data-i18n="hostGame">HOST</button>
-        <input type="text" id="online-code" maxlength="4" autocomplete="off"
-               autocapitalize="characters" spellcheck="false"
-               placeholder="CODE" aria-label="Room code">
-        <button type="button" id="online-join" data-i18n="joinGame">JOIN</button>
-      </div>
-    </div>
     <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div id="keys-hint">
       <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
+    </div>
+  </div>
+
+  <!-- Match setup. These are the same controls that used to sit in the rail,
+       moved rather than rebuilt, so nothing wired to them had to change. -->
+  <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div id="settings-panel">
+      <div id="settings-head">
+        <div id="settings-title" data-i18n="settings">SETTINGS</div>
+        <button type="button" id="settings-close" aria-label="Close settings">✕</button>
+      </div>
+      <div id="settings-grid">
+        <div class="ctrl-group">
+          <div class="ctrl-label" data-i18n="tanks">TANKS</div>
+          <select id="count-select">
+            <option value="2" selected>2 Players</option>
+            <option value="3">3 Players</option>
+            <option value="4">4 Players</option>
+          </select>
+        </div>
+            <div class="ctrl-group">
+          <div class="ctrl-label" data-i18n="opponents">OPPONENTS</div>
+          <select id="mode-select">
+            <option value="cpu" selected>vs CPU</option>
+            <option value="human">All Human</option>
+            <!-- Selected while a match is on, and hidden otherwise: it is a state
+                 the game is in, not a mode you can pick. -->
+            <option value="online" hidden>Online</option>
+          </select>
+        </div>
+            <div class="ctrl-group" id="difficulty-group">
+          <div class="ctrl-label" data-i18n="cpuLevel">CPU LEVEL</div>
+          <select id="difficulty-select">
+            <option value="easy">Easy</option>
+            <option value="medium" selected>Medium</option>
+            <option value="hard">Hard</option>
+            <option value="brutal">Brutal</option>
+          </select>
+        </div>
+        <div class="ctrl-group" id="online-group">
+          <div class="ctrl-label"><span data-i18n="online">ONLINE</span> <span class="val" id="online-status">off</span></div>
+          <div class="online-row">
+            <button type="button" id="online-host" data-i18n="hostGame">HOST</button>
+            <input type="text" id="online-code" maxlength="4" autocomplete="off"
+                   autocapitalize="characters" spellcheck="false"
+                   placeholder="CODE" aria-label="Room code">
+            <button type="button" id="online-join" data-i18n="joinGame">JOIN</button>
+          </div>
+        </div>
+        <div class="ctrl-group">
+          <div class="ctrl-label" data-i18n="language">LANGUAGE</div>
+          <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
+        </div>
+      </div>
+      <div id="settings-foot">
+        <span data-i18n="version">VERSION</span>
+        <span id="build-info">—</span>
+      </div>
     </div>
   </div>
 </div>
@@ -865,7 +1051,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v42';
+  const BUILD = 'v43';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -926,6 +1112,9 @@ if ('serviceWorker' in navigator) {
   const zoomFitBtn = document.getElementById('zoom-fit');
   const onlineGroup = document.getElementById('online-group');
   const onlineStatus = document.getElementById('online-status');
+  const netPill = document.getElementById('net-pill');
+  const netStatusEl = document.getElementById('net-status');
+  const netRejoinBtn = document.getElementById('net-rejoin');
   const onlineHostBtn = document.getElementById('online-host');
   const onlineJoinBtn = document.getElementById('online-join');
   const onlineCodeInput = document.getElementById('online-code');
@@ -937,6 +1126,8 @@ if ('serviceWorker' in navigator) {
     en: {
       wind: 'WIND', angle: 'ANGLE', power: 'POWER', weapon: 'WEAPON',
       tanks: 'TANKS', opponents: 'OPPONENTS', cpuLevel: 'CPU LEVEL',
+      settings: 'SETTINGS', language: 'LANGUAGE', version: 'VERSION',
+      closeSettings: 'Close settings',
       fire: 'FIRE', playAgain: 'Play Again', time: 'TIME',
       timerMs: '{m}m {s}s', timerS: '{s}s',
       cpuBadge: 'CPU', cpuBadgeShort: 'CPU',
@@ -944,7 +1135,7 @@ if ('serviceWorker' in navigator) {
       playerFull: 'PLAYER {n}', playerAbbr: 'P{n}',
       playerName: 'Player {n}', cpuName: 'CPU {n}',
       roundOver: 'ROUND OVER', inFlight: 'IN FLIGHT…',
-      thinking: '{name} THINKING…', aimFire: '{name} — AIM & FIRE',
+      thinking: '{name} THINKING…', aimFire: '{name}',
       wins: '{name} wins!', everybodyLoses: 'Everybody loses!',
       playAgainHint: 'Tap Play Again for a new terrain and rematch.',
       w_standard: 'Standard Shell', w_big: 'Big Bomb', w_cluster: 'Cluster Bomb',
@@ -957,7 +1148,7 @@ if ('serviceWorker' in navigator) {
       powerDown: 'Power down one', powerUp: 'Power up one',
       zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomFit: 'Fit the whole battlefield',
       online: 'ONLINE', onlineMode: 'Online', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
-      roomCode: 'CODE', roomCodeLabel: 'Room code',
+      roomCode: 'CODE', roomCodeLabel: 'Room code', rejoin: 'REJOIN',
       netOffline: 'off', netConnecting: 'connecting…', netRejoining: 'reconnecting…', netWaiting: 'code {code} — {n}/{total}',
       netPlaying: 'room {code}', netEnded: 'opponent left',
       netTheirTurn: '{name} — THEIR TURN', netYouAre: 'you are {name}',
@@ -970,6 +1161,8 @@ if ('serviceWorker' in navigator) {
     tr: {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
       tanks: 'TANKLAR', opponents: 'RAKİPLER', cpuLevel: 'BİLGİSAYAR SEVİYESİ',
+      settings: 'AYARLAR', language: 'DİL', version: 'SÜRÜM',
+      closeSettings: 'Ayarları kapat',
       fire: 'ATEŞ', playAgain: 'Tekrar Oyna', time: 'SÜRE',
       timerMs: '{m}d {s}sn', timerS: '{s}sn',
       cpuBadge: 'BİLGİSAYAR', cpuBadgeShort: 'BİL',
@@ -977,7 +1170,7 @@ if ('serviceWorker' in navigator) {
       playerFull: 'OYUNCU {n}', playerAbbr: 'O{n}',
       playerName: 'Oyuncu {n}', cpuName: 'Bilgisayar {n}',
       roundOver: 'TUR BİTTİ', inFlight: 'HAVADA…',
-      thinking: '{name} DÜŞÜNÜYOR…', aimFire: '{name} — NİŞAN AL & ATEŞ',
+      thinking: '{name} DÜŞÜNÜYOR…', aimFire: '{name}',
       wins: '{name} kazandı!', everybodyLoses: 'Herkes kaybetti!',
       playAgainHint: 'Yeni arazi ve rövanş için Tekrar Oyna\'ya dokun.',
       w_standard: 'Standart Mermi', w_big: 'Büyük Bomba', w_cluster: 'Misket Bombası',
@@ -990,7 +1183,7 @@ if ('serviceWorker' in navigator) {
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
       zoomIn: 'Yakınlaştır', zoomOut: 'Uzaklaştır', zoomFit: 'Tüm sahayı göster',
       online: 'ÇEVRİMİÇİ', onlineMode: 'Çevrimiçi', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
-      roomCode: 'KOD', roomCodeLabel: 'Oda kodu',
+      roomCode: 'KOD', roomCodeLabel: 'Oda kodu', rejoin: 'YENİDEN BAĞLAN',
       netOffline: 'kapalı', netConnecting: 'bağlanıyor…', netRejoining: 'yeniden bağlanıyor…', netWaiting: 'kod {code} — {n}/{total}',
       netPlaying: 'oda {code}', netEnded: 'rakip ayrıldı',
       netTheirTurn: '{name} — SIRA ONDA', netYouAre: 'sen {name}',
@@ -1066,7 +1259,8 @@ if ('serviceWorker' in navigator) {
     relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
     const aria = { 'zoom-in': 'zoomIn', 'zoom-out': 'zoomOut', 'zoom-fit': 'zoomFit',
                    'angle-left': 'aimLeft', 'angle-right': 'aimRight',
-                   'power-dec': 'powerDown', 'power-inc': 'powerUp' };
+                   'power-dec': 'powerDown', 'power-inc': 'powerUp',
+                   'settings-close': 'closeSettings' };
     for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
     lastTimerText = ''; // force the clock to redraw in the new language
     // the weapon <option> labels and ammo readout are rebuilt from here
@@ -1805,7 +1999,38 @@ if ('serviceWorker' in navigator) {
   // a press held while the tab loses focus would otherwise repeat forever
   window.addEventListener('blur', () => nudgeStops.forEach(fn => fn()));
 
+  // ---------- Settings dialog ----------
+  // Setup lives here rather than in the rail; the controls inside it are the
+  // originals, so opening the dialog is all this has to do.
+  const settingsModal = document.getElementById('settings-modal');
+  const settingsBtn = document.getElementById('settings-btn');
+  const settingsCloseBtn = document.getElementById('settings-close');
+  const settingsIsOpen = () => settingsModal.classList.contains('show');
+
+  function openSettings() {
+    settingsModal.classList.add('show');
+    settingsCloseBtn.focus();
+  }
+  function closeSettings() {
+    settingsModal.classList.remove('show');
+    settingsBtn.focus();
+  }
+
+  settingsBtn.addEventListener('click', openSettings);
+  settingsCloseBtn.addEventListener('click', closeSettings);
+  // The dimmed backdrop closes; a click that lands inside the panel does not.
+  settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) closeSettings();
+  });
+
   window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && settingsIsOpen()) { closeSettings(); e.preventDefault(); }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    // While the dialog is up, the keyboard belongs to it: SPACE would
+    // otherwise fire the gun from behind an open settings panel.
+    if (settingsIsOpen()) return;
     if (state !== 'AIMING' || isAi(currentPlayer)) return;
     const t = tanks[currentPlayer];
     if (e.key === 'ArrowLeft') { t.angle = Math.min(180, t.angle + 1); syncControlsFromTank(); e.preventDefault(); }
@@ -3550,12 +3775,32 @@ if ('serviceWorker' in navigator) {
     return txt('netOffline');
   }
 
+  /**
+   * Whether to offer a manual way back into a room.
+   *
+   * Automatic rejoining already covers the ordinary case, so this is only for
+   * when that has stopped: either it exhausted its attempts (online.rejoin is
+   * cleared) or the drop happened somewhere it never started from. A room we
+   * deliberately left is not one to climb back into, and neither is one we are
+   * still connected to.
+   */
+  function netCanRejoin() {
+    return !!online.room && !online.ws && !online.rejoin && !online.left;
+  }
+
   function refreshOnlineUi() {
-    onlineStatus.textContent = netStatusText();
+    const text = netStatusText();
+    onlineStatus.textContent = text;
     const busy = online.status !== 'offline' && online.status !== 'ended';
     onlineHostBtn.disabled = busy;
     onlineJoinBtn.disabled = busy;
     onlineCodeInput.disabled = busy;
+
+    // The main-screen mirror. It appears the moment online is in play and goes
+    // away again when it is not, so an offline game keeps a clean HUD.
+    netStatusEl.textContent = text;
+    netPill.hidden = online.status === 'offline' && !online.error && !online.rejoin;
+    netRejoinBtn.hidden = !netCanRejoin();
   }
 
   function netSend(kind, extra) {
@@ -3597,10 +3842,9 @@ if ('serviceWorker' in navigator) {
       online.seat = -1;
       online.seats = [];
       online.status = wasPlaying ? 'ended' : 'offline';
-      if (!wasPlaying && !online.error) online.error = txt('netLost');
-      refreshOnlineUi();
-      syncControlsFromTank();
-      updateHUD();
+      // Leaving on purpose is not a failure, and reporting one would leave the
+      // HUD claiming a lost connection to a room nobody wants back.
+      if (!wasPlaying && !online.error && !online.left) online.error = txt('netLost');
       // Losing the connection mid-match is usually temporary — a phone
       // switching apps, a tunnel, a wifi handover — and the relay holds the
       // seat open for five minutes. Get back in without making anyone retype
@@ -3608,7 +3852,11 @@ if ('serviceWorker' in navigator) {
       // `wasPlaying` is only true of the first drop — by the second attempt the
       // status is already 'ended', so an attempt in progress has to keep the
       // chain alive itself or a single failed retry would end it.
+      //
       if (!online.left && room && (wasPlaying || online.rejoin)) netScheduleRejoin(room);
+      refreshOnlineUi();
+      syncControlsFromTank();
+      updateHUD();
     });
     ws.addEventListener('error', () => { /* close follows */ });
   }
@@ -4031,8 +4279,13 @@ if ('serviceWorker' in navigator) {
 
   function netScheduleRejoin(room) {
     const tries = online.rejoin ? online.rejoin.tries : 0;
-    if (tries >= REJOIN_DELAYS_MS.length) { online.rejoin = null; return; }
+    // Out of attempts: stop, and let the UI offer the manual way back rather
+    // than leaving the player looking at a dead status line.
+    if (tries >= REJOIN_DELAYS_MS.length) { online.rejoin = null; refreshOnlineUi(); return; }
     online.rejoin = { code: room, tries: tries + 1 };
+    // An attempt is pending, so there is nothing to ask of the player: this is
+    // what takes the manual rejoin button back off the screen.
+    refreshOnlineUi();
     setTimeout(() => {
       if (!online.rejoin || online.ws || online.left) return;
       netConnect(online.rejoin.code);
@@ -4046,6 +4299,13 @@ if ('serviceWorker' in navigator) {
     if (online.ws) online.ws.close();
   }
 
+  // Same door as JOIN, minus the typing: the room we were in is remembered.
+  netRejoinBtn.addEventListener('click', () => {
+    if (!netCanRejoin()) return;
+    online.error = null;
+    netConnect(online.room);
+  });
+
   onlineHostBtn.addEventListener('click', () => netConnect(null));
   onlineJoinBtn.addEventListener('click', () => {
     const code = (onlineCodeInput.value || '').trim().toUpperCase();
@@ -4058,6 +4318,10 @@ if ('serviceWorker' in navigator) {
   // width:100% canvas used to paper over a late measurement. Watching the box
   // itself catches every cause (orientation, browser chrome, a layout shift,
   // a wrapping control row), not just the ones that raise a window event.
+  // Put the online UI in its offline state explicitly: the markup starts the
+  // pill hidden, but the game deciding it is what keeps the two in step.
+  refreshOnlineUi();
+
   if (typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(resize).observe(gameWrap);
   }
@@ -4102,7 +4366,8 @@ if ('serviceWorker' in navigator) {
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL,
     setSocketFactory(fn) { socketFactory = fn; },
-    el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus },
+    el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus,
+           netPill, netStatusEl, netRejoinBtn },
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     heliOut, netAnnounceHeli, heliAuthority, heliSignature,
