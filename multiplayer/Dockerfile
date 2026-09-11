@@ -13,7 +13,11 @@ RUN npm --prefix server ci --omit=dev
 # The game itself. relay.mjs resolves its static root as the directory above
 # its own, so index.html has to sit here rather than in server/.
 COPY server/ ./server/
-COPY index.html ./
+# The game, plus the files that make it installable to a home screen: the
+# manifest, its icons and the service worker. Leaving any of them out still
+# serves a playable game, which is exactly why it would go unnoticed.
+COPY index.html manifest.webmanifest sw.js ./
+COPY icon-192.png icon-512.png icon-maskable-512.png ./
 
 ENV PORT=8080
 EXPOSE 8080

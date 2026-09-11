@@ -6,9 +6,12 @@ the core model and the conventions all still apply. This file covers only what
 is different here.
 
 ```
-index.html      the game, forked from the root copy
-tests/          the same suite, run against this index.html
-server/         the match relay (its own package — the only dependency here)
+index.html           the game, forked from the root copy
+manifest.webmanifest what makes it installable to a home screen
+sw.js                service worker: offline start, and Chrome's install prompt
+icon-*.png           launcher icons, from `node tools/icons.mjs` at the root
+tests/               the same suite, run against this index.html
+server/              the match relay (its own package — the only dependency here)
 ```
 
 ```bash
@@ -19,6 +22,28 @@ npm run shots -- --page multiplayer/index.html
 ```
 
 All five commands are run from the repo root.
+
+## Installing it
+
+The root build keeps its whole install setup inside index.html as a data: URL,
+because it ships as a single file. This one does not have to: the relay serves
+it from its own origin, so the manifest and the icons are real files, and there
+is a service worker — which can never be inlined, and which is what makes
+Chrome offer a true install rather than a bookmark. `display: standalone` in
+the manifest is what drops the address bar.
+
+The icons are not a separate drawing of a tank: `tools/icons.mjs` lifts
+`drawTank` and `pillPath` out of this index.html and runs them against a real
+canvas in a headless Chrome, over the first theme's sky and ground gradients.
+Restyle the tank in the game and the icon follows on the next run — but it does
+have to be run, and nothing notices if it is not.
+
+The service worker is network-first for the page and cache-first for the icons,
+so an installed copy still picks up a deploy but starts with no signal. It
+never sees the match: that is a WebSocket, and there is no offline mode for an
+online game. Three things have to agree, and nothing fails loudly if they do
+not — the file list in `sw.js`, the `COPY` lines in the Dockerfile, and the
+icons in the manifest. Bump `VERSION` in `sw.js` when any of them changes.
 
 ## What differs from the single-player build
 

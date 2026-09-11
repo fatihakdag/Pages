@@ -8,6 +8,8 @@
     "test:mp": "node --test multiplayer/tests/*.test.mjs",
     "test:relay": "npm --prefix multiplayer/server test",
     "shots": "node tools/shots.mjs",
+    "manifest": "node tools/manifest.mjs",
+    "icons": "node tools/icons.mjs",
     "relay": "node multiplayer/server/relay.mjs"
   }
 }
