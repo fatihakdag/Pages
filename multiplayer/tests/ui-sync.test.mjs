@@ -306,3 +306,20 @@ test('the keys do nothing on a CPU seat or between turns', () => {
   h.key('ArrowLeft');
   assert.equal(g.tanks[0].angle, 45, 'nor while a shell is in the air');
 });
+
+test('the wind is read from the bar or from the canvas, never from both', () => {
+  const h = loadFlat();
+  const { g } = h;
+
+  // Nothing is laid out in the stub DOM, so the pill reads as off screen —
+  // which is the phone-landscape case, where the gauge is painted on the sky.
+  assert.equal(g.el.windHud.offsetParent, null);
+  g.resize();
+  assert.equal(g.hudWindVisible, false, 'no pill, so the canvas draws the gauge');
+
+  // Portrait and the wide bar both put the pill on screen instead. The draw
+  // path asks this before painting a gauge, so one readout becomes the other.
+  g.el.windHud.offsetParent = g.el.windHud;
+  g.resize();
+  assert.equal(g.hudWindVisible, true, 'pill on screen, so the sky stays clear');
+});

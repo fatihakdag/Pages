@@ -113,3 +113,88 @@ test('the dropdown lists exactly the enabled weapons', () => {
   const enabled = Object.keys(g.WEAPONS).filter(k => g.weaponEnabled(k));
   assert.deepEqual(values, enabled);
 });
+
+// ---------- The picker under the dropdown ----------
+
+test('every weapon the dropdown offers has a button and an icon', () => {
+  const { g } = loadFlat();
+  const offered = [...g.el.weaponSelect.options].map(o => o.value);
+
+  assert.deepEqual([...g.weaponButtons.keys()], offered,
+    'the row is built from the options, so the two cannot disagree');
+  for (const key of offered) {
+    assert.ok(g.WEAPON_ICONS[key], `${key} needs an icon`);
+    assert.match(g.WEAPON_ICONS[key], /^<svg /, `${key}'s icon should be inline SVG`);
+  }
+});
+
+test('the picker shows what is in stock and rings what is selected', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const t = g.tanks[g.currentPlayer];
+  g.syncWeaponOptions(t);
+
+  const shown = () => [...g.weaponButtons].filter(([, b]) => !b.hidden).map(([k]) => k);
+  const ringed = () => [...g.weaponButtons]
+    .filter(([, b]) => b.classList.contains('is-selected')).map(([k]) => k);
+
+  assert.deepEqual(ringed(), ['standard'], 'the opening weapon is marked');
+  assert.ok(shown().includes('big'));
+
+  // Spending a weapon takes it out of the row rather than greying it out.
+  t.ammo.big = 0;
+  g.syncWeaponOptions(t);
+  assert.ok(!shown().includes('big'), 'a spent weapon leaves the row');
+  assert.ok(g.weaponButtons.get('big').hidden);
+});
+
+test('tapping an icon arms that weapon for the tank whose turn it is', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const t = g.tanks[g.currentPlayer];
+
+  g.weaponButtons.get('mirv').dispatch('click');
+
+  assert.equal(t.weapon, 'mirv', 'the choice belongs to the tank, as with the dropdown');
+  assert.equal(g.el.weaponSelect.value, 'mirv', 'and the dropdown agrees');
+  assert.equal(g.weaponButtons.get('mirv').getAttribute('aria-pressed'), 'true');
+  assert.equal(g.weaponButtons.get('standard').getAttribute('aria-pressed'), 'false');
+});
+
+test('a weapon with nothing left cannot be armed by tapping it', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const t = g.tanks[g.currentPlayer];
+  t.ammo.cluster = 0;
+  g.syncWeaponOptions(t);
+
+  g.weaponButtons.get('cluster').dispatch('click');
+
+  assert.equal(t.weapon, 'standard', 'the tap is ignored rather than arming an empty weapon');
+});
+
+test('the picker is out of reach on a seat you are not playing', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const t = g.tanks[g.currentPlayer];
+  // weaponSelect.disabled is the game's existing answer to "is this choice
+  // yours", set for a CPU seat and for somebody else's seat online.
+  g.el.weaponSelect.disabled = true;
+
+  g.weaponButtons.get('big').dispatch('click');
+
+  assert.equal(t.weapon, 'standard', 'reaching into a CPU seat changes nothing');
+});
+
+test('the buttons are labelled with the weapon and what is left of it', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const t = g.tanks[g.currentPlayer];
+  t.ammo.big = 4;
+  g.syncWeaponOptions(t);
+
+  assert.equal(g.weaponButtons.get('big').getAttribute('aria-label'),
+    `${g.txt('w_big')} (4)`);
+  assert.equal(g.weaponButtons.get('standard').getAttribute('aria-label'),
+    g.txt('w_standard'), 'the unlimited one carries no count');
+});
