@@ -261,7 +261,10 @@ const TYPES = {
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.png': 'image/png',
-  '.svg': 'image/svg+xml'
+  '.svg': 'image/svg+xml',
+  // Served with this exact type or the browser ignores it, and the game stops
+  // being installable to a home screen.
+  '.webmanifest': 'application/manifest+json'
 };
 
 async function serveStatic(req, res) {

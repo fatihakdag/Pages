@@ -8,6 +8,21 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>Barrage — Tank Artillery</title>
+<!-- Installed to a home screen, this runs standalone: display:standalone in
+     the manifest is what drops the address bar on Android, and the two
+     apple-* metas are what iOS Safari reads for the same thing. The icons and
+     the manifest are real files here rather than data: URLs, because an
+     installable app needs a service worker anyway and that can only ever be a
+     separate same-origin file. Icons come from `node tools/icons.mjs`. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Barrage">
+<meta name="application-name" content="Barrage">
+<meta name="theme-color" content="#0c0b10">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
   :root {
     --sky-top: #2b3a55;
@@ -781,6 +796,14 @@
 </div>
 
 <script>
+// Register the service worker that makes the game installable and lets it
+// start with no signal. It is not part of the game: a browser without it, or a
+// page opened over file://, plays exactly the same.
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
 // Surface any startup failure on screen — a blank canvas is otherwise silent.
 (function () {
   function showError(msg) {

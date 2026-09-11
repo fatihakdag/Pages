@@ -17,6 +17,8 @@ index.html         the whole game (see map below)
 tests/             node:test suite; tests/README.md explains the harness
 tests/harness.mjs  boots index.html in a node:vm against a stub DOM
 tools/shots.mjs    screenshots a page at every breakpoint (npm run shots)
+tools/manifest.mjs generates the root page's inline home-screen install block
+tools/icons.mjs    draws multiplayer/icon-*.png with the game's own drawTank
 multiplayer/       the online build — its own game, tests and relay
 .claude/           permission allowlist for read-only and test commands
 .github/workflows/ CI: node --test "tests/*.test.mjs"
