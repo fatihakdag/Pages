@@ -38,6 +38,10 @@
     --text-main: #ece7e1;
     --text-dim: #8d8a99;
     --danger: #e14b4b;
+    /* The surround on a screen too wide for the layout to fill. Between the
+       page's near-black and the panels, so it reads as a mat the game sits on
+       rather than as either a hole or more panel. */
+    --mat: #131219;
     /* A control group in the bottom bar is a 12px label line, then the group's
        3px gap, then the control. Anything in that bar without a label adds
        this to start level with the ones that have one. */
@@ -63,6 +67,12 @@
   #app {
     display: flex;
     flex-direction: column;
+    /* On a screen too wide for even the capped rails to use, the surplus is
+       split to the outer edges (see the landscape rules). It is matted rather
+       than left as the near-black page — but deliberately NOT in the panels'
+       own colour, which made the rails look like they ran on for hundreds of
+       pixels with every control huddled at one end. */
+    background: var(--mat);
     height: 100vh;
     height: calc(var(--vh, 1vh) * 100); /* JS-set fallback for iOS < 15.4 */
     height: 100dvh; /* dvh excludes mobile browser chrome where supported */
@@ -224,6 +234,11 @@
     flex: 1 1 auto;
     min-height: 120px;
     overflow: hidden;
+    /* Whatever the world's fixed shape cannot use is matted in the panels'
+       own colour rather than the near-black page behind everything: a few
+       pixels then read as the playfield's border, continuous with the rails
+       beside it, and a wide band reads as a mat rather than a hole. */
+    background: var(--panel-bg);
     /* The world has one fixed shape (SIM_W x SIM_H) so that two players in a
        match share the same battlefield. The canvas is sized to that aspect in
        resize(), and the wrap shrinks to whatever the canvas turned out to be:
@@ -804,6 +819,16 @@
     /* With setup moved into Settings the weapon picker is the only thing left
        on its row, so it takes the whole width rather than leaving a gap. */
     #weapon-group { grid-column: 1 / -1; }
+    /* Held in one hand, the right of the screen is where the thumb already is
+       — and where FIRE is. The short rows sit there rather than across the
+       reach, and on the same side as each other: one ragged toward the left
+       and one toward the right made both look accidental. */
+    #weapon-picker { justify-content: flex-end; }
+    /* The group is a column, so its cross axis is the horizontal one: this is
+       the align-items that justify-content would be on the picker's row. And
+       it has to span both grid columns first, or "right" means the middle of
+       the screen rather than its edge. */
+    #net-group { grid-column: 1 / -1; align-items: flex-end; }
     .ctrl-label { font-size: 9px; }
     #controls select {
       width: 100%;
@@ -847,7 +872,16 @@
      Stacking panels vertically would leave almost no height for the
      playfield, which makes the terrain look flat. Flanking the canvas
      instead keeps the full screen height for the game. */
-  @media (orientation: landscape) and (max-height: 620px) {
+  /* The side-rail layout, for any window wider than it is tall by enough to
+     pay for it. The playfield's shape is fixed, so the bottom-bar layout wastes
+     the surplus as black down both sides; rails spend it on the panels and hand
+     the bar's height back to the world.
+
+     7/4 is where that trade pays *and* leaves the right rail wide enough to
+     hold the weapon picker on one line (see the block after this one). The
+     crossover is near 1.7, so 16:9 switches and 16:10 keeps the bottom bar —
+     at 16:10 rails would make the playfield smaller, not larger. */
+  @media (orientation: landscape) and (max-height: 620px), (min-aspect-ratio: 7/4) {
     /* On a screen wide enough that even the capped rails cannot use it all,
        what is left over is split evenly at the outer edges rather than piling
        up on one side. */
@@ -860,6 +894,10 @@
       width: auto;
       flex: 1 0 132px;
       max-width: 220px;
+      /* Both edges drawn, so the panel ends where it ends. Against the mat on
+         a very wide screen this is what stops it reading as a panel that runs
+         off the side of the world. */
+      border-left: 2px solid var(--panel-line);
       height: 100%;
       overflow-y: auto;
       border-bottom: none;
@@ -935,6 +973,7 @@
       width: auto;
       flex: 1 0 158px;
       max-width: 260px;
+      border-right: 2px solid var(--panel-line);
       height: 100%;
       overflow-y: auto;
       border-top: none;
@@ -1009,6 +1048,37 @@
       font-size: 14px;
     }
     #keys-hint { display: none; }
+  }
+
+  /* A rail on a big screen is not a phone's rail. It has the width to hold the
+     weapon picker on one line — 224px of icons, the rail's own 16px of padding
+     and the 2px border down each of its sides, so 244px; a narrower rail wraps
+     them onto two rows, which is right on a phone and merely wasteful here. And it has the height for the
+     keyboard hint, which the phone-sized rails drop. */
+  @media (min-aspect-ratio: 7/4) and (min-height: 621px) {
+    #controls { flex-basis: 244px; }
+    /* Matched to the right rail. The narrower left rail is a phone measure —
+       there every pixel it gives up goes to the playfield — but on a screen
+       this size the asymmetry buys nothing and reads as a mistake. Both grow
+       to the same cap, so they stay equal at any width. */
+    #hud { flex-basis: 244px; max-width: 260px; }
+
+    /* A tall rail has to put its slack somewhere. Rather than a hole in the
+       middle with the aiming controls stranded at the top and FIRE alone at
+       the bottom, the online slot takes the top as a header and its auto
+       margin pushes everything else down — so angle, power, weapon and FIRE
+       end up as one block, in the order you use them. */
+    #net-group {
+      order: -1;
+      margin-top: 0;
+      margin-bottom: auto;
+    }
+    #keys-hint {
+      display: block;
+      margin-left: 0;
+      text-align: center;
+      line-height: 1.8;
+    }
   }
 
   /* Ultra-short landscape (small phones): tighten the side panels */
