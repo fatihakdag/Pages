@@ -63,7 +63,7 @@ const MANIFEST = {
   name: 'Barrage — Tank Artillery',
   short_name: TITLE,
   display: 'standalone',
-  orientation: 'landscape',
+  orientation: 'any',
   background_color: BG,
   theme_color: BG,
   icons: [{ src: ICON, sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
