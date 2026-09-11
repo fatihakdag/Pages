@@ -38,6 +38,14 @@
     --text-main: #ece7e1;
     --text-dim: #8d8a99;
     --danger: #e14b4b;
+    /* A control group in the bottom bar is a 12px label line, then the group's
+       3px gap, then the control. Anything in that bar without a label adds
+       this to start level with the ones that have one. */
+    --control-offset: 15px;
+    /* And they share one height, so the row reads as a row: the dropdown, FIRE
+       and the online slot are all this tall. The phone layouts set their own
+       sizes — there FIRE is a thumb target, not a row member. */
+    --control-height: 30px;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -340,6 +348,10 @@
   }
   .ctrl-label {
     font-size: 10px;
+    /* Pinned rather than left to the font: --control-offset below is this plus
+       the group's gap, and an estimate there lands FIRE a pixel off the
+       dropdown it is supposed to line up with. */
+    line-height: 12px;
     letter-spacing: 0.6px;
     color: var(--text-dim);
     display: flex;
@@ -439,7 +451,8 @@
     color: var(--text-main);
     border: 1px solid var(--panel-line);
     border-radius: 3px;
-    padding: 6px 8px;
+    height: var(--control-height);
+    padding: 0 8px;
     font-family: inherit;
     font-size: 12px;
     cursor: pointer;
@@ -460,11 +473,18 @@
     cursor: pointer;
   }
   #fire-btn {
-    align-self: center; /* the row top-aligns; the button shouldn't */
+    /* The row top-aligns on the labels, and these two have no label, so they
+       would start a line above the controls. Carrying the label's own height
+       as a margin starts them level with the dropdowns instead. */
+    align-self: flex-start;
+    margin-top: var(--control-offset);
     background: var(--danger);
     color: #fff;
     border: none;
-    padding: 12px 26px;
+    /* As tall as the dropdown beside it, and wider than its word needs — the
+       width is what makes it the obvious thing to press, not the height. */
+    height: var(--control-height);
+    padding: 0 42px;
     font-size: 14px;
     font-weight: bold;
     letter-spacing: 1px;
@@ -543,12 +563,54 @@
   /* The online group needs HOST + CODE + JOIN across one line. */
   #settings-grid #online-group { grid-column: 1 / -1; }
 
+  /* One tap instead of two, and what you are holding is visible without
+     opening anything. The dropdown stays: it carries the ammo counts, and it
+     is what a keyboard reaches for. */
+  #weapon-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 5px;
+    /* Room for the full set, whether or not it is all in stock. Spending the
+       last big bomb takes its button out of the row, and without this the
+       group would narrow and slide FIRE along the bar — out from under a thumb
+       already on its way down. --weapon-count is set when the row is built, so
+       switching a weapon off shrinks the reservation with it. */
+    min-width: calc(var(--weapon-count, 6) * 34px + (var(--weapon-count, 6) - 1) * 4px);
+  }
+  .weapon-pick {
+    flex: 0 0 auto;
+    width: 34px; height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: #12111a;
+    /* Each weapon's own colour, the one its shell is drawn in. */
+    color: var(--weapon-color, var(--text-main));
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  /* A class selector would otherwise beat the UA rule for [hidden] */
+  .weapon-pick[hidden] { display: none; }
+  .weapon-pick svg { width: 20px; height: 20px; display: block; }
+  .weapon-pick:hover:not(:disabled) { border-color: #55526a; }
+  .weapon-pick.is-selected {
+    background: #221f2e;
+    border-color: var(--weapon-color);
+    box-shadow: inset 0 0 0 1px var(--weapon-color);
+  }
+  .weapon-pick:disabled { opacity: 0.4; cursor: not-allowed; }
+
   #net-group {
-    /* Every other group in the bar is a label over a control. This one is only
-       the control, so without this it lines up with the labels and sits a row
-       too high; flex-end puts it on the dropdowns' line instead. */
-    align-self: flex-end;
-    justify-content: flex-end;
+    /* Labelless like FIRE, and sitting next to it: same offset, same line.
+       Aligning to the row's bottom instead would tie it to whatever happens to
+       be tallest — which changed the moment the weapon picker appeared. */
+    align-self: flex-start;
+    margin-top: var(--control-offset);
+    justify-content: flex-start;
     /* Ordered after FIRE on the wide bar, though it sits before it in the
        markup where mobile wants it. The status changes width as it changes —
        "off", then a room code, then "connection lost" — and anything after it
@@ -558,7 +620,7 @@
   }
   #keys-hint { order: 2; }
   /* Same box as a <select>, so the alignment holds rather than nearly holds. */
-  #net-invite, #net-pill { min-height: 30px; }
+  #net-invite, #net-pill { min-height: var(--control-height); }
   #net-pill { display: inline-flex; align-items: center; gap: 6px; white-space: normal; }
   #net-pill[hidden] { display: none; }
   #net-invite {
@@ -683,20 +745,35 @@
        instead: the tanks keep the top to themselves, and whose turn it is, the
        clock and settings sit under them. It costs a few pixels of playfield
        and buys back a bar you can actually read. */
-    #hud { flex-direction: column; align-items: stretch; }
-    #players-row { flex: 0 0 auto; }
-    #center-info {
-      min-width: 0;
-      flex: 0 0 auto;
-      font-size: 10px;
-      flex-direction: row;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      text-align: left;
-      border-top: 1px solid var(--panel-line);
-      padding-top: 5px;
+    /* Two rows: the tanks, then whose turn it is, the wind and the clock. The
+       wind reads from the bar here rather than from a gauge painted over the
+       sky — on a portrait phone the playfield is the scarcest thing on screen,
+       and the bar has room going spare. Nothing tells the canvas to stop
+       drawing its own gauge: it already asks whether this pill is on screen. */
+    #hud { flex-direction: row; flex-wrap: wrap; align-items: center; }
+    #players-row {
+      flex: 1 1 100%;
+      /* The rule between the rows, which #center-info used to carry — it has
+         no box of its own down here. */
+      border-bottom: 1px solid var(--panel-line);
+      padding-bottom: 5px;
     }
+    /* Dropped as a box so its two children join the wind pill on one row; they
+       still inherit from it, which is where their size comes from. */
+    #center-info {
+      display: contents;
+      font-size: 10px;
+    }
+    /* Equal flex either side is what puts the wind in the middle of the bar
+       rather than the middle of whatever space the other two leave — the same
+       way the wide layout centres it between the cards and the clock. */
+    /* "0s" is the reading; the word in front of it was costing 35px of a row
+       that also has to hold whose turn it is, the wind and the settings
+       button. The wind keeps its word until things get really tight, below. */
+    .time-word { display: none; }
+    #turn-banner { order: 2; flex: 1 1 0; }
+    #wind-hud { display: flex; order: 3; flex: 0 0 auto; }
+    #info-row { order: 4; flex: 1 1 0; justify-content: flex-end; }
     /* Whose turn it is gives way first: the clock and settings are fixed-width
        and must not be pushed off the end by a long name. */
     #turn-banner {
@@ -707,7 +784,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    #info-row { flex: 0 0 auto; flex-wrap: nowrap; }
+    #info-row { flex-wrap: nowrap; }
     .ai-badge { font-size: 8px; margin-left: 3px; padding: 0 3px; }
 
     #controls {
@@ -723,19 +800,22 @@
        between two arrow buttons is a cramped target. Give each its own row. */
     #angle-group, #power-group { grid-column: 1 / -1; }
     /* Stacked, so there is nothing beside FIRE for the status to shove. */
-    #net-group { order: 0; align-self: auto; }
+    #net-group { order: 0; align-self: auto; margin-top: 0; }
     /* With setup moved into Settings the weapon picker is the only thing left
        on its row, so it takes the whole width rather than leaving a gap. */
     #weapon-group { grid-column: 1 / -1; }
     .ctrl-label { font-size: 9px; }
     #controls select {
       width: 100%;
+      height: auto;
       font-size: 11px;
       padding: 5px 6px;
     }
     #fire-btn {
       grid-column: 1 / -1;
       width: 100%;
+      margin-top: 0;   /* nothing to line up with when the rows are stacked */
+      height: auto;    /* a thumb target, not a row member */
       padding: 14px;
       font-size: 15px;
     }
@@ -746,6 +826,15 @@
   }
 
   /* Very short screens: shrink the sliders row further */
+  /* The narrowest phones: the bar's second row has to hold whose turn it is,
+     the wind, the clock and the settings button, and at this width the turn
+     banner was being truncated to four characters. The readings are the arrow
+     and the strength, and the number of seconds; the words in front of them
+     are what can go. */
+  @media (max-width: 380px) and (orientation: portrait) {
+    .wind-word { display: none; }
+  }
+
   @media (max-height: 500px) and (orientation: portrait) {
     #game-wrap { min-height: 90px; }
     /* No slack to spend here — pair them up again. */
@@ -788,6 +877,10 @@
          112px rail: the banner cannot wrap, so it is clipped mid-word. */
       min-width: 0;
       max-width: 100%;
+      /* Takes the rail's leftover height so the clock and the settings button
+         can sit at the foot of it. */
+      flex: 1 1 auto;
+      min-height: 0;
     }
     /* Long states — a countdown, a CPU taking over — wrap onto a second line
        rather than running off the edge, and at rail size the banner does not
@@ -802,8 +895,16 @@
     #wind-hud { display: none; }
     .hud-pill { justify-content: flex-start; }
     /* The rail is ~120px wide: the clock, the online status and the settings
-       button each take a line rather than fighting over one and clipping. */
-    #info-row { flex-direction: column; align-items: stretch; gap: 4px; }
+       button each take a line rather than fighting over one and clipping.
+       They live at the bottom of the rail, out of the way of whose turn it is
+       — the auto margin takes whatever height is going spare, and collapses to
+       nothing when the rail is full and scrolling. */
+    #info-row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 4px;
+      margin-top: auto;
+    }
     #settings-btn { justify-content: center; }
     #net-pill { flex-wrap: wrap; justify-content: flex-start; }
 
@@ -824,7 +925,7 @@
       gap: 9px;
     }
     .ctrl-group { min-width: 0; width: 100%; }
-    #controls select { width: 100%; }
+    #controls select { width: 100%; height: auto; padding: 6px 8px; }
     /* the side rail is height-constrained, so trim the touch target a little */
     input[type=range] { height: 32px; }
     input[type=range]::-webkit-slider-thumb {
@@ -864,6 +965,11 @@
        auto margins take the leftover height evenly — centring it between the
        weapon picker and FIRE instead of leaving a hole underneath it. When the
        rail overflows there is no leftover height and they collapse to nothing. */
+    /* The rail is ~124px: too narrow to hold the set in one line, so it wraps
+       to two rows rather than reserving a width that would overflow it. FIRE
+       is pinned to the bottom here, so nothing slides when a row is lost. */
+    #weapon-picker { min-width: 0; }
+
     #net-group {
       order: 0;
       align-self: stretch;
@@ -873,6 +979,7 @@
 
     #fire-btn {
       width: 100%;
+      height: auto;    /* a thumb target, not a row member */
       grid-column: auto;
       /* #net-group's auto margins already push this to the bottom; a second
          auto margin here would take a third of the space and un-centre it. */
@@ -931,12 +1038,12 @@
       </div>
     </div>
 
-    <div id="wind-hud" class="hud-pill"><span data-i18n="wind">WIND</span> <span id="wind-arrow">→</span> <span id="wind-val">0</span></div>
+    <div id="wind-hud" class="hud-pill"><span class="wind-word" data-i18n="wind">WIND</span> <span id="wind-arrow">→</span> <span id="wind-val">0</span></div>
 
     <div id="center-info">
       <div id="turn-banner">—</div>
       <div id="info-row">
-        <span id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
+        <span id="game-timer" class="hud-pill"><span class="time-word" data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
         <button type="button" id="settings-btn" aria-haspopup="dialog">
           <span aria-hidden="true">⚙</span><span data-i18n="settings">SETTINGS</span>
         </button>
@@ -977,6 +1084,8 @@
     </div>
     <div class="ctrl-group" id="weapon-group">
       <div class="ctrl-label" data-i18n="weapon">WEAPON</div>
+      <!-- The buttons under this are built from the options below, so the two
+           can never disagree about what exists. -->
       <select id="weapon-select">
         <option value="standard">Standard Shell</option>
         <option value="big">Big Bomb</option>
@@ -985,6 +1094,7 @@
         <option value="mirv">MIRV</option>
         <option value="missile">Guided Missile</option>
       </select>
+      <div id="weapon-picker" role="group"></div>
     </div>
     <!-- Hosting and joining live in Settings, but this is the space under the
          weapon picker that the rail was wasting, and it is where online
@@ -1117,7 +1227,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v43';
+  const BUILD = 'v44';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1768,6 +1878,45 @@ if ('serviceWorker' in navigator) {
   let clusterQueue = []; // pending sub-explosions for cluster bomb
   let particles = [];
 
+  // Each weapon as its own silhouette, drawn in the colour its shell is drawn
+  // in: a shell, a bomb, one round breaking into five, a mine on the ground, a
+  // warhead splitting into three, and a rocket under power. They have to read
+  // at 20px on a phone, so they are shapes rather than pictures.
+  const WEAPON_ICONS = {
+    standard:
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+      '<path d="M12 2c2.1 2.7 3.2 5.4 3.2 8.2V15H8.8v-4.8C8.8 7.4 9.9 4.7 12 2Z"/>' +
+      '<rect x="8.8" y="16" width="6.4" height="5" rx="1.2"/></svg>',
+    big:
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+      '<circle cx="10.5" cy="14.5" r="6.5"/>' +
+      '<path d="M15.1 8.6l3.1-3.1 1.6 1.6-3.1 3.1z"/>' +
+      '<circle cx="20.4" cy="4.1" r="1.9"/></svg>',
+    cluster:
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+      '<circle cx="12" cy="4.6" r="3.2"/>' +
+      '<path d="M11.2 8h1.6v3h-1.6z"/>' +
+      '<circle cx="4.8" cy="17.6" r="2.6"/><circle cx="12" cy="19.8" r="2.6"/>' +
+      '<circle cx="19.2" cy="17.6" r="2.6"/></svg>',
+    roller:
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+      '<path d="M11 3.4h2v3.2h-2zM11 15.4h2v3.2h-2zM3.4 9.9h3.2v2H3.4zM15.4 9.9h3.2v2h-3.2z"/>' +
+      '<path d="M5.6 4.2l2.3 2.3-1.4 1.4-2.3-2.3zM16.1 14.7l2.3 2.3-1.4 1.4-2.3-2.3z"/>' +
+      '<circle cx="12" cy="10.9" r="5"/>' +
+      '<rect x="1.5" y="20.4" width="21" height="2" rx="1"/></svg>',
+    mirv:
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+      '<path d="M4.2 5.2l2.6 4.4-1.8 1-2.6-4.4zM19.8 5.2l1.8 1-2.6 4.4-1.8-1z"/>' +
+      '<path d="M12 2.6l2.4 4.8h-4.8z"/><path d="M4 11.4l2.4 4.8H1.6z"/>' +
+      '<path d="M20 11.4l2.4 4.8h-4.8z"/>' +
+      '<path d="M11.2 8h1.6v5.2h-1.6z"/></svg>',
+    missile:
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+      '<path d="M12 1.6c2.2 2.9 3.4 6 3.4 9.4v4.4H8.6V11c0-3.4 1.2-6.5 3.4-9.4Z"/>' +
+      '<path d="M8.6 11.6L5.9 17h2.7zM15.4 11.6L18.1 17h-2.7z"/>' +
+      '<path d="M10.3 17h3.4l-1.7 5.4z"/></svg>'
+  };
+
   const WEAPONS = {
     standard: { radius: 26, damageMax: 34, color: '#ffcf5c', label: 'Standard Shell', startAmmo: Infinity },
     big:      { radius: 46, damageMax: 55, color: '#ff7a45', label: 'Big Bomb', startAmmo: 5 },
@@ -2007,6 +2156,43 @@ if ('serviceWorker' in navigator) {
     syncWeaponOptions(t);
   }
 
+  const weaponPicker = document.getElementById('weapon-picker');
+  const weaponButtons = new Map();
+
+  /**
+   * One button per weapon, built from the select's own options — which
+   * pruneWeaponOptions has already filtered — so a weapon that is switched off
+   * cannot appear here while being absent there.
+   */
+  function buildWeaponPicker() {
+    for (const opt of [...weaponSelect.options]) {
+      const key = opt.value;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'weapon-pick';
+      b.dataset.weapon = key;
+      b.style.setProperty('--weapon-color', WEAPONS[key].color);
+      b.innerHTML = WEAPON_ICONS[key] || '';
+      b.addEventListener('click', () => pickWeapon(key));
+      weaponPicker.appendChild(b);
+      weaponButtons.set(key, b);
+    }
+    // What the width reservation above is measured in.
+    weaponPicker.style.setProperty('--weapon-count', String(weaponButtons.size));
+  }
+
+  /** Choosing by button is choosing by dropdown: same tank, same state. */
+  function pickWeapon(key) {
+    const t = tanks[currentPlayer];
+    // weaponSelect.disabled is the existing answer to "is this seat's choice
+    // yours to make" — a CPU turn, or somebody else's in an online match.
+    if (!t || weaponSelect.disabled) return;
+    if (!weaponAvailable(t, key)) return;
+    t.weapon = key;
+    weaponSelect.value = key;
+    syncWeaponOptions(t);
+  }
+
   function syncWeaponOptions(t) {
     for (const opt of weaponSelect.options) {
       const key = opt.value;
@@ -2021,6 +2207,22 @@ if ('serviceWorker' in navigator) {
     // (or been switched off) falls back to the standard shell.
     if (!weaponAvailable(t, t.weapon)) t.weapon = 'standard';
     weaponSelect.value = t.weapon;
+
+    // The buttons follow the same answer, after the fallback above rather than
+    // before it, so they never ring a weapon this tank no longer holds.
+    for (const [key, b] of weaponButtons) {
+      const remaining = t.ammo[key];
+      const label = txt('w_' + key);
+      // Spent weapons leave the row rather than sitting there greyed out:
+      // the row is what you have, and a phone has no width to waste.
+      b.hidden = !(remaining > 0);
+      b.disabled = weaponSelect.disabled;
+      b.classList.toggle('is-selected', key === t.weapon);
+      b.setAttribute('aria-pressed', key === t.weapon ? 'true' : 'false');
+      const name = remaining === Infinity ? label : `${label} (${remaining})`;
+      b.setAttribute('aria-label', name);
+      b.title = name;
+    }
   }
 
   angleSlider.addEventListener('input', () => {
@@ -4435,6 +4637,7 @@ if ('serviceWorker' in navigator) {
   buildInfo.textContent = BUILD;
   refreshViewUi();
   pruneWeaponOptions();
+  buildWeaponPicker();
   initLanguage();
   refreshOpponentUi();
   resetGame();
@@ -4453,7 +4656,9 @@ if ('serviceWorker' in navigator) {
     WIND_MAX, MAX_PLAYERS, THEMES, SIM_W, SIM_H,
     groundHeightAt, craterAt, bedrockY, newTerrain, buildTerrainFromShape,
     placeTanks, levelTankPads, groundGradientAt, buildTanks,
+    get hudWindVisible() { return hudWindVisible; },
     freshAmmo, weaponEnabled, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
+    pickWeapon, weaponButtons, WEAPON_ICONS,
     fire, applyDamageAndCrater, stepProjectile, stepRoller, detonateRoller, splitMirv,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
     endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
@@ -4474,7 +4679,7 @@ if ('serviceWorker' in navigator) {
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
-      settingsModal, settingsBtn,
+      settingsModal, settingsBtn, windHud,
       nudgeBtns, cards, hpText, langCheckbox
     },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },
