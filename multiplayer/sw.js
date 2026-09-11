@@ -19,7 +19,7 @@
 // there is no offline mode for an online match. /health is the relay's, so it
 // is left alone too.
 
-const VERSION = 'barrage-online-v1';
+const VERSION = 'barrage-online-v2';
 
 const SHELL = [
   './',
