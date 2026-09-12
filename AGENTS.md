@@ -61,6 +61,7 @@ file moves. Sizes are approximate, to tell you what you are about to read.
 | Canvas sizing, `resize()`, `physScale` | `Canvas sizing` | 55 |
 | `THEMES` (7 environments) and decor (stars/clouds/embers/snow/dust) | `Environments` | 120 |
 | Terrain heightmap, `craterAt()`, `groundHeightAt()` | `Terrain ---` | 85 |
+| Sound: Web Audio synthesis, one noise buffer, the `SOUND` switch and mute | `Sound ---` | 230 |
 | `WEAPONS`, tanks, wind, HUD sync, `fire()`, damage, turns | `Game state` | 435 |
 | AI: `predictLandingX()`, `chooseAiShot()`, `DIFFICULTY_SETTINGS` | `AI: trajectory` | 215 |
 | Roller mine / MIRV split / guided-missile flight | `Roller mine` | 170 |
@@ -103,6 +104,12 @@ a document never is.
   `stepProjectile()`. The test harness picks up the new `<option>` automatically.
 - Every user-facing string goes through `txt()` and needs an **en and a tr**
   entry. Turkish uppercasing uses `upper()`, not `toUpperCase()`.
+- Sound is **synthesised, never loaded** — there are no audio assets and there
+  cannot be, since nothing may fetch. Effects live in `Sound`; anything
+  sustained (rotor, rocket motor, rolling mine) is driven from the frame loop
+  by `updateSoundLoops()` rather than from the events that start it, so it
+  cannot be left playing, and `resetGame()` calls `stopAllSound()` as a
+  backstop. A browser with no Web Audio falls through to silence.
 - Bump `BUILD` (the top of the game script) when shipping a visible change; it
   renders in the HUD.
 - Expose anything worth testing on `window.__BARRAGE_TEST__` at the bottom of the
