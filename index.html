@@ -159,7 +159,7 @@
     gap: 4px 8px;
   }
   #build-info { font-size: 10px; color: var(--text-dim); }
-  #lang-toggle {
+  #lang-toggle, #sound-toggle {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -170,7 +170,7 @@
     user-select: none;
     -webkit-user-select: none;
   }
-  #lang-toggle input {
+  #lang-toggle input, #sound-toggle input {
     width: 12px; height: 12px;
     margin: 0;
     cursor: pointer;
@@ -608,6 +608,7 @@
       <div id="info-row">
         <span id="build-info">—</span>
         <span id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
+        <label id="sound-toggle"><input type="checkbox" id="sound-on" checked><span data-i18n="sfx">SFX</span></label>
         <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
       </div>
     </div>
@@ -722,7 +723,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v42';
+  const BUILD = 'v43';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -779,6 +780,8 @@
   const modeSelect = document.getElementById('mode-select');
   const countSelect = document.getElementById('count-select');
   const difficultyGroup = document.getElementById('difficulty-group');
+  const soundToggle = document.getElementById('sound-toggle');
+  const soundCheckbox = document.getElementById('sound-on');
 
   // ---------- Language ----------
   // Theme names are keyed by their English name so the THEMES table stays the
@@ -805,6 +808,7 @@
       easy: 'Easy', medium: 'Medium', hard: 'Hard', brutal: 'Brutal',
       aimLeft: 'Aim one degree left', aimRight: 'Aim one degree right',
       powerDown: 'Power down one', powerUp: 'Power up one',
+      sfx: 'SFX', sfxTitle: 'Sound effects',
     },
     tr: {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
@@ -827,6 +831,7 @@
       easy: 'Kolay', medium: 'Orta', hard: 'Zor', brutal: 'Acımasız',
       aimLeft: 'Bir derece sola nişan al', aimRight: 'Bir derece sağa nişan al',
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
+      sfx: 'SES', sfxTitle: 'Ses efektleri',
       'Rust Canyon': 'Pas Kanyonu'
     }
   };
@@ -895,6 +900,7 @@
     const aria = { 'angle-left': 'aimLeft', 'angle-right': 'aimRight',
                    'power-dec': 'powerDown', 'power-inc': 'powerUp' };
     for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
+    soundToggle.title = txt('sfxTitle');
     lastTimerText = ''; // force the clock to redraw in the new language
     // the weapon <option> labels and ammo readout are rebuilt from here
     if (tanks.length) { updateHUD(); syncControlsFromTank(); }
@@ -1211,6 +1217,284 @@
     return terrain[xi];
   }
 
+  // ---------- Sound ----------
+  // Every effect is synthesised here at runtime. This file ships as one page
+  // with no build step and no network fetch, so there are no audio assets to
+  // load: one buffer of noise is generated on first use and every burst —
+  // cannon, blast, rotor chop, rocket motor — is that buffer replayed through
+  // different filters and envelopes. A browser with no Web Audio, and the test
+  // harness's stub DOM, both fall through to silence rather than throwing.
+  const SOUND = {
+    enabled: true,    // false hides the toggle and silences the game entirely
+    volume: 0.45,     // master level, 0..1
+    noiseSeconds: 1   // length of the single generated noise buffer
+  };
+
+  let audio = null;        // AudioContext, built on the first gesture
+  let master = null;       // everything runs through here, so mute is instant
+  let noiseBuf = null;     // the one generated asset
+  let soundOn = true;
+  let liveVoices = 0;      // sources currently sounding; the test seam reads it
+  const loops = new Map(); // sustained sounds by name, so each can be stopped
+
+  // White noise, generated once. Every percussive sound in the game is this
+  // buffer shaped differently, which is why there is only one of them.
+  function makeNoiseBuffer(ctx) {
+    const n = Math.floor(ctx.sampleRate * SOUND.noiseSeconds);
+    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  // Browsers refuse to start audio before a gesture, so the context cannot be
+  // built at boot. Exactly one is ever made: they are a limited resource and a
+  // page that creates them per round eventually throws.
+  function audioCtx() {
+    if (audio) return audio;
+    if (!SOUND.enabled) return null;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null; // no Web Audio here — the game simply stays silent
+    try {
+      audio = new AC();
+      master = audio.createGain();
+      master.gain.value = soundOn ? SOUND.volume : 0;
+      master.connect(audio.destination);
+      noiseBuf = makeNoiseBuffer(audio);
+    } catch (e) {
+      audio = null;
+      return null;
+    }
+    return audio;
+  }
+
+  function soundAvailable() {
+    return SOUND.enabled && !!(window.AudioContext || window.webkitAudioContext);
+  }
+
+  // Counts a source for its lifetime and releases its nodes when it ends, so a
+  // long round does not accumulate a graph. The test seam asserts this returns
+  // to zero.
+  function trackVoice(src, tail) {
+    liveVoices++;
+    src.onended = () => {
+      liveVoices = Math.max(0, liveVoices - 1);
+      try { tail.disconnect(); } catch (e) { /* already torn down */ }
+    };
+  }
+
+  // A shaped burst of the noise buffer: the workhorse behind every impact.
+  function noiseBurst(o) {
+    const ctx = audioCtx();
+    if (!ctx || !soundOn) return null;
+    const t = ctx.currentTime + (o.when || 0);
+    const dur = o.dur || 0.3;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    src.loop = true;
+    src.playbackRate.value = o.rate || 1;
+    const filt = ctx.createBiquadFilter();
+    filt.type = o.type || 'lowpass';
+    filt.Q.value = o.q || 1;
+    filt.frequency.setValueAtTime(o.freq || 900, t);
+    if (o.sweepTo) filt.frequency.exponentialRampToValueAtTime(Math.max(30, o.sweepTo), t + dur);
+    const g = ctx.createGain();
+    const peak = Math.max(0.0002, o.gain || 0.5);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + Math.min(0.015, dur * 0.25));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(filt); filt.connect(g); g.connect(master);
+    // A random offset into the buffer is what stops repeated shots sounding
+    // identical — the cheap variation a fixed audio file could not give.
+    src.start(t, Math.random() * SOUND.noiseSeconds * 0.5);
+    src.stop(t + dur + 0.03);
+    trackVoice(src, g);
+    return g;
+  }
+
+  // A pitched body, for the thump under a blast and the fall of a dying tank.
+  function toneHit(o) {
+    const ctx = audioCtx();
+    if (!ctx || !soundOn) return null;
+    const t = ctx.currentTime + (o.when || 0);
+    const dur = o.dur || 0.3;
+    const osc = ctx.createOscillator();
+    osc.type = o.type || 'sine';
+    osc.frequency.setValueAtTime(o.f0 || 180, t);
+    if (o.f1) osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.f1), t + dur);
+    const g = ctx.createGain();
+    const peak = Math.max(0.0002, o.gain || 0.3);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + Math.min(0.02, dur * 0.2));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(master);
+    osc.start(t);
+    osc.stop(t + dur + 0.03);
+    trackVoice(osc, g);
+    return g;
+  }
+
+  // ---- sustained sounds ----
+  // These are the ones that can leak: each has to be stopped at a definite
+  // point, and stopAllSound() is the backstop when a round ends mid-flight.
+  function startLoop(name, build) {
+    if (loops.has(name)) return loops.get(name);
+    const ctx = audioCtx();
+    if (!ctx || !soundOn) return null;
+    const l = build(ctx);
+    if (l) loops.set(name, l);
+    return l;
+  }
+
+  function stopLoop(name) {
+    const l = loops.get(name);
+    if (!l) return;
+    loops.delete(name);
+    try { l.src.stop(); } catch (e) { /* never started */ }
+    try { l.out.disconnect(); } catch (e) { /* already torn down */ }
+  }
+
+  function stopAllSound() {
+    for (const name of Array.from(loops.keys())) stopLoop(name);
+  }
+
+  // A looping noise bed with its own gain, shared by the rotor, the rocket
+  // motor and the rolling mine — they differ only in filter and modulation.
+  function loopBed(ctx, o) {
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    src.loop = true;
+    src.playbackRate.value = o.rate || 1;
+    const filt = ctx.createBiquadFilter();
+    filt.type = o.type || 'lowpass';
+    filt.frequency.value = o.freq || 600;
+    filt.Q.value = o.q || 1;
+    const g = ctx.createGain();
+    g.gain.value = o.gain || 0.1;
+    src.connect(filt); filt.connect(g); g.connect(master);
+    src.start();
+    return { src, filt, gain: g, out: g };
+  }
+
+  // ---- the game's voices ----
+  const Sound = {
+    available: soundAvailable,
+    voices: () => liveVoices,
+    loops: () => loops.size,
+    muted: () => !soundOn,
+    stopAll: stopAllSound,
+
+    // Muzzle blast. Power sets how much low end it has, so a lob sounds
+    // softer than a flat-out shot.
+    fire(power) {
+      const p = Math.max(0, Math.min(100, power)) / 100;
+      noiseBurst({ dur: 0.22 + p * 0.12, freq: 1800 + p * 1200, sweepTo: 180, gain: 0.5, q: 0.7 });
+      toneHit({ dur: 0.26 + p * 0.14, f0: 150 + p * 60, f1: 42, gain: 0.42, type: 'triangle' });
+    },
+
+    // Every detonation in the game comes through here, so blast radius is the
+    // single knob: a bomblet cracks, a helicopter crash booms.
+    explode(radius) {
+      const r = Math.max(8, radius);
+      const big = Math.min(1, r / 74);                 // 74 is the heli crash blast
+      const dur = 0.32 + big * 0.75;
+      noiseBurst({ dur, freq: 1400 - big * 700, sweepTo: 60, gain: 0.55, q: 0.6, rate: 1 - big * 0.35 });
+      toneHit({ dur: dur * 0.9, f0: 120 - big * 55, f1: 28, gain: 0.34 + big * 0.2, type: 'sine' });
+      if (big > 0.45) noiseBurst({ when: 0.05, dur: dur * 1.2, freq: 300, sweepTo: 40, gain: 0.22, q: 0.4, rate: 0.5 });
+    },
+
+    // A tank going up: the blast is already playing, this is the wreck.
+    destroyed() {
+      toneHit({ when: 0.06, dur: 0.7, f0: 320, f1: 40, gain: 0.3, type: 'sawtooth' });
+      noiseBurst({ when: 0.06, dur: 0.6, freq: 700, sweepTo: 90, gain: 0.25, q: 1.2 });
+    },
+
+    tick() {
+      noiseBurst({ dur: 0.035, freq: 3200, gain: 0.16, q: 2, type: 'bandpass' });
+    },
+
+    // Rotor chop: a noise bed whose gain is swung by a low-frequency
+    // oscillator. Pitch drops and the chop slows as the wreck falls.
+    rotor(on, falling) {
+      if (!on) { stopLoop('rotor'); return; }
+      const l = startLoop('rotor', (ctx) => {
+        const bed = loopBed(ctx, { freq: 420, q: 1.2, gain: 0.0001, rate: 0.8 });
+        const lfo = ctx.createOscillator();
+        const lfoGain = ctx.createGain();
+        lfo.frequency.value = 15;
+        lfoGain.gain.value = 0.09;
+        lfo.connect(lfoGain); lfoGain.connect(bed.gain.gain);
+        lfo.start();
+        bed.gain.gain.value = 0.09;
+        bed.lfo = lfo;
+        const stop = bed.src.stop.bind(bed.src);
+        bed.src.stop = () => { try { lfo.stop(); } catch (e) {} stop(); };
+        return bed;
+      });
+      if (l && l.lfo) l.lfo.frequency.value = falling ? 7 : 15;
+      if (l) l.filt.frequency.value = falling ? 240 : 420;
+    },
+
+    // Rocket motor, for as long as the burn lasts.
+    motor(on) {
+      if (!on) { stopLoop('motor'); return; }
+      startLoop('motor', (ctx) => loopBed(ctx, { freq: 1100, q: 0.8, gain: 0.14, type: 'bandpass', rate: 1.6 }));
+    },
+
+    // Rolling mine: a low rumble that tracks how fast it is actually moving,
+    // so it fades out as the mine stalls.
+    rumble(on, speed01) {
+      if (!on) { stopLoop('rumble'); return; }
+      const l = startLoop('rumble', (ctx) => loopBed(ctx, { freq: 220, q: 1.5, gain: 0.02, rate: 0.4 }));
+      if (l) l.gain.gain.value = 0.02 + Math.max(0, Math.min(1, speed01)) * 0.13;
+    }
+  };
+
+  // Mute keeps the context alive and drops the master to zero, so unmuting is
+  // instant; the sustained sounds are cut as well or they would come back mid
+  // note.
+  function setSoundOn(on) {
+    soundOn = on;
+    if (!on) stopAllSound();
+    if (master && audio) master.gain.setValueAtTime(on ? SOUND.volume : 0, audio.currentTime);
+    try { localStorage.setItem('barrage.sound', on ? '1' : '0'); } catch (e) { /* private mode */ }
+  }
+
+  function initSound() {
+    if (!SOUND.enabled) { soundToggle.style.display = 'none'; return; }
+    let stored = null;
+    try { stored = localStorage.getItem('barrage.sound'); } catch (e) { /* private mode */ }
+    soundOn = stored !== '0';
+    soundCheckbox.checked = soundOn;
+    soundCheckbox.addEventListener('change', () => setSoundOn(soundCheckbox.checked));
+    // The context can only be created inside a gesture, so the first one the
+    // page sees builds it; after that it is just resumed if the tab suspended
+    // it while backgrounded.
+    const wake = () => {
+      const ctx = audioCtx();
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    };
+    for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
+      window.addEventListener(ev, wake);
+    }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+  }
+
+  // Driven from the frame loop rather than from the events that start and end
+  // these things: derived state cannot forget to stop, which is the whole risk
+  // with a sustained sound.
+  function updateSoundLoops() {
+    if (!soundAvailable() || !soundOn) return;
+    Sound.rotor(!!heli, !!(heli && heli.falling));
+    let burning = false, rolling = 0;
+    for (const p of projectiles) {
+      if (p.burnLeft > 0) burning = true;
+      if (p.rolling) rolling = Math.max(rolling, Math.abs(p.vx) / (300 * physScale));
+    }
+    Sound.motor(burning);
+    Sound.rumble(rolling > 0, rolling);
+  }
+
   // ---------- Game state ----------
   const GRAVITY = 340; // px/s^2
   const TANK_W = 26, TANK_H = 14;
@@ -1386,6 +1670,7 @@
     particles = [];
     clusterQueue = [];
     heli = null;
+    stopAllSound(); // a round can end mid-burn; nothing sustained may survive it
     nextTheme();
     newTerrain();
     placeTanks();
@@ -1488,6 +1773,7 @@
   // pick one degree out of 180, especially with a fingertip.
   function nudge(which, delta) {
     if (isAi(currentPlayer)) return; // same condition that gates the sliders
+    Sound.tick();
     const t = tanks[currentPlayer];
     if (which === 'angle') t.angle = Math.max(0, Math.min(180, t.angle + delta));
     else t.power = Math.max(0, Math.min(100, t.power + delta));
@@ -1574,6 +1860,7 @@
       trail: []
     }];
     shotExploded = false;
+    Sound.fire(shooter.power);
     state = 'FIRING';
     updateHUD();
   }
@@ -1594,7 +1881,7 @@
         const falloff = 1 - dist / w.radius;
         const dmg = w.damageMax * falloff;
         t.hp -= dmg;
-        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; Sound.destroyed(); }
       }
     }
     craterAt(px, py, w.radius);
@@ -1602,6 +1889,7 @@
   }
 
   function spawnExplosionFx(x, y, radius, color) {
+    Sound.explode(radius); // the one place every blast in the game passes through
     explosions.push({ x, y, r: 4, maxR: radius * 1.15, t: 0, color });
     const count = Math.round(radius * 0.9);
     for (let i = 0; i < count; i++) {
@@ -2206,6 +2494,7 @@
     particles = particles.filter(p => p.age < p.life);
     windPulse = Math.max(0, windPulse - dt * 1.6);
     updateHeli(dt);
+    updateSoundLoops();
     updateTimer();
 
     render();
@@ -2837,6 +3126,7 @@
   resize();
   buildInfo.textContent = BUILD;
   pruneWeaponOptions();
+  initSound();
   initLanguage();
   refreshOpponentUi();
   resetGame();
@@ -2862,10 +3152,11 @@
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
+    SOUND, Sound, setSoundOn, stopAllSound, updateSoundLoops, soundAvailable,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner, ammoReadout,
-      nudgeBtns, cards, hpText, langCheckbox
+      nudgeBtns, cards, hpText, langCheckbox, soundToggle, soundCheckbox
     },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },
     get terrain() { return terrain; }, set terrain(v) { terrain = v; },
