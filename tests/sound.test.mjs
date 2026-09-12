@@ -92,18 +92,18 @@ test('a round restarting stops everything sustained', () => {
   assert.equal(g.Sound.voices(), 0);
 });
 
-test('the sound toggle is present and defaults to on', () => {
+test('sound defaults to on', () => {
   const { g } = loadFlat();
 
   assert.equal(g.SOUND.enabled, true);
   assert.ok(g.SOUND.volume > 0 && g.SOUND.volume <= 1, 'master volume is a 0..1 fraction');
-  assert.equal(g.el.soundCheckbox.checked, true);
+  assert.equal(g.Sound.muted(), false);
 });
 
 test('the toggle label is translated in both languages', () => {
   const { g } = loadFlat();
 
-  for (const key of ['sfx', 'sfxTitle']) {
+  for (const key of ['sfx', 'sfxTitle', 'sfxVolume']) {
     const en = g.txt(key);
     assert.ok(en && en.length, `${key} needs an English string`);
   }
@@ -111,4 +111,35 @@ test('the toggle label is translated in both languages', () => {
   g.el.langCheckbox.dispatch('change');
   assert.equal(g.lang, 'tr');
   assert.equal(g.txt('sfx'), 'SES', 'and a Turkish one');
+  assert.equal(g.el.sfxSlider.attributes['aria-label'], g.txt('sfxVolume'),
+    'the level slider is relabelled too');
+});
+
+test('the level slider starts at the default level and maps evenly', () => {
+  const { g } = loadFlat();
+
+  assert.equal(g.sfxLevel, g.SOUND.volume);
+  assert.equal(g.el.sfxSlider.value, String(g.levelToSlider(g.SOUND.volume)));
+  assert.equal(g.sliderToLevel(0), 0);
+  assert.equal(g.sliderToLevel(100), 1);
+  assert.equal(g.sliderToLevel(50), 0.25, 'squared, so the travel is heard evenly');
+  assert.ok(Math.abs(g.sliderToLevel(g.levelToSlider(0.49)) - 0.49) < 1e-9, 'and it round-trips');
+});
+
+test('the level slider is the mute: zero is off, anything above is on', () => {
+  const { g } = loadFlat();
+
+  g.el.sfxSlider.value = '0';
+  g.el.sfxSlider.dispatch('input');
+  assert.equal(g.Sound.muted(), true, 'zero mutes');
+  assert.equal(g.sfxLevel, 0);
+
+  g.el.sfxSlider.value = '30';
+  g.el.sfxSlider.dispatch('input');
+  assert.equal(g.Sound.muted(), false, 'and raising it unmutes');
+  assert.ok(Math.abs(g.sfxLevel - 0.09) < 1e-9);
+
+  g.el.sfxSlider.dispatch('change'); // the preview tick must not throw without audio
+  g.setSfxLevel(7);
+  assert.equal(g.sfxLevel, 1, 'the level is clamped');
 });

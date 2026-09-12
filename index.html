@@ -159,7 +159,7 @@
     gap: 4px 8px;
   }
   #build-info { font-size: 10px; color: var(--text-dim); }
-  #lang-toggle, #sound-toggle {
+  #lang-toggle, #sound-ctl {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -170,12 +170,30 @@
     user-select: none;
     -webkit-user-select: none;
   }
-  #lang-toggle input, #sound-toggle input {
+  #lang-toggle input {
     width: 12px; height: 12px;
     margin: 0;
     cursor: pointer;
     accent-color: var(--accent-p1);
   }
+  /* SFX level: a small knob beside its label, and all the sound control there
+     is — zero is off. The id outranks the big touch-sized range rules further
+     down, which are sized for aiming, not for a HUD control. */
+  #sound-ctl { gap: 5px; }
+  #sfx-volume { width: 56px; height: 18px; }
+  #sfx-volume::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: #444; }
+  #sfx-volume::-webkit-slider-thumb {
+    width: 11px; height: 11px; margin-top: -4px;
+    border: 1px solid #000; background: var(--text-dim); box-shadow: none;
+  }
+  #sfx-volume::-moz-range-track { height: 3px; border-radius: 2px; background: #444; }
+  #sfx-volume::-moz-range-thumb {
+    width: 11px; height: 11px;
+    border: 1px solid #000; background: var(--text-dim); box-shadow: none;
+  }
+  #sfx-volume:active::-webkit-slider-thumb,
+  #sfx-volume:focus-visible::-webkit-slider-thumb { background: var(--accent-p1); box-shadow: none; }
+  #sfx-volume:active::-moz-range-thumb { background: var(--accent-p1); box-shadow: none; }
   .hud-pill {
     display: flex;
     align-items: center;
@@ -437,6 +455,9 @@
     .pn-abbr { display: inline; }
     .player-bar-row { display: block; } /* ~46px cards: no room to pair */
     #info-row { gap: 3px 6px; }
+    /* a ticking "12s" reads as the clock on its own; the word costs a phone
+       row room it does not have */
+    #game-timer [data-i18n="time"] { display: none; }
     .cb-full { display: none; }
     .cb-abbr { display: inline; }
     .health-bar-track { max-width: 110px; height: 8px; }
@@ -470,6 +491,13 @@
     #keys-hint { display: none; }
     #overlay h1 { font-size: 20px; }
     #overlay p { font-size: 11px; padding: 0 20px; }
+  }
+
+  /* The narrowest phones: the HUD row is shared with the player cards, and a
+     full-width level knob pushes P2's health text under the build number. */
+  @media (max-width: 360px) and (orientation: portrait) {
+    #sfx-volume { width: 32px; }
+    #sound-ctl { gap: 3px; }
   }
 
   /* Very short screens: shrink the sliders row further */
@@ -509,7 +537,9 @@
       text-align: left;
       border-top: 1px solid var(--panel-line);
       padding-top: 8px;
+      min-width: 0; /* the base 160px is wider than the rail, so nothing wrapped */
     }
+    #info-row { justify-content: flex-start; }
     #wind-hud { display: none; }
     .hud-pill { justify-content: flex-start; }
 
@@ -563,6 +593,7 @@
     .player-name { font-size: 9px; }
     .health-text { font-size: 8px; }
     #turn-banner { font-size: 9px; }
+    #sfx-volume { width: 44px; }
     #fire-btn { padding: 11px 8px; font-size: 13px; }
   }
 </style>
@@ -608,7 +639,7 @@
       <div id="info-row">
         <span id="build-info">—</span>
         <span id="game-timer" class="hud-pill"><span data-i18n="time">TIME</span> <span id="timer-val">0s</span></span>
-        <label id="sound-toggle"><input type="checkbox" id="sound-on" checked><span data-i18n="sfx">SFX</span></label>
+        <label id="sound-ctl"><span data-i18n="sfx">SFX</span><input type="range" id="sfx-volume" min="0" max="100" step="1" value="67" aria-label="Sound effects volume"></label>
         <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
       </div>
     </div>
@@ -723,7 +754,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v45';
+  const BUILD = 'v46';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -780,8 +811,8 @@
   const modeSelect = document.getElementById('mode-select');
   const countSelect = document.getElementById('count-select');
   const difficultyGroup = document.getElementById('difficulty-group');
-  const soundToggle = document.getElementById('sound-toggle');
-  const soundCheckbox = document.getElementById('sound-on');
+  const soundCtl = document.getElementById('sound-ctl');
+  const sfxSlider = document.getElementById('sfx-volume');
 
   // ---------- Language ----------
   // Theme names are keyed by their English name so the THEMES table stays the
@@ -808,7 +839,7 @@
       easy: 'Easy', medium: 'Medium', hard: 'Hard', brutal: 'Brutal',
       aimLeft: 'Aim one degree left', aimRight: 'Aim one degree right',
       powerDown: 'Power down one', powerUp: 'Power up one',
-      sfx: 'SFX', sfxTitle: 'Sound effects',
+      sfx: 'SFX', sfxTitle: 'Sound effects', sfxVolume: 'Sound effects volume',
     },
     tr: {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
@@ -831,7 +862,7 @@
       easy: 'Kolay', medium: 'Orta', hard: 'Zor', brutal: 'Acımasız',
       aimLeft: 'Bir derece sola nişan al', aimRight: 'Bir derece sağa nişan al',
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
-      sfx: 'SES', sfxTitle: 'Ses efektleri',
+      sfx: 'SES', sfxTitle: 'Ses efektleri', sfxVolume: 'Ses efektleri seviyesi',
       'Rust Canyon': 'Pas Kanyonu'
     }
   };
@@ -900,7 +931,9 @@
     const aria = { 'angle-left': 'aimLeft', 'angle-right': 'aimRight',
                    'power-dec': 'powerDown', 'power-inc': 'powerUp' };
     for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
-    soundToggle.title = txt('sfxTitle');
+    soundCtl.title = txt('sfxTitle');
+    sfxSlider.title = txt('sfxVolume');
+    sfxSlider.setAttribute('aria-label', txt('sfxVolume'));
     lastTimerText = ''; // force the clock to redraw in the new language
     // the weapon <option> labels and ammo readout are rebuilt from here
     if (tanks.length) { updateHUD(); syncControlsFromTank(); }
@@ -1226,14 +1259,16 @@
   // harness's stub DOM, both fall through to silence rather than throwing.
   const SOUND = {
     enabled: true,    // false hides the toggle and silences the game entirely
-    volume: 0.45,     // master level, 0..1
+    volume: 0.45,     // default master level, 0..1, until the player sets their own
     noiseSeconds: 1   // length of the single generated noise buffer
   };
 
   let audio = null;        // AudioContext, built on the first gesture
   let master = null;       // everything runs through here, so mute is instant
-  let noiseBuf = null;     // the one generated asset
+  let noiseBuf = null;     // white noise: cracks, hiss, debris
+  let brownBuf = null;     // brown noise: the rumble white noise cannot make
   let soundOn = true;
+  let sfxLevel = SOUND.volume; // the player's level from the slider, 0..1
   let liveVoices = 0;      // sources currently sounding; the test seam reads it
   const loops = new Map(); // sustained sounds by name, so each can be stopped
 
@@ -1244,6 +1279,46 @@
     const buf = ctx.createBuffer(1, n, ctx.sampleRate);
     const d = buf.getChannelData(0);
     for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  // Brown noise: white noise integrated, so its energy sits in the low end the
+  // way a real blast's does. Lowpassing white noise down there leaves almost
+  // nothing, which is why the old booms were all hiss and no weight. The drift
+  // is taken out so the ends meet — these buffers loop, and a step at the seam
+  // would click once a second under every rumble.
+  function makeBrownBuffer(ctx) {
+    const n = Math.floor(ctx.sampleRate * SOUND.noiseSeconds);
+    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < n; i++) {
+      last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+      d[i] = last * 3.5;
+    }
+    const drift = d[n - 1] - d[0];
+    for (let i = 0; i < n; i++) d[i] -= drift * i / (n - 1);
+    return buf;
+  }
+
+  // An impulse response for open ground, generated like everything else: a
+  // decaying noise tail that darkens as it goes, because distance eats the top
+  // end of an echo first. Without it every blast stops dead in a vacuum.
+  function makeReverbBuffer(ctx) {
+    const seconds = 2.8, pre = 0.012;
+    const n = Math.floor(ctx.sampleRate * seconds);
+    const buf = ctx.createBuffer(2, n, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      let y = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / ctx.sampleRate;
+        if (t < pre) { d[i] = 0; continue; }
+        const a = 0.55 - 0.5 * (i / n);         // one-pole lowpass, closing
+        y += a * ((Math.random() * 2 - 1) - y);
+        d[i] = y * Math.exp(-(t - pre) * 2.4);
+      }
+    }
     return buf;
   }
 
@@ -1258,9 +1333,19 @@
     try {
       audio = new AC();
       master = audio.createGain();
-      master.gain.value = soundOn ? SOUND.volume : 0;
-      master.connect(audio.destination);
+      master.gain.value = soundOn ? sfxLevel : 0;
+      // A compressor last, so a big sub-bass blast can be loud without
+      // clipping the output, and the whistle ducks under it as a real one would.
+      const comp = audio.createDynamicsCompressor();
+      comp.threshold.value = -16;
+      comp.knee.value = 8;
+      comp.ratio.value = 5;
+      comp.attack.value = 0.003;
+      comp.release.value = 0.3;
+      master.connect(comp);
+      comp.connect(audio.destination);
       noiseBuf = makeNoiseBuffer(audio);
+      brownBuf = makeBrownBuffer(audio);
     } catch (e) {
       audio = null;
       return null;
@@ -1283,11 +1368,14 @@
     };
   }
 
-  // Soft clipping. Perfectly clean synthesis is exactly what reads as plastic —
-  // a real blast drives whatever it reaches into distortion, and tanh puts that
-  // grit back. Built once and shared; it feeds master, so mute still governs it.
+  // The bus every gun and blast plays into. Soft clipping first: perfectly
+  // clean synthesis is exactly what reads as plastic, and tanh also turns a sub
+  // thump into harmonics a laptop speaker can actually reproduce. Then a send
+  // into the generated reverb, which is what makes a shot sound like it went
+  // off outdoors, rolling back off the hills. Built once; it feeds master, so
+  // mute still governs it.
   let shaper = null;
-  function saturator(ctx) {
+  function blastBus(ctx) {
     if (shaper) return shaper;
     const n = 1024, curve = new Float32Array(n);
     for (let i = 0; i < n; i++) curve[i] = Math.tanh(((i / (n - 1)) * 2 - 1) * 2.4);
@@ -1295,6 +1383,13 @@
     shaper.curve = curve;
     shaper.oversample = '2x';
     shaper.connect(master);
+    try {
+      const verb = ctx.createConvolver();
+      verb.buffer = makeReverbBuffer(ctx);
+      const send = ctx.createGain();
+      send.gain.value = 0.5;
+      shaper.connect(send); send.connect(verb); verb.connect(master);
+    } catch (e) { /* no convolver: dry is still a blast */ }
     return shaper;
   }
 
@@ -1305,7 +1400,7 @@
     const t = ctx.currentTime + (o.when || 0);
     const dur = o.dur || 0.3;
     const src = ctx.createBufferSource();
-    src.buffer = noiseBuf;
+    src.buffer = o.brown ? brownBuf : noiseBuf;
     src.loop = true;
     src.playbackRate.value = o.rate || 1;
     const filt = ctx.createBiquadFilter();
@@ -1341,7 +1436,7 @@
     const g = ctx.createGain();
     const peak = Math.max(0.0002, o.gain || 0.3);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(peak, t + Math.min(0.02, dur * 0.2));
+    g.gain.exponentialRampToValueAtTime(peak, t + (o.attack !== undefined ? o.attack : Math.min(0.02, dur * 0.2)));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     osc.connect(g); g.connect(o.dest || master);
     osc.start(t);
@@ -1417,56 +1512,73 @@
     muted: () => !soundOn,
     stopAll: stopAllSound,
 
-    // Muzzle blast. Power sets how much low end it has, so a lob sounds
-    // softer than a flat-out shot.
+    // Gun report. Power sets how much charge went in, so a lob is a pop and a
+    // flat-out shot is a thump you feel, with the echo coming back off the
+    // ground after it.
     fire(power) {
       const ctx = audioCtx();
       if (!ctx || !soundOn) return;
-      const dest = saturator(ctx);
+      const dest = blastBus(ctx);
       const p = Math.max(0, Math.min(100, power)) / 100;
-      // The crack of the charge, then the body of the barrel behind it.
-      noiseBurst({ dur: 0.05, freq: 2200, q: 0.5, type: 'highpass', gain: 0.55, attack: 0.001, dest });
-      noiseBurst({ dur: 0.2 + p * 0.12, freq: 700 + p * 400, sweepTo: 160, gain: 0.5, q: 0.8, attack: 0.002, dest });
-      toneHit({ dur: 0.24 + p * 0.14, f0: 130 + p * 55, f1: 40, gain: 0.45, type: 'triangle', dest });
+      // The supersonic crack of the charge leaving the barrel.
+      noiseBurst({ dur: 0.07, freq: 1600, q: 0.4, type: 'highpass', gain: 0.45, attack: 0.0006, dest });
+      // The concussion: brown noise, so it is a shove of air rather than hiss.
+      noiseBurst({ brown: true, dur: 0.4 + p * 0.3, freq: 1000 + p * 600, sweepTo: 220, q: 0.5,
+                   gain: 0.75 + p * 0.2, attack: 0.002, dest });
+      // The thump in the chest: a sine dropping into the sub range, hit hard.
+      toneHit({ dur: 0.35 + p * 0.25, f0: 105 + p * 25, f1: 36, gain: 0.55 + p * 0.3, attack: 0.002, dest });
     },
 
     // Every detonation in the game comes through here, so blast radius is the
     // single knob: a bomblet cracks, a helicopter crash booms.
-    // Four layers, because one filtered burst is what sounded like plastic. A
-    // real detonation is a transient you hear before anything else, a body of
-    // moving air, weight underneath it, and a tail that outlasts all three —
-    // and the filter sweep that used to carry it was a synth gesture, so the
-    // envelopes do the work now instead.
+    // A real detonation is a shock front you hear before anything else, a sub
+    // punch you feel, a body of moving air, a rumble that rolls on after it,
+    // and dirt coming back down — then the whole thing echoing off the terrain
+    // through the blast bus's reverb. The rumble layers are brown noise: white
+    // noise lowpassed that far passes almost nothing, which is what left the
+    // old boom sounding thin however it was tuned.
     explode(radius) {
       const ctx = audioCtx();
       if (!ctx || !soundOn) return;
-      const dest = saturator(ctx);
+      const dest = blastBus(ctx);
       const r = Math.max(8, radius);
       const big = Math.min(1, r / 74);                 // 74 is the heli crash blast
 
-      // 1. the crack: near-instant, bright, gone before you place it. Kept
-      // under the body deliberately — a transient loud enough to dominate is
-      // what makes the tail behind it inaudible.
-      noiseBurst({ dur: 0.04 + big * 0.02, freq: 3000, q: 0.5, type: 'highpass',
-                   gain: 0.38, attack: 0.0008, dest });
-      // 2. the body: noise, not a tone — a sine here is most of "plastic"
-      noiseBurst({ dur: 0.25 + big * 0.45, freq: 620 - big * 260, sweepTo: 190 - big * 90,
-                   q: 0.9, gain: 0.62, rate: 0.95 - big * 0.35, attack: 0.004, dest });
-      // 3. the weight underneath, dropping in pitch as the pressure falls away
-      toneHit({ dur: 0.2 + big * 0.35, f0: 100 - big * 32, f1: 30, gain: 0.5 + big * 0.3,
-                type: 'triangle', dest });
-      // 4. the tail. A lowpass down at 150Hz passes so little of the noise that
-      // the first attempt at this was inaudible within 300ms — measured, not
-      // guessed. It needs both a higher corner and real level to read as the
-      // blast rolling away rather than stopping dead.
-      noiseBurst({ when: 0.02, dur: 0.9 + big * 1.8, freq: 430 - big * 130, q: 0.5,
-                   gain: 0.5 + big * 0.45, rate: 0.25, attack: 0.06, dest });
+      // 1. the shock front: broadband and over in a few milliseconds
+      noiseBurst({ dur: 0.03 + big * 0.03, freq: 5500, q: 0.3, gain: 0.5, attack: 0.0005, dest });
+      // 2. the punch: a sine falling into the sub range, driven into the
+      // clipper so it hits rather than hums
+      toneHit({ dur: 0.45 + big * 0.7, f0: 80 - big * 25, f1: 26, gain: 0.8 + big * 0.25,
+                attack: 0.003, dest });
+      // 3. the body: brown noise with its top closing as the fireball expands
+      noiseBurst({ brown: true, dur: 0.6 + big * 1.1, freq: 1500 - big * 500, sweepTo: 200,
+                   q: 0.6, gain: 0.85 + big * 0.15, attack: 0.003, dest });
+      // 4. the rumble rolling away, slower to arrive and far longer
+      noiseBurst({ brown: true, when: 0.03, dur: 1.3 + big * 2.4, freq: 360, sweepTo: 110,
+                   q: 0.5, gain: 0.45 + big * 0.5, rate: 0.6, attack: 0.09, dest });
+      // 5. debris: dirt and fragments pattering down in the half second after
+      const bits = Math.round(3 + big * 14);
+      for (let i = 0; i < bits; i++) {
+        noiseBurst({ when: 0.1 + Math.random() * (0.35 + big * 1.1),
+                     dur: 0.015 + Math.random() * 0.04, type: 'bandpass',
+                     freq: 1200 + Math.random() * 3500, q: 1.2,
+                     gain: (0.04 + Math.random() * 0.07) * (0.6 + big), attack: 0.001, dest });
+      }
     },
 
-    // A tank going up: the blast is already playing, this is the wreck.
+    // A tank going up: the hit is already playing, this is its ammunition
+    // cooking off a beat later — a second, deeper blast and rounds popping.
     destroyed() {
-      toneHit({ when: 0.06, dur: 0.7, f0: 320, f1: 40, gain: 0.3, type: 'sawtooth' });
-      noiseBurst({ when: 0.06, dur: 0.6, freq: 700, sweepTo: 90, gain: 0.25, q: 1.2 });
+      const ctx = audioCtx();
+      if (!ctx || !soundOn) return;
+      const dest = blastBus(ctx);
+      toneHit({ when: 0.18, dur: 1.0, f0: 62, f1: 24, gain: 0.75, attack: 0.004, dest });
+      noiseBurst({ brown: true, when: 0.18, dur: 1.7, freq: 900, sweepTo: 130, q: 0.5,
+                   gain: 0.8, attack: 0.004, dest });
+      for (let i = 0; i < 5; i++) {
+        noiseBurst({ brown: true, when: 0.35 + Math.random() * 0.9, dur: 0.06,
+                     freq: 1800, q: 0.6, gain: 0.3, attack: 0.001, dest });
+      }
     },
 
     tick() {
@@ -1507,20 +1619,68 @@
     // possible because it is generated rather than played back.
     whistle(on, pitch01) {
       if (!on) { stopLoop('whistle'); return; }
-      // Noise through a narrow band, not an oscillator. A pure tone is what a
-      // person whistling actually produces, which is why it sounded like one;
-      // a shell is air tearing past metal, so the pitch has to come from
-      // resonance over noise rather than from a tone generator.
-      // Q trades presence for pitch: too narrow and it is both a tone again and
-      // far too quiet, since a narrow band passes almost none of the noise.
-      const l = startLoop('whistle', (ctx) => loopBed(ctx, {
-        type: 'bandpass', q: 9, freq: 900, gain: 0.38, rate: 1.4, attack: 0.1
-      }));
+      // Both earlier versions were half the sound. A clean sine was a person
+      // whistling; filtered noise alone was wind. An incoming shell is both: a
+      // shrieking tone that is never quite steady, and air rushing past it.
+      // So: two sines a few cents apart, which beat against each other the way
+      // a real shriek wavers; a slow random wobble on their pitch, so it is
+      // never a held note; and a band of noise riding the same pitch for the
+      // rush. It gets louder as the shell comes down, which is the dread of it.
+      const l = startLoop('whistle', (ctx) => {
+        const t = ctx.currentTime;
+        const out = ctx.createGain();            // stopLoop fades this one
+        out.gain.setValueAtTime(0.0001, t);
+        out.gain.exponentialRampToValueAtTime(1, t + 0.15);
+        const level = ctx.createGain();          // the approach, set per frame
+        level.gain.value = 0.12;
+        level.connect(out); out.connect(master);
+
+        const osc = ctx.createOscillator(), osc2 = ctx.createOscillator();
+        osc.frequency.value = 1000; osc2.frequency.value = 1007;
+        const toneGain = ctx.createGain();
+        toneGain.gain.value = 0.55;
+        osc.connect(toneGain); osc2.connect(toneGain); toneGain.connect(level);
+
+        // The wobble: brown noise slowed right down and lowpassed, added to
+        // both oscillators' frequency.
+        const wob = ctx.createBufferSource();
+        wob.buffer = brownBuf; wob.loop = true; wob.playbackRate.value = 0.5;
+        const wobFilt = ctx.createBiquadFilter();
+        wobFilt.type = 'lowpass'; wobFilt.frequency.value = 20;
+        const wobDepth = ctx.createGain();
+        wobDepth.gain.value = 45;                // Hz of wander
+        wob.connect(wobFilt); wobFilt.connect(wobDepth);
+        wobDepth.connect(osc.frequency); wobDepth.connect(osc2.frequency);
+
+        // The rush: noise in a band around the tone.
+        const rush = ctx.createBufferSource();
+        rush.buffer = noiseBuf; rush.loop = true; rush.playbackRate.value = 1.3;
+        const filt = ctx.createBiquadFilter();
+        filt.type = 'bandpass'; filt.frequency.value = 1000; filt.Q.value = 3;
+        const rushGain = ctx.createGain();
+        rushGain.gain.value = 0.9;
+        rush.connect(filt); filt.connect(rushGain); rushGain.connect(level);
+
+        const offset = Math.random() * SOUND.noiseSeconds * 0.5;
+        osc.start(t); osc2.start(t); wob.start(t, offset); rush.start(t, offset);
+        // stopLoop stops l.src; the rest have to go with it.
+        const stop = osc.stop.bind(osc);
+        osc.stop = (when) => {
+          for (const s of [osc2, wob, rush]) { try { s.stop(when); } catch (e) { /* stopped */ } }
+          stop(when);
+        };
+        return { src: osc, gain: out, out, filt, osc, osc2, level };
+      });
       if (l && audio) {
-        const f = 380 + Math.max(0, Math.min(1, pitch01)) * 1150;
+        const p = Math.max(0, Math.min(1, pitch01));
+        const f = 420 + p * 1150;
+        const now = audio.currentTime;
         // setTargetAtTime glides rather than steps, so the pitch slides with
         // the shell instead of zippering once a frame.
-        l.filt.frequency.setTargetAtTime(f, audio.currentTime, 0.04);
+        l.osc.frequency.setTargetAtTime(f, now, 0.05);
+        l.osc2.frequency.setTargetAtTime(f * 1.007, now, 0.05);
+        l.filt.frequency.setTargetAtTime(f, now, 0.05);
+        l.level.gain.setTargetAtTime(0.07 + (1 - p) * 0.2, now, 0.12);
       }
     },
 
@@ -1539,17 +1699,52 @@
   function setSoundOn(on) {
     soundOn = on;
     if (!on) stopAllSound();
-    if (master && audio) master.gain.setValueAtTime(on ? SOUND.volume : 0, audio.currentTime);
+    if (master && audio) {
+      master.gain.cancelScheduledValues(audio.currentTime);
+      master.gain.setValueAtTime(on ? sfxLevel : 0, audio.currentTime);
+    }
     try { localStorage.setItem('barrage.sound', on ? '1' : '0'); } catch (e) { /* private mode */ }
   }
 
+  // The slider is a position and the level is a gain. Loudness is heard on a
+  // log scale, so a linear mapping does all its audible work in the bottom
+  // quarter of the travel; squaring spreads it evenly along the slider.
+  const sliderToLevel = (v) => Math.pow(Math.max(0, Math.min(100, Number(v) || 0)) / 100, 2);
+  const levelToSlider = (l) => Math.round(Math.sqrt(Math.max(0, Math.min(1, l))) * 100);
+
+  function setSfxLevel(level) {
+    sfxLevel = Math.max(0, Math.min(1, level));
+    // A short glide rather than a jump, or dragging the slider zippers.
+    if (master && audio && soundOn) {
+      master.gain.cancelScheduledValues(audio.currentTime);
+      master.gain.setTargetAtTime(sfxLevel, audio.currentTime, 0.02);
+    }
+    try { localStorage.setItem('barrage.sfxLevel', String(sfxLevel)); } catch (e) { /* private mode */ }
+  }
+
   function initSound() {
-    if (!SOUND.enabled) { soundToggle.style.display = 'none'; return; }
-    let stored = null;
-    try { stored = localStorage.getItem('barrage.sound'); } catch (e) { /* private mode */ }
-    soundOn = stored !== '0';
-    soundCheckbox.checked = soundOn;
-    soundCheckbox.addEventListener('change', () => setSoundOn(soundCheckbox.checked));
+    if (!SOUND.enabled) { soundCtl.style.display = 'none'; return; }
+    // The slider is the only control, so off is simply zero.
+    let stored = null, storedLevel = null;
+    try {
+      stored = localStorage.getItem('barrage.sound');
+      storedLevel = localStorage.getItem('barrage.sfxLevel');
+    } catch (e) { /* private mode */ }
+    const parsed = storedLevel == null ? NaN : parseFloat(storedLevel);
+    sfxLevel = Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : SOUND.volume;
+    // There used to be an on/off switch; whoever turned it off comes back at
+    // zero rather than suddenly loud.
+    if (stored === '0') sfxLevel = 0;
+    soundOn = sfxLevel > 0;
+    sfxSlider.value = String(levelToSlider(sfxLevel));
+    sfxSlider.addEventListener('input', () => {
+      const level = sliderToLevel(sfxSlider.value);
+      // Only on a crossing: setSoundOn jumps the gain, which would zipper a drag.
+      if ((level > 0) !== soundOn) setSoundOn(level > 0);
+      setSfxLevel(level);
+    });
+    // One tick at the new level on release, so it can be judged without firing.
+    sfxSlider.addEventListener('change', () => Sound.tick());
     // The context can only be created inside a gesture, so the first one the
     // page sees builds it; after that it is just resumed if the tab suspended
     // it while backgrounded.
@@ -1908,6 +2103,8 @@
   window.addEventListener('blur', () => nudgeStops.forEach(fn => fn()));
 
   window.addEventListener('keydown', (e) => {
+    // Arrows on the focused SFX slider belong to the slider, not the aim.
+    if (e.target === sfxSlider) return;
     if (state !== 'AIMING' || isAi(currentPlayer)) return;
     const t = tanks[currentPlayer];
     if (e.key === 'ArrowLeft') { t.angle = Math.min(180, t.angle + 1); syncControlsFromTank(); e.preventDefault(); }
@@ -3247,10 +3444,11 @@
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     SOUND, Sound, setSoundOn, stopAllSound, updateSoundLoops, soundAvailable,
+    setSfxLevel, sliderToLevel, levelToSlider,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner, ammoReadout,
-      nudgeBtns, cards, hpText, langCheckbox, soundToggle, soundCheckbox
+      nudgeBtns, cards, hpText, langCheckbox, soundCtl, sfxSlider
     },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },
     get terrain() { return terrain; }, set terrain(v) { terrain = v; },
@@ -3260,6 +3458,7 @@
     get projectiles() { return projectiles; }, set projectiles(v) { projectiles = v; },
     get clusterQueue() { return clusterQueue; }, set clusterQueue(v) { clusterQueue = v; },
     get heli() { return heli; }, set heli(v) { heli = v; },
+    get sfxLevel() { return sfxLevel; },
     get cpuMode() { return cpuMode; }, set cpuMode(v) { cpuMode = v; },
     get aiDifficulty() { return aiDifficulty; }, set aiDifficulty(v) { aiDifficulty = v; },
     get playerCount() { return playerCount; }, set playerCount(v) { playerCount = v; },
