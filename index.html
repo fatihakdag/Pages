@@ -723,7 +723,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v44';
+  const BUILD = 'v45';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1283,6 +1283,21 @@
     };
   }
 
+  // Soft clipping. Perfectly clean synthesis is exactly what reads as plastic —
+  // a real blast drives whatever it reaches into distortion, and tanh puts that
+  // grit back. Built once and shared; it feeds master, so mute still governs it.
+  let shaper = null;
+  function saturator(ctx) {
+    if (shaper) return shaper;
+    const n = 1024, curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) curve[i] = Math.tanh(((i / (n - 1)) * 2 - 1) * 2.4);
+    shaper = ctx.createWaveShaper();
+    shaper.curve = curve;
+    shaper.oversample = '2x';
+    shaper.connect(master);
+    return shaper;
+  }
+
   // A shaped burst of the noise buffer: the workhorse behind every impact.
   function noiseBurst(o) {
     const ctx = audioCtx();
@@ -1301,9 +1316,10 @@
     const g = ctx.createGain();
     const peak = Math.max(0.0002, o.gain || 0.5);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(peak, t + Math.min(0.015, dur * 0.25));
+    // Attack is the difference between a crack and a whump, so it is a knob.
+    g.gain.exponentialRampToValueAtTime(peak, t + (o.attack !== undefined ? o.attack : Math.min(0.015, dur * 0.25)));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(filt); filt.connect(g); g.connect(master);
+    src.connect(filt); filt.connect(g); g.connect(o.dest || master);
     // A random offset into the buffer is what stops repeated shots sounding
     // identical — the cheap variation a fixed audio file could not give.
     src.start(t, Math.random() * SOUND.noiseSeconds * 0.5);
@@ -1327,7 +1343,7 @@
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(peak, t + Math.min(0.02, dur * 0.2));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(g); g.connect(master);
+    osc.connect(g); g.connect(o.dest || master);
     osc.start(t);
     osc.stop(t + dur + 0.03);
     trackVoice(osc, g);
@@ -1381,24 +1397,15 @@
     filt.frequency.value = o.freq || 600;
     filt.Q.value = o.q || 1;
     const g = ctx.createGain();
-    g.gain.value = o.gain || 0.1;
-    src.connect(filt); filt.connect(g); g.connect(master);
+    if (o.attack) {
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(o.gain || 0.1, ctx.currentTime + o.attack);
+    } else {
+      g.gain.value = o.gain || 0.1;
+    }
+    src.connect(filt); filt.connect(g); g.connect(o.dest || master);
     src.start();
     return { src, filt, gain: g, out: g };
-  }
-
-  // A held tone, the counterpart to loopBed for the one sustained sound that is
-  // pitched rather than noisy.
-  function toneBed(ctx, o) {
-    const osc = ctx.createOscillator();
-    osc.type = o.type || 'sine';
-    osc.frequency.value = o.f || 700;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(o.gain || 0.07, ctx.currentTime + 0.09);
-    osc.connect(g); g.connect(master);
-    osc.start();
-    return { src: osc, osc, gain: g, out: g };
   }
 
   // ---- the game's voices ----
@@ -1413,20 +1420,47 @@
     // Muzzle blast. Power sets how much low end it has, so a lob sounds
     // softer than a flat-out shot.
     fire(power) {
+      const ctx = audioCtx();
+      if (!ctx || !soundOn) return;
+      const dest = saturator(ctx);
       const p = Math.max(0, Math.min(100, power)) / 100;
-      noiseBurst({ dur: 0.22 + p * 0.12, freq: 1800 + p * 1200, sweepTo: 180, gain: 0.5, q: 0.7 });
-      toneHit({ dur: 0.26 + p * 0.14, f0: 150 + p * 60, f1: 42, gain: 0.42, type: 'triangle' });
+      // The crack of the charge, then the body of the barrel behind it.
+      noiseBurst({ dur: 0.05, freq: 2200, q: 0.5, type: 'highpass', gain: 0.55, attack: 0.001, dest });
+      noiseBurst({ dur: 0.2 + p * 0.12, freq: 700 + p * 400, sweepTo: 160, gain: 0.5, q: 0.8, attack: 0.002, dest });
+      toneHit({ dur: 0.24 + p * 0.14, f0: 130 + p * 55, f1: 40, gain: 0.45, type: 'triangle', dest });
     },
 
     // Every detonation in the game comes through here, so blast radius is the
     // single knob: a bomblet cracks, a helicopter crash booms.
+    // Four layers, because one filtered burst is what sounded like plastic. A
+    // real detonation is a transient you hear before anything else, a body of
+    // moving air, weight underneath it, and a tail that outlasts all three —
+    // and the filter sweep that used to carry it was a synth gesture, so the
+    // envelopes do the work now instead.
     explode(radius) {
+      const ctx = audioCtx();
+      if (!ctx || !soundOn) return;
+      const dest = saturator(ctx);
       const r = Math.max(8, radius);
       const big = Math.min(1, r / 74);                 // 74 is the heli crash blast
-      const dur = 0.32 + big * 0.75;
-      noiseBurst({ dur, freq: 1400 - big * 700, sweepTo: 60, gain: 0.55, q: 0.6, rate: 1 - big * 0.35 });
-      toneHit({ dur: dur * 0.9, f0: 120 - big * 55, f1: 28, gain: 0.34 + big * 0.2, type: 'sine' });
-      if (big > 0.45) noiseBurst({ when: 0.05, dur: dur * 1.2, freq: 300, sweepTo: 40, gain: 0.22, q: 0.4, rate: 0.5 });
+
+      // 1. the crack: near-instant, bright, gone before you place it. Kept
+      // under the body deliberately — a transient loud enough to dominate is
+      // what makes the tail behind it inaudible.
+      noiseBurst({ dur: 0.04 + big * 0.02, freq: 3000, q: 0.5, type: 'highpass',
+                   gain: 0.38, attack: 0.0008, dest });
+      // 2. the body: noise, not a tone — a sine here is most of "plastic"
+      noiseBurst({ dur: 0.25 + big * 0.45, freq: 620 - big * 260, sweepTo: 190 - big * 90,
+                   q: 0.9, gain: 0.62, rate: 0.95 - big * 0.35, attack: 0.004, dest });
+      // 3. the weight underneath, dropping in pitch as the pressure falls away
+      toneHit({ dur: 0.2 + big * 0.35, f0: 100 - big * 32, f1: 30, gain: 0.5 + big * 0.3,
+                type: 'triangle', dest });
+      // 4. the tail. A lowpass down at 150Hz passes so little of the noise that
+      // the first attempt at this was inaudible within 300ms — measured, not
+      // guessed. It needs both a higher corner and real level to read as the
+      // blast rolling away rather than stopping dead.
+      noiseBurst({ when: 0.02, dur: 0.9 + big * 1.8, freq: 430 - big * 130, q: 0.5,
+                   gain: 0.5 + big * 0.45, rate: 0.25, attack: 0.06, dest });
     },
 
     // A tank going up: the blast is already playing, this is the wreck.
@@ -1473,12 +1507,20 @@
     // possible because it is generated rather than played back.
     whistle(on, pitch01) {
       if (!on) { stopLoop('whistle'); return; }
-      const l = startLoop('whistle', (ctx) => toneBed(ctx, { f: 700, gain: 0.055, type: 'sine' }));
+      // Noise through a narrow band, not an oscillator. A pure tone is what a
+      // person whistling actually produces, which is why it sounded like one;
+      // a shell is air tearing past metal, so the pitch has to come from
+      // resonance over noise rather than from a tone generator.
+      // Q trades presence for pitch: too narrow and it is both a tone again and
+      // far too quiet, since a narrow band passes almost none of the noise.
+      const l = startLoop('whistle', (ctx) => loopBed(ctx, {
+        type: 'bandpass', q: 9, freq: 900, gain: 0.38, rate: 1.4, attack: 0.1
+      }));
       if (l && audio) {
-        const f = 300 + Math.max(0, Math.min(1, pitch01)) * 900;
+        const f = 380 + Math.max(0, Math.min(1, pitch01)) * 1150;
         // setTargetAtTime glides rather than steps, so the pitch slides with
         // the shell instead of zippering once a frame.
-        l.osc.frequency.setTargetAtTime(f, audio.currentTime, 0.04);
+        l.filt.frequency.setTargetAtTime(f, audio.currentTime, 0.04);
       }
     },
 
