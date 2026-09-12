@@ -116,7 +116,9 @@ a document never is.
   (`RELOADS`), and shots pan to the tank's position (`gunPanner`), so you can
   hear who fired. Everything else is placed too: sustained sounds pan with
   their source every frame (`panLoop`), blasts to where they land
-  (`zonePanner`).
+  (`zonePanner`). The shell whistle has a character per weapon (`FLIGHT`) —
+  a weapon added to `WEAPONS` needs an entry there too, or it whistles like
+  the standard shell.
 - Bump `BUILD` (the top of the game script) when shipping a visible change; it
   renders in the HUD.
 - Expose anything worth testing on `window.__BARRAGE_TEST__` at the bottom of the

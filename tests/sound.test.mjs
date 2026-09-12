@@ -28,7 +28,9 @@ test('every voice is a no-op rather than a throw when audio is unavailable', () 
   g.Sound.rotor(true, false, 0.2);
   g.Sound.motor(true, 0.4);
   g.Sound.rumble(true, 0.5, 0.6);
-  g.Sound.whistle(true, 0.8, 0.8);
+  g.Sound.whistle(true, { pitch01: 0.8, speed01: 0.5, impactIn: 0.4, x01: 0.8 });
+  g.Sound.whistle(true, { pitch01: 0.2, speed01: 1, impactIn: Infinity, x01: 0.2 });
+  g.Sound.whistle(true, { pitch01: 0.5, speed01: 0.7, impactIn: 1, x01: 0.5, flight: g.FLIGHT.big });
   g.Sound.stopAll();
   g.updateSoundLoops();
 
@@ -61,6 +63,44 @@ test('a shell in flight drives the whistle without throwing', () => {
   assert.ok(g.projectiles.length > 0, 'still airborne');
   g.updateSoundLoops();
   assert.equal(g.Sound.loops(), 0, 'silent here, but it must not have thrown');
+});
+
+test('the whistle knows how soon a shell will land, and counts it down', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.placeTanksAt([200, 700]);
+  g.currentPlayer = 0;
+  g.tanks[0].angle = 50;
+  g.tanks[0].power = 70;
+  g.fire();
+
+  h.advance(300);
+  assert.ok(g.projectiles.length > 0, 'still airborne');
+  const first = g.secondsToImpact(g.projectiles[0]);
+  assert.ok(Number.isFinite(first) && first > 0, 'an airborne shell has an impact ahead of it');
+
+  h.advance(300);
+  assert.ok(g.projectiles.length > 0, 'still airborne');
+  const later = g.secondsToImpact(g.projectiles[0]);
+  assert.ok(later < first, 'and it counts down');
+  assert.ok(Math.abs((first - later) - 0.3) < 0.15, 'roughly in step with the clock');
+});
+
+test('every weapon has its own flight sound, and split warheads theirs', () => {
+  const { g } = loadFlat();
+  const fields = ['pitch', 'spin', 'tumble', 'shriek', 'rush', 'level'];
+
+  for (const key of Object.keys(g.WEAPONS)) {
+    assert.ok(g.FLIGHT[key], `${key} needs a FLIGHT profile of its own`);
+    const fl = g.flightOf({ weapon: key });
+    for (const f of fields) assert.ok(Number.isFinite(fl[f]) && fl[f] > 0, `${key}.${f}`);
+  }
+  assert.equal(g.flightOf({ weapon: 'nonsense' }), g.FLIGHT.standard, 'an unknown weapon falls back');
+  assert.equal(g.flightOf({ weapon: 'mirv', split: true }), g.FLIGHT.warhead,
+    'a split warhead sounds like a warhead');
+  assert.equal(g.flightOf({ weapon: 'mirv' }), g.FLIGHT.mirv, 'and the bus before it splits does not');
+  assert.ok(g.FLIGHT.big.pitch < g.FLIGHT.standard.pitch, 'a heavy bomb whistles lower');
+  assert.ok(g.FLIGHT.warhead.pitch > g.FLIGHT.standard.pitch, 'and a warhead higher');
 });
 
 test('a full shot leaves nothing sounding', () => {
