@@ -21,12 +21,14 @@ test('every voice is a no-op rather than a throw when audio is unavailable', () 
   g.Sound.fire(50);
   for (let seat = 0; seat < 4; seat++) g.Sound.fire(80, seat, seat / 3); // every reload signature
   g.Sound.explode(26);
+  g.Sound.explode(26, 0.1);
   g.Sound.destroyed();
+  g.Sound.destroyed(0.9);
   g.Sound.tick();
-  g.Sound.rotor(true, false);
-  g.Sound.motor(true);
-  g.Sound.rumble(true, 0.5);
-  g.Sound.whistle(true, 0.8);
+  g.Sound.rotor(true, false, 0.2);
+  g.Sound.motor(true, 0.4);
+  g.Sound.rumble(true, 0.5, 0.6);
+  g.Sound.whistle(true, 0.8, 0.8);
   g.Sound.stopAll();
   g.updateSoundLoops();
 
@@ -143,4 +145,15 @@ test('the level slider is the mute: zero is off, anything above is on', () => {
   g.el.sfxSlider.dispatch('change'); // the preview tick must not throw without audio
   g.setSfxLevel(7);
   assert.equal(g.sfxLevel, 1, 'the level is clamped');
+});
+
+test('screen position maps to a stereo position short of hard left and right', () => {
+  const { g } = loadFlat();
+
+  assert.equal(g.panOf(0.5), 0, 'the middle is centred');
+  assert.equal(g.panOf(0), -0.75);
+  assert.equal(g.panOf(1), 0.75);
+  assert.equal(g.panOf(-3), -0.75, 'off the left edge clamps');
+  assert.equal(g.panOf(9), 0.75, 'and off the right');
+  assert.equal(g.panOf(undefined), 0, 'no position is centred, not NaN');
 });

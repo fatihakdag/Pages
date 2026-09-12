@@ -1408,8 +1408,39 @@
       panners[i] = ctx.createStereoPanner();
       panners[i].connect(bus);
     }
-    panners[i].pan.setValueAtTime(Math.max(-1, Math.min(1, x01 * 2 - 1)) * 0.75, ctx.currentTime);
+    panners[i].pan.setValueAtTime(panOf(x01), ctx.currentTime);
     return panners[i];
+  }
+
+  // Screen position to stereo position: 0 is the left edge, 1 the right, and
+  // the edges stop short of hard left/right (see gunPanner).
+  function panOf(x01) {
+    return Number.isFinite(x01) ? Math.max(-1, Math.min(1, x01 * 2 - 1)) * 0.75 : 0;
+  }
+
+  // Steers a sustained sound after the thing making it. A glide rather than a
+  // step, or a fast shell zippers across the field once a frame.
+  function panLoop(l, x01) {
+    if (l && l.pan && audio && Number.isFinite(x01)) {
+      l.pan.pan.setTargetAtTime(panOf(x01), audio.currentTime, 0.05);
+    }
+  }
+
+  // Blasts do not move, but they do overlap — a cluster drops several at once.
+  // Rather than a panner per blast, to be torn down after its tail, there is a
+  // fixed row of them across the field and each blast plays through its zone's.
+  const ZONES = 9;
+  const zonePanners = [];
+  function zonePanner(ctx, x01) {
+    const bus = blastBus(ctx);
+    if (!ctx.createStereoPanner || !Number.isFinite(x01)) return bus;
+    const z = Math.round(Math.max(0, Math.min(1, x01)) * (ZONES - 1));
+    if (!zonePanners[z]) {
+      zonePanners[z] = ctx.createStereoPanner();
+      zonePanners[z].pan.value = panOf(z / (ZONES - 1));
+      zonePanners[z].connect(bus);
+    }
+    return zonePanners[z];
   }
 
   // Each seat's gun reloads with its own sound, heard once the report has
@@ -1560,8 +1591,13 @@
     if (loops.has(name)) return loops.get(name);
     const ctx = audioCtx();
     if (!ctx || !soundOn) return null;
-    const l = build(ctx);
-    if (l) loops.set(name, l);
+    // Every sustained sound is something moving, so each gets its own panner,
+    // steered from the frame loop by panLoop(). build() plays into it.
+    const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    if (pan) pan.connect(master);
+    const l = build(ctx, pan || master);
+    if (l) { l.pan = pan; loops.set(name, l); }
+    else if (pan) pan.disconnect();
     return l;
   }
 
@@ -1569,7 +1605,10 @@
     const l = loops.get(name);
     if (!l) return;
     loops.delete(name);
-    const release = () => { try { l.out.disconnect(); } catch (e) { /* already torn down */ } };
+    const release = () => {
+      try { l.out.disconnect(); } catch (e) { /* already torn down */ }
+      try { if (l.pan) l.pan.disconnect(); } catch (e) { /* already torn down */ }
+    };
     try {
       // Stopping a running oscillator dead leaves a click, so every loop is
       // faded out over a few milliseconds and only then torn down.
@@ -1647,10 +1686,10 @@
     // through the blast bus's reverb. The rumble layers are brown noise: white
     // noise lowpassed that far passes almost nothing, which is what left the
     // old boom sounding thin however it was tuned.
-    explode(radius) {
+    explode(radius, x01) {
       const ctx = audioCtx();
       if (!ctx || !soundOn) return;
-      const dest = blastBus(ctx);
+      const dest = zonePanner(ctx, x01);
       const r = Math.max(8, radius);
       const big = Math.min(1, r / 74);                 // 74 is the heli crash blast
 
@@ -1678,10 +1717,10 @@
 
     // A tank going up: the hit is already playing, this is its ammunition
     // cooking off a beat later — a second, deeper blast and rounds popping.
-    destroyed() {
+    destroyed(x01) {
       const ctx = audioCtx();
       if (!ctx || !soundOn) return;
-      const dest = blastBus(ctx);
+      const dest = zonePanner(ctx, x01);
       toneHit({ when: 0.18, dur: 1.0, f0: 62, f1: 24, gain: 0.75, attack: 0.004, dest });
       noiseBurst({ brown: true, when: 0.18, dur: 1.7, freq: 900, sweepTo: 130, q: 0.5,
                    gain: 0.8, attack: 0.004, dest });
@@ -1697,10 +1736,10 @@
 
     // Rotor chop: a noise bed whose gain is swung by a low-frequency
     // oscillator. Pitch drops and the chop slows as the wreck falls.
-    rotor(on, falling) {
+    rotor(on, falling, x01) {
       if (!on) { stopLoop('rotor'); return; }
-      const l = startLoop('rotor', (ctx) => {
-        const bed = loopBed(ctx, { freq: 420, q: 1.2, gain: 0.0001, rate: 0.8 });
+      const l = startLoop('rotor', (ctx, dest) => {
+        const bed = loopBed(ctx, { freq: 420, q: 1.2, gain: 0.0001, rate: 0.8, dest });
         const lfo = ctx.createOscillator();
         const lfoGain = ctx.createGain();
         lfo.frequency.value = 15;
@@ -1715,19 +1754,21 @@
       });
       if (l && l.lfo) l.lfo.frequency.value = falling ? 7 : 15;
       if (l) l.filt.frequency.value = falling ? 240 : 420;
+      panLoop(l, x01);
     },
 
     // Rocket motor, for as long as the burn lasts.
-    motor(on) {
+    motor(on, x01) {
       if (!on) { stopLoop('motor'); return; }
-      startLoop('motor', (ctx) => loopBed(ctx, { freq: 1100, q: 0.8, gain: 0.14, type: 'bandpass', rate: 1.6 }));
+      panLoop(startLoop('motor', (ctx, dest) =>
+        loopBed(ctx, { freq: 1100, q: 0.8, gain: 0.14, type: 'bandpass', rate: 1.6, dest })), x01);
     },
 
     // The shell's flight. Pitch follows how fast it is rising or falling, so a
     // shot climbs away, levels at the top of its arc and comes down in the drop
     // that makes the boom land — the sound is the trajectory, which is only
     // possible because it is generated rather than played back.
-    whistle(on, pitch01) {
+    whistle(on, pitch01, x01) {
       if (!on) { stopLoop('whistle'); return; }
       // Both earlier versions were half the sound. A clean sine was a person
       // whistling; filtered noise alone was wind. An incoming shell is both: a
@@ -1736,14 +1777,14 @@
       // a real shriek wavers; a slow random wobble on their pitch, so it is
       // never a held note; and a band of noise riding the same pitch for the
       // rush. It gets louder as the shell comes down, which is the dread of it.
-      const l = startLoop('whistle', (ctx) => {
+      const l = startLoop('whistle', (ctx, dest) => {
         const t = ctx.currentTime;
         const out = ctx.createGain();            // stopLoop fades this one
         out.gain.setValueAtTime(0.0001, t);
         out.gain.exponentialRampToValueAtTime(1, t + 0.15);
         const level = ctx.createGain();          // the approach, set per frame
         level.gain.value = 0.12;
-        level.connect(out); out.connect(master);
+        level.connect(out); out.connect(dest);
 
         const osc = ctx.createOscillator(), osc2 = ctx.createOscillator();
         osc.frequency.value = 1000; osc2.frequency.value = 1007;
@@ -1791,15 +1832,17 @@
         l.osc2.frequency.setTargetAtTime(f * 1.007, now, 0.05);
         l.filt.frequency.setTargetAtTime(f, now, 0.05);
         l.level.gain.setTargetAtTime(0.07 + (1 - p) * 0.2, now, 0.12);
+        panLoop(l, x01);
       }
     },
 
     // Rolling mine: a low rumble that tracks how fast it is actually moving,
     // so it fades out as the mine stalls.
-    rumble(on, speed01) {
+    rumble(on, speed01, x01) {
       if (!on) { stopLoop('rumble'); return; }
-      const l = startLoop('rumble', (ctx) => loopBed(ctx, { freq: 220, q: 1.5, gain: 0.02, rate: 0.4 }));
+      const l = startLoop('rumble', (ctx, dest) => loopBed(ctx, { freq: 220, q: 1.5, gain: 0.02, rate: 0.4, dest }));
       if (l) l.gain.gain.value = 0.02 + Math.max(0, Math.min(1, speed01)) * 0.13;
+      panLoop(l, x01);
     }
   };
 
@@ -1873,25 +1916,30 @@
   // with a sustained sound.
   function updateSoundLoops() {
     if (!soundAvailable() || !soundOn) return;
-    Sound.rotor(!!heli, !!(heli && heli.falling));
-    let burning = false, rolling = 0;
-    let flying = false, fall = 0;
+    // Each sustained sound also carries where its source is, so it pans with it.
+    Sound.rotor(!!heli, !!(heli && heli.falling), heli ? heli.x / W : 0.5);
+    let burning = false, burnX = 0.5, rolling = 0, rollX = 0.5;
+    let flying = false, fall = 0, flyX = 0.5;
     for (const p of projectiles) {
-      if (p.burnLeft > 0) burning = true;
-      if (p.rolling) { rolling = Math.max(rolling, Math.abs(p.vx) / (300 * physScale)); continue; }
+      if (p.burnLeft > 0) { burning = true; burnX = p.x / W; }
+      if (p.rolling) {
+        const speed = Math.abs(p.vx) / (300 * physScale);
+        if (speed >= rolling) { rolling = speed; rollX = p.x / W; }
+        continue;
+      }
       // A shell under power has its motor instead, and the first moments belong
       // to the muzzle blast — the whistle would only muddy it.
       if (p.burnLeft > 0 || (p.age || 0) < 0.12) continue;
       // With a MIRV in the air this picks the warhead nearest its impact, so
       // three splitting warheads sing one descending note rather than a chord.
-      if (!flying || p.vy > fall) fall = p.vy;
+      if (!flying || p.vy > fall) { fall = p.vy; flyX = p.x / W; }
       flying = true;
     }
-    Sound.motor(burning);
-    Sound.rumble(rolling > 0, rolling);
+    Sound.motor(burning, burnX);
+    Sound.rumble(rolling > 0, rolling, rollX);
     // vy runs negative climbing and positive falling, so this maps a rising
     // shell high and a falling one low.
-    Sound.whistle(flying, 0.5 - fall / (1040 * physScale));
+    Sound.whistle(flying, 0.5 - fall / (1040 * physScale), flyX);
   }
 
   // ---------- Game state ----------
@@ -2282,7 +2330,7 @@
         const falloff = 1 - dist / w.radius;
         const dmg = w.damageMax * falloff;
         t.hp -= dmg;
-        if (t.hp <= 0) { t.hp = 0; t.alive = false; Sound.destroyed(); }
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; Sound.destroyed(t.x / W); }
       }
     }
     craterAt(px, py, w.radius);
@@ -2290,7 +2338,7 @@
   }
 
   function spawnExplosionFx(x, y, radius, color) {
-    Sound.explode(radius); // the one place every blast in the game passes through
+    Sound.explode(radius, x / W); // the one place every blast in the game passes through
     explosions.push({ x, y, r: 4, maxR: radius * 1.15, t: 0, color });
     const count = Math.round(radius * 0.9);
     for (let i = 0; i < count; i++) {
@@ -3554,7 +3602,7 @@
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     SOUND, Sound, setSoundOn, stopAllSound, updateSoundLoops, soundAvailable,
-    setSfxLevel, sliderToLevel, levelToSlider, RELOADS, gunPanner, audioCtx,
+    setSfxLevel, sliderToLevel, levelToSlider, RELOADS, gunPanner, zonePanner, panOf, audioCtx,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner, ammoReadout,
