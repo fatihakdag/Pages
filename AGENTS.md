@@ -112,7 +112,9 @@ a document never is.
   backstop. A browser with no Web Audio falls through to silence. The HUD's
   SFX slider is the only sound control: it sets the master level (squared,
   stored as `barrage.sfxLevel`) and zero is mute. `SOUND.volume` is only its
-  default.
+  default. Each seat's gun has its own reload sound after the report
+  (`RELOADS`), and shots pan to the tank's position (`gunPanner`), so you can
+  hear who fired.
 - Bump `BUILD` (the top of the game script) when shipping a visible change; it
   renders in the HUD.
 - Expose anything worth testing on `window.__BARRAGE_TEST__` at the bottom of the

@@ -1393,6 +1393,73 @@
     return shaper;
   }
 
+  // One stereo panner per seat, built once and moved per shot, so a gun is
+  // heard from where its tank sits. Per seat rather than per shot, because a
+  // panner is a node that would otherwise need tearing down after the longest
+  // tail, and one seat's shots never overlap. Kept short of hard left/right,
+  // which tires on headphones; a mono phone speaker just sums it back, which is
+  // why the reload signatures below carry the identity rather than this.
+  const panners = [];
+  function gunPanner(ctx, seat, x01) {
+    const bus = blastBus(ctx);
+    if (!ctx.createStereoPanner || !Number.isFinite(x01)) return bus;
+    const i = (seat || 0) % 4;
+    if (!panners[i]) {
+      panners[i] = ctx.createStereoPanner();
+      panners[i].connect(bus);
+    }
+    panners[i].pan.setValueAtTime(Math.max(-1, Math.min(1, x01 * 2 - 1)) * 0.75, ctx.currentTime);
+    return panners[i];
+  }
+
+  // Each seat's gun reloads with its own sound, heard once the report has
+  // cleared: that is what tells you who fired, on any speaker and whatever the
+  // weapon. They follow the seat, not the weapon.
+  const RELOAD_AT = 0.38; // seconds after the shot
+  const RELOADS = [
+    // P1: a heavy steel breech block. The drag of it sliding home, a dead
+    // clunk whose ring the sheer mass chokes off, then the lever latching.
+    (dest) => {
+      const T = RELOAD_AT;
+      noiseBurst({ when: T, dur: 0.17, type: 'bandpass', freq: 800, sweepTo: 1500, q: 1.8,
+                   gain: 0.14, attack: 0.1, dest });
+      noiseBurst({ brown: true, when: T + 0.17, dur: 0.14, freq: 320, q: 0.7, gain: 0.8, attack: 0.001, dest });
+      metalHit({ when: T + 0.17, strike: 0.008, gain: 1,
+                 modes: [[190, 1, 10], [505, 0.8, 14], [1130, 0.55, 18], [2080, 0.3, 20]], dest });
+      metalHit({ when: T + 0.33, strike: 0.004, gain: 0.5,
+                 modes: [[1720, 1, 30], [3080, 0.6, 34], [4700, 0.3, 30]], dest });
+    },
+    // P2: hydraulics — a hiss falling as the pressure bleeds off, then a thunk
+    (dest) => {
+      noiseBurst({ when: RELOAD_AT, dur: 0.5, type: 'bandpass', freq: 4200, sweepTo: 1600, q: 1.5,
+                   gain: 0.2, attack: 0.05, dest });
+      toneHit({ when: RELOAD_AT + 0.5, dur: 0.12, f0: 160, f1: 90, gain: 0.3, attack: 0.002, dest });
+    },
+    // P3: the big brass casing thrown out onto the ground. A clang that keeps
+    // ringing, because a free brass tube barely damps; smaller bounces, each a
+    // touch off pitch as it turns over; then a short gritty roll.
+    (dest) => {
+      const T = RELOAD_AT;
+      const tube = [[640, 1, 260], [1590, 0.75, 320], [2870, 0.5, 340], [4310, 0.3, 320]];
+      noiseBurst({ brown: true, when: T, dur: 0.07, freq: 500, q: 0.7, gain: 0.6, attack: 0.001, dest });
+      // Levels measured off an offline render to sit with the breech and the
+      // hydraulics; at unity the clang was no louder than the ratchet clicks.
+      const bounces = [[0, 1.6, 1], [0.26, 0.72, 1.012], [0.43, 0.4, 0.994], [0.54, 0.2, 1.006]];
+      for (const [dt, g, detune] of bounces) {
+        metalHit({ when: T + dt, strike: 0.006, gain: g, detune, modes: tube, dest });
+      }
+      noiseBurst({ when: T + 0.6, dur: 0.3, type: 'bandpass', freq: 2600, q: 2.5,
+                   gain: 0.05, attack: 0.03, dest });
+    },
+    // P4: a ratchet — quick even clicks as the next round is cranked in
+    (dest) => {
+      for (let i = 0; i < 6; i++) {
+        noiseBurst({ when: RELOAD_AT + i * 0.05, dur: 0.014, type: 'bandpass', freq: 3200, q: 5,
+                     gain: 0.45, attack: 0.0006, dest });
+      }
+    }
+  ];
+
   // A shaped burst of the noise buffer: the workhorse behind every impact.
   function noiseBurst(o) {
     const ctx = audioCtx();
@@ -1443,6 +1510,47 @@
     osc.stop(t + dur + 0.03);
     trackVoice(osc, g);
     return g;
+  }
+
+  // Struck metal. A sine is a beep however it is enveloped, which is what the
+  // first breech and casing sounds were. Metal is a short strike of noise
+  // ringing a handful of resonances that are not harmonics of one another,
+  // each dying at its own rate — so this is that: a click of noise into
+  // parallel high-Q bandpasses. modes are [freq, level, Q]; Q sets the ring
+  // (a heavy damped block is low, a free brass tube is very high).
+  function metalHit(o) {
+    const ctx = audioCtx();
+    if (!ctx || !soundOn) return null;
+    const t = ctx.currentTime + (o.when || 0);
+    const strikeLen = o.strike || 0.01;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    src.loop = true;
+    const strike = ctx.createGain();
+    strike.gain.setValueAtTime(0.0001, t);
+    strike.gain.exponentialRampToValueAtTime(1, t + 0.0008);
+    strike.gain.exponentialRampToValueAtTime(0.0001, t + strikeLen);
+    src.connect(strike);
+    const out = ctx.createGain();
+    out.gain.value = o.gain || 1;
+    out.connect(o.dest || master);
+    let ring = 0;
+    for (const [f, level, q] of o.modes) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f * (o.detune || 1);
+      bp.Q.value = q;
+      const g = ctx.createGain();
+      g.gain.value = level;
+      strike.connect(bp); bp.connect(g); g.connect(out);
+      ring = Math.max(ring, q / (Math.PI * f)); // a resonator's decay constant
+    }
+    src.start(t, Math.random() * SOUND.noiseSeconds * 0.5);
+    // Seven decay constants is past -60dB; the source stopping is what
+    // releases the nodes, so it has to outlast the ring, not the strike.
+    src.stop(t + strikeLen + ring * 7 + 0.05);
+    trackVoice(src, out);
+    return out;
   }
 
   // ---- sustained sounds ----
@@ -1515,10 +1623,12 @@
     // Gun report. Power sets how much charge went in, so a lob is a pop and a
     // flat-out shot is a thump you feel, with the echo coming back off the
     // ground after it.
-    fire(power) {
+    // Seat picks the reload signature and x01 (0 left edge, 1 right) the pan.
+    fire(power, seat, x01) {
       const ctx = audioCtx();
       if (!ctx || !soundOn) return;
-      const dest = blastBus(ctx);
+      const dest = gunPanner(ctx, seat, x01);
+      RELOADS[(seat || 0) % RELOADS.length](dest);
       const p = Math.max(0, Math.min(100, power)) / 100;
       // The supersonic crack of the charge leaving the barrel.
       noiseBurst({ dur: 0.07, freq: 1600, q: 0.4, type: 'highpass', gain: 0.45, attack: 0.0006, dest });
@@ -2151,7 +2261,7 @@
       trail: []
     }];
     shotExploded = false;
-    Sound.fire(shooter.power);
+    Sound.fire(shooter.power, currentPlayer, shooter.x / W);
     state = 'FIRING';
     updateHUD();
   }
@@ -3444,7 +3554,7 @@
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     SOUND, Sound, setSoundOn, stopAllSound, updateSoundLoops, soundAvailable,
-    setSfxLevel, sliderToLevel, levelToSlider,
+    setSfxLevel, sliderToLevel, levelToSlider, RELOADS, gunPanner, audioCtx,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner, ammoReadout,

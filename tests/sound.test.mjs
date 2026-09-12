@@ -19,6 +19,7 @@ test('every voice is a no-op rather than a throw when audio is unavailable', () 
 
   // If any of these throw, they take the frame loop down with them.
   g.Sound.fire(50);
+  for (let seat = 0; seat < 4; seat++) g.Sound.fire(80, seat, seat / 3); // every reload signature
   g.Sound.explode(26);
   g.Sound.destroyed();
   g.Sound.tick();
