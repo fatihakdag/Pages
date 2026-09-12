@@ -25,11 +25,13 @@ test('every voice is a no-op rather than a throw when audio is unavailable', () 
   g.Sound.rotor(true, false);
   g.Sound.motor(true);
   g.Sound.rumble(true, 0.5);
+  g.Sound.whistle(true, 0.8);
   g.Sound.stopAll();
   g.updateSoundLoops();
 
   assert.equal(g.Sound.voices(), 0, 'nothing can sound without a context');
   assert.equal(g.Sound.loops(), 0, 'and nothing sustained can be left running');
+  assert.deepEqual(g.Sound.loopNames(), []);
 });
 
 test('muting is safe before a context has ever been built', () => {
@@ -39,6 +41,23 @@ test('muting is safe before a context has ever been built', () => {
   assert.equal(g.Sound.muted(), true);
   g.setSoundOn(true);
   assert.equal(g.Sound.muted(), false);
+});
+
+test('a shell in flight drives the whistle without throwing', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.placeTanksAt([200, 700]);
+  g.currentPlayer = 0;
+  g.tanks[0].angle = 50;
+  g.tanks[0].power = 70;
+  g.fire();
+
+  // Mid-flight: updateSoundLoops reads vy off the live shell every frame, so a
+  // shell that has left the barrel must not upset it.
+  h.advance(300);
+  assert.ok(g.projectiles.length > 0, 'still airborne');
+  g.updateSoundLoops();
+  assert.equal(g.Sound.loops(), 0, 'silent here, but it must not have thrown');
 });
 
 test('a full shot leaves nothing sounding', () => {

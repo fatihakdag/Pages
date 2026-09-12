@@ -723,7 +723,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v43';
+  const BUILD = 'v44';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1350,8 +1350,19 @@
     const l = loops.get(name);
     if (!l) return;
     loops.delete(name);
-    try { l.src.stop(); } catch (e) { /* never started */ }
-    try { l.out.disconnect(); } catch (e) { /* already torn down */ }
+    const release = () => { try { l.out.disconnect(); } catch (e) { /* already torn down */ } };
+    try {
+      // Stopping a running oscillator dead leaves a click, so every loop is
+      // faded out over a few milliseconds and only then torn down.
+      const t = audio.currentTime;
+      l.gain.gain.cancelScheduledValues(t);
+      l.gain.gain.setValueAtTime(Math.max(0.0001, l.gain.gain.value), t);
+      l.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      l.src.onended = release;
+      l.src.stop(t + 0.06);
+    } catch (e) {
+      release();
+    }
   }
 
   function stopAllSound() {
@@ -1376,11 +1387,26 @@
     return { src, filt, gain: g, out: g };
   }
 
+  // A held tone, the counterpart to loopBed for the one sustained sound that is
+  // pitched rather than noisy.
+  function toneBed(ctx, o) {
+    const osc = ctx.createOscillator();
+    osc.type = o.type || 'sine';
+    osc.frequency.value = o.f || 700;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(o.gain || 0.07, ctx.currentTime + 0.09);
+    osc.connect(g); g.connect(master);
+    osc.start();
+    return { src: osc, osc, gain: g, out: g };
+  }
+
   // ---- the game's voices ----
   const Sound = {
     available: soundAvailable,
     voices: () => liveVoices,
     loops: () => loops.size,
+    loopNames: () => Array.from(loops.keys()), // which sustained sounds are live
     muted: () => !soundOn,
     stopAll: stopAllSound,
 
@@ -1441,6 +1467,21 @@
       startLoop('motor', (ctx) => loopBed(ctx, { freq: 1100, q: 0.8, gain: 0.14, type: 'bandpass', rate: 1.6 }));
     },
 
+    // The shell's flight. Pitch follows how fast it is rising or falling, so a
+    // shot climbs away, levels at the top of its arc and comes down in the drop
+    // that makes the boom land — the sound is the trajectory, which is only
+    // possible because it is generated rather than played back.
+    whistle(on, pitch01) {
+      if (!on) { stopLoop('whistle'); return; }
+      const l = startLoop('whistle', (ctx) => toneBed(ctx, { f: 700, gain: 0.055, type: 'sine' }));
+      if (l && audio) {
+        const f = 300 + Math.max(0, Math.min(1, pitch01)) * 900;
+        // setTargetAtTime glides rather than steps, so the pitch slides with
+        // the shell instead of zippering once a frame.
+        l.osc.frequency.setTargetAtTime(f, audio.currentTime, 0.04);
+      }
+    },
+
     // Rolling mine: a low rumble that tracks how fast it is actually moving,
     // so it fades out as the mine stalls.
     rumble(on, speed01) {
@@ -1487,12 +1528,23 @@
     if (!soundAvailable() || !soundOn) return;
     Sound.rotor(!!heli, !!(heli && heli.falling));
     let burning = false, rolling = 0;
+    let flying = false, fall = 0;
     for (const p of projectiles) {
       if (p.burnLeft > 0) burning = true;
-      if (p.rolling) rolling = Math.max(rolling, Math.abs(p.vx) / (300 * physScale));
+      if (p.rolling) { rolling = Math.max(rolling, Math.abs(p.vx) / (300 * physScale)); continue; }
+      // A shell under power has its motor instead, and the first moments belong
+      // to the muzzle blast — the whistle would only muddy it.
+      if (p.burnLeft > 0 || (p.age || 0) < 0.12) continue;
+      // With a MIRV in the air this picks the warhead nearest its impact, so
+      // three splitting warheads sing one descending note rather than a chord.
+      if (!flying || p.vy > fall) fall = p.vy;
+      flying = true;
     }
     Sound.motor(burning);
     Sound.rumble(rolling > 0, rolling);
+    // vy runs negative climbing and positive falling, so this maps a rising
+    // shell high and a falling one low.
+    Sound.whistle(flying, 0.5 - fall / (1040 * physScale));
   }
 
   // ---------- Game state ----------
