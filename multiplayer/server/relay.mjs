@@ -21,7 +21,8 @@ import { WebSocketServer } from 'ws';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-export const PROTOCOL = 1;
+// 2: `time`, and the game's `turn` carries its result.
+export const PROTOCOL = 2;
 
 // Room codes are read aloud and typed on phones, so the alphabet drops the
 // characters people confuse: O/0, I/1, S/5.
@@ -128,6 +129,13 @@ export function createRelay({ serveGame = process.env.SERVE_GAME !== '0',
       try { m = JSON.parse(raw.toString()); }
       catch { return fail('BAD_JSON', 'not JSON'); }
       if (!m || typeof m.t !== 'string') return fail('BAD_JSON', 'no type');
+
+      // The room's shared clock: the game flies its helicopter on it. The sample
+      // is echoed so the client can take off half the round trip.
+      if (m.t === 'time') {
+        send({ t: 'time', c: m.c, s: Date.now() });
+        return;
+      }
 
       if (m.t === 'join') {
         if (m.v !== PROTOCOL) {

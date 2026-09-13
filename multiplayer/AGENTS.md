@@ -150,6 +150,7 @@ copy of the physics to keep in sync.
 | `join` — create a room, or join a code | `joined` — code, your id, host, who is already here |
 | `msg` — payload relayed verbatim | `peer` / `gone` — arrivals and departures, host handed on |
 | `bye` | `msg` — `{from, d}` |
+| `time` — a clock sample `{c}`, joined or not | `time` — `{c, s}`: the sample back, beside the relay's clock |
 | | `err` — `NO_ROOM`, `ROOM_FULL`, `BAD_VERSION`, `RATE`, … |
 
 - Bump `PROTOCOL` when the message shape changes; clients are checked on join
@@ -183,40 +184,67 @@ room to a machine with `fly-replay`.
 
 ## The client side
 
-`// ---------- Online ----------` in `index.html`. A match carries two messages
-per turn:
+`// ---------- Online ----------` in `index.html`, with the shot machinery under
+`// ---------- Shots: resolved once, played everywhere ----------`.
 
-- **`turn`** — `{seat, angle, power, weapon}`, sent by `fire()` *before* the
-  shell is simulated, so the other client watches the same flight rather than
-  having the result appear.
-- **`sync`** — the full state, sent from `nextTurn()` by the seat that just
-  played. This is what actually decides the outcome: small divergences in the
-  replay are erased every turn instead of accumulating, so the clients cannot
-  drift apart. A `sync` that lands mid-flight is held in `online.pendingSync`
-  and applied when the turn resolves — snapping immediately would cut the shot
-  off on screen.
+**A shot is resolved once and played everywhere.** On the client that drives
+the seat, `fire()` first runs the whole shot to the end on a copy of the world
+(`resolveShot()`: `saveWorld`, fixed steps, `advanceTurn`, `restoreWorld`) —
+flight, blasts, craters, damage, a helicopter brought down and where its wreck
+lands, the turn handed on and the new wind. Then one message goes out:
 
-Both carry `turn`, the round's count of resolved turns (`turnSeq`), because
-screens do not finish a shot at the same moment. When the next player's screen
-lands a shot first and they fire again, the shooter's `sync` for the turn
-before arrives *after* a later crater: applying it put the old ground back and
-handed the turn back to someone who had already fired. So `netApplyState()`
-drops a snapshot older than the turn this client is on (`start` always
-applies), and a `turn` that arrives while a shot is still landing is held in
-`online.pendingTurn` and replayed by `nextTurn()` rather than dropped.
+- **`turn`** — `{seat, angle, power, weapon, ai, turn, seed, wind, heli, result}`.
+  `result` is the snapshot the shot leaves behind. Every screen, the shooter's
+  too, replays the shot from the inputs (`beginShot()`) and takes `result` as
+  the board when it lands (`finishShot()`).
 
-The helicopter had the same race, worse. A shot-down wreck used to land after
-the turn had moved on, so it crashed at a different moment on each screen, and
-`heliAuthority()` (whoever's turn it is) named a different seat on each — two
-screens could both work out the crash. And the shooter's `heli` "falling" news,
-or a snapshot taken mid-fall, could reach a screen that had already crashed it
-and put it back in the sky to explode again. Now a falling wreck holds the turn
-in `EXPLODING`, so it always lands inside the shooter's turn, and every
-helicopter carries an `id`: `heliIn()` ignores news of the one this screen last
+Before this, every screen simulated a shot by its own frame times and moved the
+turn on when *its* animation ended, while the shooter's `sync` arrived whenever
+it arrived. Screens drifted a few units apart and snapped back at each turn, and
+whenever "my animation ended" and "their result arrived" came in a different
+order on different screens, an old result undid a newer crater, or two screens
+both worked out a helicopter crash. Now the answer is known before anyone
+watches, and nothing about the outcome depends on which screen animates fastest.
+
+What makes a replay land exactly on `result` (there are tests for each):
+
+- **Fixed steps.** `step()` accumulates frame time and runs `simStep(SIM_DT)`;
+  only sparks, smoke, sound and the camera use the frame's own `dt`. A 30fps
+  laptop and a 144Hz phone do the same arithmetic `resolveShot()` did.
+- **A seed per shot.** Chance that changes the outcome — cluster scatter, a
+  helicopter's new altitude when it turns mid-shot — draws from `simRandom`,
+  seeded from `turn.seed`. Anything cosmetic stays on `Math.random`.
+- **The same starting world.** The message carries the wind and the helicopter
+  it was fired into; terrain and tanks are the previous `result`.
+- **Nothing lands on a replay in progress.** `turn`, `heli`, `timeout` and
+  `sync` go through `netReceive()`: applied in the order sent, and only when no
+  shot is playing (`activeShot`) — otherwise queued in `online.inbox` and
+  drained by `finishShot()`. A screen a whole shot behind (one queued, another
+  arrives) skips to the current shot's result rather than falling further back.
+- **Quiet resolving.** Nothing is heard while `resolving` is non-zero, and
+  nothing about the helicopter is announced mid-shot (`!inShot()`).
+
+`sync` — a full snapshot — is left for turns no shot's result covers: a skip the
+turn clock called (`netPublishNext`), a crash between turns (`netPublishState`).
+Snapshots carry `turn` (`turnSeq`, the round's count of resolved turns), and
+`netApplyState()` drops one older than the turn this client is on; `start`
+always applies. A match resumed mid-shot is handed that shot's `result`, since
+the arrival has nothing to replay it from.
+
+**The helicopter flies on a shared clock.** Its state carries `t`, the moment on
+the match clock it describes, and between shots `heliFollowClock()` steps it in
+`SIM_DT` steps up to `netNow()` — so every screen shows it in the same place
+instead of each adding up its own frames. The clock is the relay's: on joining,
+a client sends three `time` samples and keeps the offset from the fastest round
+trip (`netClockSample`). Arrivals and turnarounds between shots are still
+decided by the seat holding the turn and announced (`heli`); mid-shot the
+helicopter is part of the replay. A shot-down wreck holds the turn in
+`EXPLODING` until it lands, so every screen crashes it inside the shot and
+agrees on what it did; `heliIn()` ignores news of the one this screen last
 brought down (`heliDownId`).
 
-`nextTurn()` captures `actor` before advancing, because by the time the result
-is published `currentPlayer` is already the *next* seat.
+`nextTurn()` captures `actor` before advancing, because by the time a turn with
+no shot is published `currentPlayer` is already the *next* seat.
 
 Other things worth knowing:
 
@@ -264,6 +292,14 @@ Other things worth knowing:
   (medium), not at the client's own difficulty setting — that control is hidden
   during a match, so its value is only whatever that player last chose locally,
   and a substitute's strength would otherwise depend on whose browser stood in.
+- **One stand-in per seat, and the player outranks it.** The CPU plays a seat on
+  the client covering it (`netActsForSeat`), never on the seat's own client —
+  that is where its player comes back, and a CPU firing there too sent two shots
+  for one turn (the seat's own client stands in only if nobody else can). `ai`
+  on a shot comes from who fired it (`fire({ byAi: true })` from
+  `netPlayAiTurn`), not from whether the seat is CPU-held, so a player's click
+  hands the seat back. If the player and the stand-in still fire the same turn,
+  every screen takes the player's result (`netStandInLost`).
 - `netActsForSeat()` decides which client speaks for a seat that cannot speak
   for itself — calling its deadline, and playing it once the CPU has it. It is
   the lowest living seat that is still a real player and is not this one:
@@ -297,10 +333,11 @@ Other things worth knowing:
   its own random number while the physics quietly used the right one. Every test
   compared `g.wind` and passed. When state and display can disagree, test the
   display.
-- **Wind is rolled only by the client publishing the turn.** Everyone else keeps
-  the wind they know until the snapshot arrives. Rolling it locally put a
-  different figure on every screen for as long as the message took, and anyone
-  who started aiming in that window aimed against a wind that existed nowhere.
+- **Wind is rolled only by the client that resolves the turn.** It travels in the
+  shot's `result`, so every screen shows it the moment the shot lands. Rolling it
+  locally put a different figure on every screen for as long as a message took,
+  and anyone who started aiming in that window aimed against a wind that existed
+  nowhere.
 - **A turn resolved on somebody else's behalf still has to be published.**
   `netPublishTurn()` is gated on driving the seat, so a skip called by the turn
   clock published nothing — the caller advanced and everyone else did not,
