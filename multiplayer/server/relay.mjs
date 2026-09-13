@@ -22,7 +22,8 @@ import { WebSocketServer } from 'ws';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // 2: `time`, and the game's `turn` carries its result.
-export const PROTOCOL = 2;
+// 3: the game sends the helicopter as its route.
+export const PROTOCOL = 3;
 
 // Room codes are read aloud and typed on phones, so the alphabet drops the
 // characters people confuse: O/0, I/1, S/5.

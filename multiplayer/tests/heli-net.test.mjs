@@ -4,7 +4,7 @@
 // other could not see.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { load, loadFlat } from './harness.mjs';
+import { load, loadFlat, routeHeli } from './harness.mjs';
 
 function fakeSocket() {
   const listeners = {};
@@ -75,59 +75,57 @@ test('only the player whose turn it is brings one in', () => {
 });
 
 test('the whole helicopter travels, not a sketch of it', () => {
-  const { host, guest, hs, gs } = liveMatch();
-  host.g.heli = {
-    x: 321, y: 150, dir: -1, speed: 88,
-    vy: 42, falling: true, spin: 1.75, legs: 2, seen: new Set([0, 1])
-  };
+  const { host, guest, gs } = liveMatch();
+  host.g.heli = host.g.heliIn(routeHeli(host.g, { x: 321, y: 150, dir: -1, speed: 88, legsTotal: 3 }));
   host.g.heliTimer = 17.5;
 
-  const snap = JSON.parse(JSON.stringify(host.g.netSnapshot()));
+  let snap = JSON.parse(JSON.stringify(host.g.netSnapshot()));
   gs.deliver({ t: 'msg', from: 1, d: { k: 'sync', state: snap } });
-
   const h = guest.g.heli;
   assert.ok(h, 'it arrived');
-  for (const f of ['x', 'y', 'dir', 'speed', 'vy', 'falling', 'spin', 'legs']) {
+  for (const f of ['id', 't0', 'fromLeft', 'speed', 'legsTotal', 'x', 'y', 'dir', 'legs']) {
     assert.equal(h[f], host.g.heli[f], `${f} survived the trip`);
   }
+  assert.deepEqual(h.ys, host.g.heli.ys, 'every leg’s altitude');
   assert.deepEqual([...h.seen].sort(), [0, 1], 'including who has had a crack at it');
   assert.equal(guest.g.heliTimer, 17.5, 'and the countdown to the next one');
+
+  // A wreck is off its route: its own position and fall travel instead.
+  host.g.heli = { id: 9, falling: true, t: host.g.netNow(), x: 321, y: 150, dir: -1, speed: 88,
+                  vy: 42, spin: 1.75, ys: [], seen: new Set([0, 1]) };
+  snap = JSON.parse(JSON.stringify(host.g.netSnapshot()));
+  gs.deliver({ t: 'msg', from: 1, d: { k: 'sync', state: snap } });
+  for (const f of ['x', 'y', 'dir', 'speed', 'vy', 'spin', 'falling', 't']) {
+    assert.equal(guest.g.heli[f], host.g.heli[f], `the wreck's ${f} survived the trip`);
+  }
 });
 
 test('a stale helicopter is replaced, not merged over', () => {
-  const { guest, gs } = liveMatch();
-  guest.g.heli = { x: 10, y: 20, dir: 1, speed: 50, vy: 99, falling: true, spin: 5, legs: 4, seen: new Set([1]) };
+  const { guest } = liveMatch();
+  guest.g.heli = { id: 2, x: 10, y: 20, dir: 1, speed: 50, vy: 99, falling: true, spin: 5, t: guest.g.netNow(), ys: [], seen: new Set([1]) };
 
   const fresh = guest.g.netSnapshot();
-  fresh.heli = { x: 500, y: 100, dir: -1, speed: 60, vy: 0, falling: false, spin: 0, legs: 0, seen: [] };
+  fresh.heli = routeHeli(guest.g, { x: 500, seen: [] });
   guest.g.netApplyState(JSON.parse(JSON.stringify(fresh)));
 
-  assert.equal(guest.g.heli.vy, 0, 'no leftovers from the one we had');
+  assert.equal(guest.g.heli.falling, false, 'no leftovers from the one we had');
   assert.equal(guest.g.heli.legs, 0);
-  assert.equal(guest.g.heli.falling, false);
+  assert.ok(Math.abs(guest.g.heli.x - 500) < 1e-9);
   assert.deepEqual([...guest.g.heli.seen], []);
 });
 
-test('a helicopter that leaves is gone for both, and only once', () => {
-  const { host, guest, hs, gs } = liveMatch();
-  const airborne = {
-    x: 500, y: 120, dir: 1, speed: 400, vy: 0, falling: false, spin: 0,
-    legs: 9, seen: [0, 1]   // already flown its legs: the next edge ends it
-  };
-  const snap = host.g.netSnapshot();
-  snap.heli = airborne;
-  host.g.netApplyState(JSON.parse(JSON.stringify(snap)));
-  guest.g.netApplyState(JSON.parse(JSON.stringify(snap)));
+test('a helicopter leaves at the same moment on every screen, without a word', () => {
+  const { host, guest, gs } = liveMatch();
+  const route = routeHeli(host.g, { x: 900, speed: 400, legsTotal: 1 });   // its last leg: the edge ends it
+  host.g.heli = host.g.heliIn(route);
+  guest.g.heli = guest.g.heliIn(route);
 
-  host.advance(4000);
-  guest.advance(4000);
+  host.advance(1000);
+  guest.advance(1000);
 
-  assert.equal(host.g.heli, null, 'the seat with the turn retires it');
-  assert.ok(guest.g.heli, 'the other client keeps its copy until told');
-
-  // The sync is what removes it there.
-  guest.g.netApplyState(JSON.parse(JSON.stringify(host.g.netSnapshot())));
-  assert.equal(guest.g.heli, null);
+  assert.equal(host.g.heli, null, 'gone here');
+  assert.equal(guest.g.heli, null, 'and gone there too, with nothing sent to say so');
+  assert.deepEqual(gs.payloads('heli'), []);
 });
 
 test('summoning one on somebody else’s turn does nothing', () => {
@@ -160,19 +158,16 @@ test('a helicopter arriving mid-turn is seen at once, not at the end of it', () 
 
   gs.deliver({ t: 'msg', from: 1, d: announced[0] });
   assert.ok(guest.g.heli, 'the other player can see it now');
-  assert.equal(guest.g.heli.x, host.g.heli.x);
+  const T = host.g.netNow();
+  assert.deepEqual({ ...guest.g.heliRouteAt(guest.g.heli, T) }, { ...host.g.heliRouteAt(host.g.heli, T) },
+    'on the same route, so in the same place at any moment');
   assert.equal(guest.g.heliTimer, host.g.heliTimer);
 });
 
 test('a helicopter leaving is announced too', () => {
   const { host, guest, hs, gs } = liveMatch();
-  const airborne = {
-    x: 500, y: 120, dir: 1, speed: 400, vy: 0, falling: false, spin: 0,
-    legs: 9, seen: [0, 1]     // out of legs: the next edge retires it
-  };
-  const snap = host.g.netSnapshot();
-  snap.heli = airborne;
-  host.g.netApplyState(JSON.parse(JSON.stringify(snap)));
+  const airborne = routeHeli(host.g, { x: 900, speed: 400, legsTotal: 1 });   // out of legs: the edge retires it
+  host.g.heli = host.g.heliIn(airborne);
   gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: airborne, heliTimer: 60 } });
   assert.ok(guest.g.heli, 'both have it');
 
@@ -249,36 +244,28 @@ test('but only the seat holding the turn moves play on after a crash', () => {
   assert.ok(guest.g.explosions.length > 0, 'but the wreck is still drawn');
 });
 
-test('a helicopter turning at the edge comes back on every screen', () => {
-  const { host, guest, hs, gs } = liveMatch();
+test('a helicopter turns at the edge on every screen at once, without a message', () => {
+  const { host, guest, hs } = liveMatch();
   // One leg in, about to leave by the right-hand edge.
-  const outbound = {
-    x: host.g.W + host.g.heliSize() * 1.4, y: 140, dir: 1, speed: 300,
-    vy: 0, falling: false, spin: 0, legs: 0, seen: [0]
-  };
-  hs.deliver({ t: 'msg', from: 2, d: { k: 'heli', heli: outbound, heliTimer: 90 } });
-  host.g.heli = { ...outbound, seen: new Set(outbound.seen) };
-  gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: outbound, heliTimer: 90 } });
-  assert.equal(guest.g.heli.dir, 1, 'both have it heading right');
+  const outbound = routeHeli(host.g, { x: host.g.W + host.g.heliSize() * 1.4, y: 140, speed: 300, seen: [0] });
+  host.g.heli = host.g.heliIn(outbound);
+  guest.g.heli = guest.g.heliIn(outbound);
+  host.advance(16);
+  guest.advance(16);
+  const said = hs.payloads('heli').length;
 
-  host.advance(500);   // the owner turns it around
-  assert.ok(host.g.heli, 'it is still flying');
-  assert.equal(host.g.heli.dir, -1, 'now heading back');
-
-  // The frame loop only notices a helicopter appearing or leaving, so a
-  // turnaround has to be announced on its own — without it the guest watched
-  // this one leave and never return.
-  const said = hs.payloads('heli').slice(-1)[0];
-  assert.ok(said, 'the turn is announced');
-  assert.equal(said.heli.dir, -1);
-
-  gs.deliver({ t: 'msg', from: 1, d: said });
-  assert.equal(guest.g.heli.dir, -1, 'and the guest turns it too');
-  assert.equal(guest.g.heli.y, host.g.heli.y, 'at the same altitude');
-  assert.equal(guest.g.heli.legs, host.g.heli.legs);
+  host.advance(500);
+  guest.advance(500);
+  for (const c of [host, guest]) {
+    assert.ok(c.g.heli, 'still flying');
+    assert.equal(c.g.heli.dir, -1, 'and heading back');
+    assert.equal(c.g.heli.legs, 1);
+  }
+  assert.deepEqual({ ...guest.g.heliDrawPos() }, { ...host.g.heliDrawPos() }, 'in the same place, at the same altitude');
+  assert.equal(hs.payloads('heli').length, said, 'a turnaround is part of the route, not news');
 });
 
-test('any discrete change is announced, without anyone listing the cases', () => {
+test('any discrete change is announced, and flying along is not', () => {
   const { host, hs } = liveMatch();
   const said = () => hs.payloads('heli').length;
 
@@ -289,35 +276,25 @@ test('any discrete change is announced, without anyone listing the cases', () =>
   const afterArrival = said();
   assert.ok(afterArrival > 0, 'arrival');
 
-  // Turning at the edge: same aircraft, different heading. Pushed past the
-  // edge it is actually heading for — the check runs after the move, so an
-  // aircraft shoved off the edge behind it simply flies back in.
-  const wide = host.g.heliSize() * 1.4;
-  const wasHeading = host.g.heli.dir;
-  host.g.heli.speed = 300;
-  host.g.heli.x = wasHeading > 0 ? host.g.W + wide : -wide;
-  host.advance(300);
-  assert.ok(said() > afterArrival, 'turnaround');
-  assert.notEqual(host.g.heli && host.g.heli.dir, wasHeading, 'it really did turn');
-  const afterTurn = said();
+  // Flying along, through a turnaround: the route already says all of it.
+  host.g.heli.t0 -= (host.g.W + host.g.heliSize() * 2.3) / host.g.heli.speed;
+  const heading = host.g.heli.dir;
+  host.advance(3000);
+  assert.notEqual(host.g.heli.dir, heading, 'it turned');
+  assert.equal(said(), afterArrival, 'without a word');
+
+  // Being told how many legs it has left.
+  host.g.heli.legsTotal = 3;
+  host.advance(100);
+  assert.ok(said() > afterArrival, 'its last leg decided');
+  const afterLegs = said();
 
   // Starting to fall.
   host.g.heli.falling = true;
   host.g.heli.vy = 10;
+  host.g.heli.t = host.g.netNow();
   host.advance(100);
-  assert.ok(said() > afterTurn, 'beginning to come down');
-
-  // Ordinary flight says nothing: position is the same arithmetic on both
-  // sides, so it is not news. Settled into level flight first — putting it back
-  // into level flight is itself a change, and rightly announced.
-  host.g.heli.falling = false;
-  host.g.heli.vy = 0;
-  host.g.heli.x = host.g.W / 2;
-  host.advance(100);
-  const quiet = said();
-  host.advance(600);
-  assert.equal(said(), quiet, 'flying along is not news');
-  assert.ok(host.g.heli.x !== host.g.W / 2, 'even though it moved');
+  assert.ok(said() > afterLegs, 'beginning to come down');
 });
 
 test('a crash that ends the round is announced, including to the winner', () => {
@@ -384,7 +361,7 @@ test('a wreck that has crashed here is not put back in the sky by late news', ()
   assert.equal(guest.g.heli, null, 'nor by a snapshot of it mid-fall');
 
   // A different helicopter is a different matter.
-  const next = { ...falling, id: 8, y: 120, vy: 0, falling: false };
+  const next = routeHeli(guest.g, { id: 8, x: 500 });
   gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: next, heliTimer: 90 } });
   assert.equal(guest.g.heli && guest.g.heli.id, 8, 'the next one still arrives');
 });

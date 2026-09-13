@@ -4,7 +4,7 @@
 // protocol rather than about sockets.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { load, loadFlat } from './harness.mjs';
+import { load, loadFlat, routeHeli } from './harness.mjs';
 
 /** A stand-in for WebSocket that records what was sent and can be fed frames. */
 function fakeSocket() {
@@ -608,7 +608,7 @@ test('a helicopter announced mid-shot waits for the shot to land', () => {
     d: { k: 'turn', seat: 0, angle: 45, power: 40, weapon: 'standard', ai: false, turn: 0, seed: 1, wind: 0, heli: null } });
   assert.equal(h.g.state, 'FIRING');
 
-  const arriving = { id: 5, x: 500, y: 120, dir: 1, speed: 60, vy: 0, falling: false, spin: 0, legs: 0, seen: [1] };
+  const arriving = routeHeli(h.g, { id: 5, x: 500, seen: [1] });
   sock.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: arriving, heliTimer: 90 } });
   assert.equal(h.g.heli, null, 'not dropped into a replay in progress');
 
@@ -649,18 +649,130 @@ test('a screen a whole shot behind skips ahead to the result', () => {
   assert.equal(guest.g.online.inbox.length, 1, 'with the latest still waiting');
 });
 
-test('between shots the helicopter is where the clock says, whatever the frame rate', () => {
+test('the helicopter is where the clock says, whatever the frame rate', () => {
   const [a, b] = [loadFlat(), loadFlat()];
+  const route = routeHeli(a.g, { id: 3, x: 300 });
   for (const h of [a, b]) {
     h.g.state = 'AIMING';
-    h.g.heli = h.g.heliIn({ id: 3, t: h.g.netNow(), x: 300, y: 120, dir: 1, speed: 60,
-                            vy: 0, falling: false, spin: 0, legs: 0, seen: [0, 1] });
+    h.g.heli = h.g.heliIn(route);
   }
   a.advance(3000, 16);
   b.advance(3000, 33);
-  assert.ok(Math.abs(a.g.heli.x - b.g.heli.x) <= 60 * a.g.SIM_DT + 1e-9,
-    `within a step of each other: ${a.g.heli.x} vs ${b.g.heli.x}`);
-  assert.ok(Math.abs(a.g.heli.x - (300 + 60 * 3)) <= 2, 'and where three seconds of flight puts it');
+  assert.deepEqual({ ...a.g.heliDrawPos() }, { ...b.g.heliDrawPos() }, 'exactly the same place');
+  assert.ok(Math.abs(a.g.heliDrawPos().x - (300 + 60 * 3)) < 1e-9, 'where three seconds of flight puts it');
+});
+
+/** Host and guest on one flat board, with their clocks level. */
+function levelMatch() {
+  const host = loadFlat();
+  const hs = hostAMatch(host);
+  const guest = loadFlat();
+  const gs = joinAMatch(guest);
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
+  for (const c of [host, guest]) { c.flatTerrain(400); c.placeTanksAt([200, 700]); c.g.wind = 0; c.g.state = 'AIMING'; }
+  assert.equal(host.now, guest.now, 'the two clocks start level');
+  return { host, hs, guest, gs };
+}
+
+test('a replay that starts late catches up with the shooter, and lands on the same board', () => {
+  const { host, hs, guest, gs } = levelMatch();
+  Object.assign(host.g.tanks[0], { angle: 55, power: 70, weapon: 'cluster' });
+  host.g.currentPlayer = 0;
+  host.g.fire();
+  const { result, ...inputs } = hs.payloads('turn')[0];
+
+  guest.advance(300);    // the message took 300ms
+  gs.deliver({ t: 'msg', from: 1, d: inputs });
+  guest.advance(16);
+  assert.ok(guest.g.netNow() - guest.g.simClock > 0.25, 'it starts behind');
+  guest.advance(700);
+  assert.ok(guest.g.netNow() - guest.g.simClock < guest.g.SIM_DT * 2,
+    `and within 0.7s is back in step with the clock: ${(guest.g.netNow() - guest.g.simClock).toFixed(3)}s behind`);
+
+  guest.advanceUntil(() => guest.g.state === 'AIMING' || guest.g.state === 'GAMEOVER');
+  assert.deepEqual(Array.from(guest.g.terrain), result.terrain, 'the same craters as the shooter worked out');
+  assert.deepEqual(Array.from(guest.g.tanks, t => t.hp), result.tanks.map(t => t.hp));
+});
+
+test('a replay seconds behind skips most of the way, then catches up', () => {
+  const { host, hs, guest, gs } = levelMatch();
+  Object.assign(host.g.tanks[0], { angle: 60, power: 80 });
+  host.g.currentPlayer = 0;
+  host.g.fire();
+  const turn = hs.payloads('turn')[0];
+
+  guest.advance(1800);
+  gs.deliver({ t: 'msg', from: 1, d: turn });
+  guest.advance(16);
+  const behind = guest.g.netNow() - guest.g.simClock;
+  assert.ok(behind <= guest.g.SHOT_SKIP_TO_S + 0.02, `skipped to about half a second behind: ${behind.toFixed(3)}s`);
+  guest.advanceUntil(() => guest.g.state === 'AIMING' || guest.g.state === 'GAMEOVER');
+  assert.deepEqual(Array.from(guest.g.terrain), turn.result.terrain);
+});
+
+test('a helicopter shot down on a late replay comes down exactly as it did for the shooter', () => {
+  const { host, hs, guest, gs } = levelMatch();
+  // Hovering all but still over the shooter, and a shell fired straight up at it.
+  for (const c of [host, guest]) {
+    c.placeTanksAt([500, 850]);
+    c.g.heli = c.g.heliIn(routeHeli(c.g, { x: 500, y: 200, speed: 1 }));
+  }
+  Object.assign(host.g.tanks[0], { angle: 90, power: 60, weapon: 'standard' });
+  host.g.currentPlayer = 0;
+  host.g.fire();
+  const { result, ...inputs } = hs.payloads('turn')[0];
+  assert.equal(result.heli, null, 'the shooter brought it down, and the wreck landed');
+  assert.ok(result.terrain.some(y => y > 400), 'leaving a crater');
+
+  guest.advance(400);
+  gs.deliver({ t: 'msg', from: 1, d: inputs });
+  guest.advanceUntil(() => !guest.g.activeShot);
+  assert.equal(guest.g.heli, null);
+  assert.deepEqual(Array.from(guest.g.terrain), result.terrain, 'where the shooter had the wreck land');
+  assert.deepEqual(Array.from(guest.g.tanks, t => t.hp), result.tanks.map(t => t.hp));
+});
+
+test('the helicopter never steps back when a late shot starts or when its result lands', () => {
+  const { host, hs, guest, gs } = levelMatch();
+  const route = routeHeli(host.g, { x: 100, y: 80, speed: 90 });
+  for (const c of [host, guest]) c.g.heli = c.g.heliIn(route);
+  Object.assign(host.g.tanks[0], { angle: 60, power: 55 });
+  host.g.currentPlayer = 0;
+  host.g.fire();
+
+  const drawn = [guest.g.heliDrawPos().x];
+  const frame = () => { guest.advance(16); if (guest.g.heli) drawn.push(guest.g.heliDrawPos().x); };
+  for (let i = 0; i < 12; i++) frame();          // ~200ms of the message on its way
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('turn')[0] });
+  for (let i = 0; i < 600 && guest.g.activeShot; i++) frame();
+  for (let i = 0; i < 10; i++) frame();          // and past the result
+  assert.equal(guest.g.activeShot, null, 'the shot played out');
+
+  const moves = drawn.slice(1).map((x, i) => x - drawn[i]);
+  assert.ok(moves.every(d => Math.abs(d - 90 * 0.016) < 1e-6),
+    `the same step forward every frame: ${[...new Set(moves.map(d => d.toFixed(3)))].join(', ')}`);
+});
+
+test('the clock is measured again every minute', () => {
+  const h = load();
+  const sock = connect(h);
+  sock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+  const samples = () => sock.sent.filter(m => m.t === 'time').length;
+  h.advance(2000);
+  assert.equal(samples(), 3, 'three samples on joining');
+  h.advance(h.g.CLOCK_RESYNC_MS);
+  assert.equal(samples(), 6, 'and three more a minute later');
+});
+
+test('the first clock sample does not move a helicopter already up', () => {
+  const h = loadFlat();
+  h.g.state = 'AIMING';
+  h.g.heli = h.g.heliIn(routeHeli(h.g, { x: 400 }));
+  const before = h.g.heliDrawPos();
+  h.g.netClockSample({ t: 'time', c: h.now - 40, s: 1_700_000_000_000 });   // the relay's clock: decades on
+  const after = h.g.heliDrawPos();
+  // To within float precision at a match clock of 1.7e9 seconds: a millionth of a second.
+  assert.ok(Math.abs(after.x - before.x) < 1e-3 && after.y === before.y, `it stays put: ${before.x} → ${after.x}`);
 });
 
 test('the match clock is the relay’s, less half the round trip', () => {
