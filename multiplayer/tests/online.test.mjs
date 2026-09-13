@@ -144,7 +144,7 @@ test('firing publishes the inputs before the shell is simulated', () => {
 
   const [turn] = sock.payloads('turn');
   assert.deepEqual(turn,
-    { k: 'turn', seat: 0, angle: 40, power: 70, weapon: 'standard', ai: false },
+    { k: 'turn', seat: 0, angle: 40, power: 70, weapon: 'standard', ai: false, turn: 0 },
     'ai: false marks it as the player themselves, not the CPU standing in');
 });
 
@@ -182,6 +182,7 @@ test('a sync that lands mid-flight waits for the shot to finish', () => {
   // Authority arrives while the shell is still in the air.
   const authoritative = h.g.netSnapshot();
   authoritative.tanks[1].hp = 42;
+  authoritative.turn = h.g.turnSeq + 1; // published once the shooter's turn resolved
   sock.deliver({ t: 'msg', from: 1, d: { k: 'sync', state: authoritative } });
 
   assert.equal(h.g.tanks[1].hp, 100, 'the flight is not cut short by the snap');
@@ -190,6 +191,65 @@ test('a sync that lands mid-flight waits for the shot to finish', () => {
   h.advanceUntil(() => h.g.state === 'AIMING' || h.g.state === 'GAMEOVER');
   assert.equal(h.g.tanks[1].hp, 42, 'and applied once the turn resolves');
   assert.equal(h.g.online.pendingSync, null);
+});
+
+test('a result that arrives after our own next shot does not undo it', () => {
+  const h = loadFlat();
+  const sock = joinAMatch(h);
+  const host = loadFlat();
+  const hostSock = hostAMatch(host);
+  sock.deliver({ t: 'msg', from: 1, d: hostSock.payloads('start')[0] });
+
+  h.flatTerrain(400);
+  h.placeTanksAt([200, 700]);
+  h.g.wind = 0;
+  h.g.currentPlayer = 0;
+  h.g.state = 'AIMING';
+
+  // The host fires, and this screen finishes watching it first.
+  sock.deliver({ t: 'msg', from: 1,
+    d: { k: 'turn', seat: 0, angle: 45, power: 40, weapon: 'standard', ai: false, turn: 0 } });
+  h.advanceUntil(() => h.g.state === 'AIMING');
+  assert.equal(h.g.currentPlayer, 1, 'our turn');
+  // The host's result for that turn — as it will be sent, but not here yet.
+  const late = JSON.parse(JSON.stringify(h.g.netSnapshot()));
+
+  // We fire straight away, and their result lands while our shell is in the air.
+  h.g.tanks[1].angle = 135;
+  h.g.tanks[1].power = 40;
+  h.g.fire();
+  sock.deliver({ t: 'msg', from: 1, d: { k: 'sync', state: late } });
+  h.advanceUntil(() => h.g.state === 'AIMING');
+
+  assert.equal(h.g.currentPlayer, 0, 'the turn goes on to the host, not back to us');
+  assert.equal(h.g.turnSeq, 2);
+  assert.notDeepEqual(Array.from(h.g.terrain), late.terrain, 'and our crater is still in the ground');
+});
+
+test('a shot fired while ours is still landing is watched, not dropped', () => {
+  const h = loadFlat();
+  const sock = hostAMatch(h);
+  h.flatTerrain(400);
+  h.placeTanksAt([200, 700]);
+  h.g.wind = 0;
+  h.g.currentPlayer = 0;
+  h.g.tanks[0].angle = 45;
+  h.g.tanks[0].power = 40;
+  h.g.state = 'AIMING';
+  const syncsBefore = sock.payloads('sync').length;
+  h.g.fire();
+
+  // The guest's screen landed our shell first, and they have already fired back.
+  sock.deliver({ t: 'msg', from: 2,
+    d: { k: 'turn', seat: 1, angle: 135, power: 40, weapon: 'standard', ai: false, turn: 1 } });
+  assert.equal(h.g.currentPlayer, 0, 'our own shot is not cut off');
+
+  assert.ok(h.advanceUntil(() => h.g.currentPlayer === 1 && h.g.state === 'FIRING'),
+    'once ours lands, theirs is replayed');
+  h.advanceUntil(() => h.g.state === 'AIMING');
+  assert.equal(h.g.currentPlayer, 0, 'and play comes back round to us');
+  assert.equal(h.g.turnSeq, 2);
+  assert.equal(sock.payloads('sync').length, syncsBefore + 1, 'only our own turn is published from here');
 });
 
 test('a snapshot survives the round trip, unlimited ammo included', () => {

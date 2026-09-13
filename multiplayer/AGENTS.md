@@ -196,6 +196,25 @@ per turn:
   and applied when the turn resolves — snapping immediately would cut the shot
   off on screen.
 
+Both carry `turn`, the round's count of resolved turns (`turnSeq`), because
+screens do not finish a shot at the same moment. When the next player's screen
+lands a shot first and they fire again, the shooter's `sync` for the turn
+before arrives *after* a later crater: applying it put the old ground back and
+handed the turn back to someone who had already fired. So `netApplyState()`
+drops a snapshot older than the turn this client is on (`start` always
+applies), and a `turn` that arrives while a shot is still landing is held in
+`online.pendingTurn` and replayed by `nextTurn()` rather than dropped.
+
+The helicopter had the same race, worse. A shot-down wreck used to land after
+the turn had moved on, so it crashed at a different moment on each screen, and
+`heliAuthority()` (whoever's turn it is) named a different seat on each — two
+screens could both work out the crash. And the shooter's `heli` "falling" news,
+or a snapshot taken mid-fall, could reach a screen that had already crashed it
+and put it back in the sky to explode again. Now a falling wreck holds the turn
+in `EXPLODING`, so it always lands inside the shooter's turn, and every
+helicopter carries an `id`: `heliIn()` ignores news of the one this screen last
+brought down (`heliDownId`).
+
 `nextTurn()` captures `actor` before advancing, because by the time the result
 is published `currentPlayer` is already the *next* seat.
 

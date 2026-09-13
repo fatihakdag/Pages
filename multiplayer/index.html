@@ -1395,7 +1395,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v51';
+  const BUILD = 'v52';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2189,6 +2189,10 @@ if ('serviceWorker' in navigator) {
   // Set when any shell of the current shot detonated, so the turn can tell an
   // explosion apart from a shot that simply flew off the map.
   let shotExploded = false;
+  // Turns resolved this round. It travels in every snapshot and every `turn`
+  // message, so a client can tell a result it has already played past from one
+  // it has not (see netApplyState).
+  let turnSeq = 0;
   let explosions = []; // active explosion animations {x,y,r,maxR,t}
   let particles = [];
 
@@ -2384,6 +2388,7 @@ if ('serviceWorker' in navigator) {
     lastTimerText = '';
     buildTanks();
     currentPlayer = 0;
+    turnSeq = 0;
     state = 'AIMING';
     projectiles = [];
     shotExploded = false;
@@ -2760,7 +2765,8 @@ if ('serviceWorker' in navigator) {
         angle: tanks[currentPlayer].angle,
         power: tanks[currentPlayer].power,
         weapon: tanks[currentPlayer].weapon,
-        ai: byAi   // so nobody mistakes the CPU playing for the player returning
+        ai: byAi,  // so nobody mistakes the CPU playing for the player returning
+        turn: turnSeq   // the board it was fired from
       });
     }
     const shooter = tanks[currentPlayer];
@@ -2867,6 +2873,7 @@ if ('serviceWorker' in navigator) {
   function nextTurn() {
     // Captured before the turn moves on: this is who just played.
     const actor = currentPlayer;
+    turnSeq++;
     if (endTurnCheckWin()) { netPublishTurn(actor); return; }
     // at least two tanks are alive here, so this always lands on someone else
     do { currentPlayer = (currentPlayer + 1) % tanks.length; }
@@ -2887,7 +2894,13 @@ if ('serviceWorker' in navigator) {
     // The player who took the turn is the authority on how it ended.
     netPublishTurn(actor);
     netPlayAiTurn();
-    if (online.pendingSync) {
+    // A shot somebody fired while ours was still landing is watched first. It
+    // was fired from the board as it now stands, and any result held for it
+    // stays held until the replay lands, as if the two had arrived in order.
+    const heldTurn = online.pendingTurn;
+    online.pendingTurn = null;
+    if (heldTurn) netReplayTurn(heldTurn);
+    if (online.pendingSync && state === 'AIMING') {
       const held = online.pendingSync;
       online.pendingSync = null;
       netApplyState(held);
@@ -3459,7 +3472,9 @@ if ('serviceWorker' in navigator) {
       if (projectiles.length === 0) {
         // Nothing went off anywhere: the whole shot missed, so skip the
         // explosion wait and hand the turn straight on.
-        state = shotExploded ? 'EXPLODING' : 'RESOLVED';
+        // A wreck still coming down holds the turn too, even when this screen's
+        // shell missed it (the shooter may have said it was hit): see below.
+        state = (shotExploded || (heli && heli.falling)) ? 'EXPLODING' : 'RESOLVED';
         explodeTimer = 0;
       }
     }
@@ -3467,7 +3482,13 @@ if ('serviceWorker' in navigator) {
     if (state === 'EXPLODING') {
       explodeTimer += dt;
       updateHUD();
-      if (explodeTimer > 0.9 && explosions.every(e => e.t > e.maxR / 90)) {
+      // The turn is not over while a shot-down wreck is still falling. It used to
+      // hand on after the shell's own blast, so the wreck landed during the next
+      // turn — at a different moment on each screen, with "whoever's turn it is"
+      // (heliAuthority) meaning a different seat on each, so two screens could
+      // both work out the crash. Held here, every screen crashes it inside the
+      // shooter's turn, and the shooter's result carries the crater.
+      if (explodeTimer > 0.9 && explosions.every(e => e.t > e.maxR / 90) && !(heli && heli.falling)) {
         state = 'RESOLVED';
       }
     }
@@ -3631,6 +3652,7 @@ if ('serviceWorker' in navigator) {
     const fromLeft = Math.random() < 0.5;
     const w = heliSize();
     heli = {
+      id: Math.floor(Math.random() * 2 ** 31),   // so a late word about it can be recognised (heliIn)
       x: fromLeft ? -w : W + w,
       y: heliCruiseY(),
       dir: fromLeft ? 1 : -1,
@@ -3893,12 +3915,13 @@ if ('serviceWorker' in navigator) {
     // watched a helicopter fall straight through the ground and off the bottom,
     // never crashing, until an announcement happened to remove it. The wreck
     // is the same arithmetic from the same state, like the rest of its flight.
-    if (heli.x < -60 || heli.x > W + 60) { heli = null; return; } // fell off the map
+    if (heli.x < -60 || heli.x > W + 60) { heliDownId = heli.id; heli = null; return; } // fell off the map
     // Walked from where the frame started, like a shell, so a wreck falling
     // into a cliff face goes off against the face rather than on top of the
     // cliff. Offset by the 4px the airframe hangs below its centre.
     const c = firstContact(x0, y0 + 4, heli.x, heli.y + 4);
     if (!c) return;
+    heliDownId = heli.id;
     heli = null;
     if (c.what === 'off') return;
     heliCrash(Math.max(0, Math.min(W - 1, c.px)), c.py);
@@ -4378,7 +4401,8 @@ if ('serviceWorker' in navigator) {
     aiSeats: [],       // seats the CPU is playing until their player returns
     peerAway: false,   // their window is hidden, so their game loop is stopped
 
-    pendingSync: null  // a sync that arrived while a shot was still in the air
+    pendingSync: null, // a sync that arrived while a shot was still in the air
+    pendingTurn: null  // a turn fired elsewhere while ours was still landing
   };
 
   /** True once we are in a match, as opposed to merely connected. */
@@ -4788,7 +4812,11 @@ if ('serviceWorker' in navigator) {
       playerCount = d.seats.length;
       countSelect.value = String(playerCount);
       refreshOpponentUi();
-      netApplyState(d.state);
+      // A new or resumed match replaces the board outright, whatever turn this
+      // client thinks it is on.
+      online.pendingSync = null;
+      online.pendingTurn = null;
+      netApplyState(d.state, { force: true });
       refreshOnlineUi();
       return;
     }
@@ -4799,19 +4827,16 @@ if ('serviceWorker' in navigator) {
       // A turn the player took themselves means they are back: the clock
       // resets and the CPU hands the seat over. A CPU-played turn does not.
       if (!d.ai) netSeatResponded(d.seat);
-      // Replay their inputs so the shot is watched, not merely reported.
-      const t = tanks[d.seat];
-      if (!t || state !== 'AIMING') return;
-      currentPlayer = d.seat;
-      t.angle = d.angle;
-      t.power = d.power;
-      t.weapon = d.weapon;
-      fire();
+      // Their screen finished the last shot before ours did and they have fired
+      // again. Dropping this lost their shot here, and our result for the last
+      // turn then went out stale; it waits for our turn to resolve instead.
+      if (state !== 'AIMING' && state !== 'GAMEOVER') { online.pendingTurn = d; return; }
+      netReplayTurn(d);
       return;
     }
 
     if (d.k === 'heli') {
-      heli = d.heli ? { ...d.heli, seen: new Set(d.heli.seen || []) } : null;
+      heli = heliIn(d.heli);
       if (typeof d.heliTimer === 'number') heliTimer = d.heliTimer;
       return;
     }
@@ -4842,6 +4867,20 @@ if ('serviceWorker' in navigator) {
       }
       return;
     }
+  }
+
+  /** Replay somebody else's inputs so the shot is watched, not merely reported. */
+  function netReplayTurn(d) {
+    const t = tanks[d.seat];
+    if (!t || state !== 'AIMING') return;
+    // Fired from a board we have already moved past — its result has been
+    // applied here, and replaying it would land the same shot twice.
+    if (typeof d.turn === 'number' && d.turn < turnSeq) return;
+    currentPlayer = d.seat;
+    t.angle = d.angle;
+    t.power = d.power;
+    t.weapon = d.weapon;
+    fire();
   }
 
   /** Host only: deal seats and hand out the world everyone will play on. */
@@ -4956,9 +4995,21 @@ if ('serviceWorker' in navigator) {
     return heli ? `${heli.dir}|${heli.legs}|${heli.falling ? 1 : 0}` : 'none';
   }
 
+  // The last wreck this screen brought down. Screens land a wreck at slightly
+  // different moments, so the shooter's word that it is falling — or a snapshot
+  // taken while it was — can arrive after it has already exploded here, and
+  // used to put it back in the sky to crash a second time.
+  let heliDownId = null;
+
+  /** A helicopter as it arrives from another client, or null. */
+  function heliIn(h) {
+    if (!h || (h.id != null && h.id === heliDownId)) return null;
+    return { ...h, seen: new Set(h.seen || []) };
+  }
+
   function heliOut() {
     return heli ? {
-      x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed,
+      id: heli.id, x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed,
       vy: heli.vy, falling: heli.falling, spin: heli.spin, legs: heli.legs,
       seen: [...heli.seen]
     } : null;
@@ -4987,6 +5038,7 @@ if ('serviceWorker' in navigator) {
         angle: t.angle, power: t.power, weapon: t.weapon, ammo: ammoOut(t.ammo)
       })),
       wind, currentPlayer, state,
+      turn: turnSeq,
       // Who won. The overlay is raised by endTurnCheckWin(), which only ever
       // runs on the client that resolved the shot — everyone else had the state
       // set to GAMEOVER and no idea, so the round ended in silence for them.
@@ -5001,8 +5053,16 @@ if ('serviceWorker' in navigator) {
     };
   }
 
-  function netApplyState(snap) {
+  function netApplyState(snap, { force = false } = {}) {
     if (!snap) return;
+    // A result this client has already played past. The screen that published
+    // it was slower than this one, and by the time it arrived a later shot had
+    // landed here: applying it put back the ground that shot blew away, and
+    // handed the turn back to a seat that had already fired.
+    if (typeof snap.turn === 'number') {
+      if (!force && snap.turn < turnSeq) return;
+      turnSeq = snap.turn;
+    }
     if (snap.theme >= 0 && THEMES[snap.theme] && THEMES[snap.theme] !== theme) {
       applyTheme(THEMES[snap.theme]);
       buildDecor();
@@ -5029,7 +5089,7 @@ if ('serviceWorker' in navigator) {
     state = snap.state;
     // Rebuilt from the snapshot rather than merged over whatever we had, so a
     // stale local helicopter cannot leave fields behind.
-    heli = snap.heli ? { ...snap.heli, seen: new Set(snap.heli.seen || []) } : null;
+    heli = heliIn(snap.heli);
     if (typeof snap.heliTimer === 'number') heliTimer = snap.heliTimer;
     projectiles = [];
     wind = snap.wind;
@@ -5215,6 +5275,7 @@ if ('serviceWorker' in navigator) {
     get camZoom() { return camZoom; }, get camX() { return camX; }, get camY() { return camY; },
     get camPanned() { return camPanned; }, set camPanned(v) { camPanned = v; },
     get turnToken() { return turnToken; }, get lastWinner() { return lastWinner; },
+    get turnSeq() { return turnSeq; },
     get shotExploded() { return shotExploded; },
     get explosions() { return explosions; }, get particles() { return particles; }
   };
