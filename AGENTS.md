@@ -1,6 +1,6 @@
 # Barrage — agent guide
 
-A single-file, dependency-free artillery game (Scorched Earth style). Two to four
+A single-file, dependency-free artillery game (Scorched Earth style). Two to six
 tanks take turns lobbing shells across destructible terrain, with wind, weapons,
 themes and an optional helicopter to shoot down.
 
@@ -160,5 +160,5 @@ non-zero and says so if the page logged an error or Chrome refused a viewport,
 so a shot that looks fine while the game threw during boot does not slip past.
 
 Read the PNGs — that is the point of them. `--out` puts them somewhere you can
-keep. Still worth doing by hand: 3–4 player mode and an actual game in motion,
+keep. Still worth doing by hand: 3–6 player mode and an actual game in motion,
 which a single frame cannot show.

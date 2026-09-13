@@ -28,7 +28,7 @@ export const PROTOCOL = 1;
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRTUVWXYZ23456789';
 const CODE_LEN = 4;
 
-const MAX_MEMBERS = 4;        // matches MAX_PLAYERS in the game
+const MAX_MEMBERS = 6;        // matches MAX_PLAYERS in the game
 const MAX_FRAME = 64 * 1024;  // a terrain snapshot is a few KB; this is slack
 const MAX_MSGS_PER_SEC = 40;  // a turn is one message; this only stops floods
 // An empty room is kept this long before it is forgotten. A room used to be

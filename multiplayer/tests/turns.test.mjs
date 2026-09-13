@@ -122,7 +122,7 @@ test('restarting gives everyone full hp, fresh ammo and a live round', () => {
 });
 
 test('tanks start spread out across the map', () => {
-  for (const count of [2, 3, 4]) {
+  for (const count of [2, 3, 4, 5, 6]) {
     const h = load();
     h.g.cpuMode = false;
     h.g.playerCount = count;
