@@ -71,6 +71,21 @@ test('a four-seat room waits for the whole table', () => {
   assert.equal(start.state.tanks.length, 4, 'and four in the world everyone gets');
 });
 
+test('a six-seat room waits for all six', () => {
+  const { h, s } = hostFor(6);
+
+  [2, 3, 4, 5].forEach(id => arrive(s, id));
+  assert.deepEqual(s.payloads('start'), [], 'five is not a table of six');
+  assert.match(h.g.el2.onlineStatus.textContent, /5\/6/);
+
+  arrive(s, 6);
+  const [start] = s.payloads('start');
+  assert.ok(start, 'the sixth starts it');
+  assert.deepEqual(start.seats, [1, 2, 3, 4, 5, 6], 'seats in join order');
+  assert.equal(h.g.tanks.length, 6, 'six tanks on the field');
+  assert.equal(start.state.tanks.length, 6, 'and six in the world everyone gets');
+});
+
 test('a three-seat game deals three', () => {
   const { h, s } = hostFor(3);
   arrive(s, 2);

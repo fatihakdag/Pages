@@ -328,5 +328,6 @@ in front — the same throttling as the first gap above.
   two, since both mean the relay holding state it currently does not:
   - arbitrating turn timeouts server-side instead of electing a client;
   - keeping the last snapshot per room, so a match survives everyone dropping.
-- **More than four players** would need `MAX_PLAYERS` raised in the game and
-  `MAX_MEMBERS` in the relay; nothing in the protocol assumes four.
+- **More than six players** would need `MAX_PLAYERS` raised in the game and
+  `MAX_MEMBERS` in the relay (the two must match), plus a card, a colour and a
+  reload sound per seat; nothing in the protocol assumes a count.

@@ -174,16 +174,16 @@ test('room codes are case-insensitive', async () => {
   });
 });
 
-test('a fifth player is turned away rather than seated', async () => {
+test('a seventh player is turned away rather than seated', async () => {
   await withRelay(async (h) => {
     const a = await h.client();
     const { room } = await a.join();
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const c = await h.client();
       assert.equal((await c.join(room)).t, 'joined');
     }
-    const fifth = await h.client();
-    assert.equal((await fifth.join(room)).code, 'ROOM_FULL');
+    const seventh = await h.client();
+    assert.equal((await seventh.join(room)).code, 'ROOM_FULL');
   });
 });
 

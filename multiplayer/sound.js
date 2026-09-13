@@ -164,7 +164,7 @@
   function gunPanner(ctx, seat, x01) {
     const bus = blastBus(ctx);
     if (!ctx.createStereoPanner || !Number.isFinite(x01)) return bus;
-    const i = (seat || 0) % 4;
+    const i = (seat || 0) % RELOADS.length;
     if (!panners[i]) {
       panners[i] = ctx.createStereoPanner();
       panners[i].connect(bus);
@@ -249,6 +249,21 @@
         noiseBurst({ when: RELOAD_AT + i * 0.05, dur: 0.014, type: 'bandpass', freq: 3200, q: 5,
                      gain: 0.45, attack: 0.0006, dest });
       }
+    },
+    // P5: a bolt worked by hand — snapped back, then run home and locked, the
+    // second strike a touch lower as it seats
+    (dest) => {
+      const bolt = [[2300, 1, 60], [3900, 0.6, 70], [6100, 0.3, 80]];
+      metalHit({ when: RELOAD_AT, strike: 0.003, gain: 0.55, modes: bolt, dest });
+      noiseBurst({ when: RELOAD_AT + 0.02, dur: 0.12, type: 'bandpass', freq: 1800, sweepTo: 2600, q: 2,
+                   gain: 0.08, attack: 0.02, dest });
+      metalHit({ when: RELOAD_AT + 0.24, strike: 0.003, gain: 0.7, detune: 0.94, modes: bolt, dest });
+    },
+    // P6: an autoloader — a motor winding up, then the rammer's clack
+    (dest) => {
+      toneHit({ when: RELOAD_AT, dur: 0.32, f0: 110, f1: 420, gain: 0.12, attack: 0.04, dest });
+      noiseBurst({ when: RELOAD_AT + 0.32, dur: 0.03, type: 'bandpass', freq: 2400, q: 3,
+                   gain: 0.5, attack: 0.001, dest });
     }
   ];
 

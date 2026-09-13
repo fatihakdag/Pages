@@ -1,6 +1,6 @@
 # Barrage
 
-A turn-based artillery game — two to four tanks lobbing shells over destructible
+A turn-based artillery game — two to six tanks lobbing shells over destructible
 terrain, in the Scorched Earth tradition. Wind, six weapons, seven environments,
 an AI with four difficulty levels, and a helicopter that occasionally flies over
 and can be shot down.
