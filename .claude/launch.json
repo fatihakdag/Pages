@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "relay",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["multiplayer/server/relay.mjs"],
+      "port": 8787
+    }
+  ]
+}

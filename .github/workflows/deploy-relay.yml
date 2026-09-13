@@ -11,6 +11,7 @@ on:
     paths:
       - 'multiplayer/server/**'
       - 'multiplayer/index.html'
+      - 'multiplayer/sound.js'
       # The service worker, the manifest and the icons ship with the game and
       # are easy to forget here: a change to only those used to merge without
       # ever reaching production.

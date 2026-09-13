@@ -720,6 +720,28 @@
   }
   #settings-grid .ctrl-group { min-width: 0; }
   #settings-grid select { width: 100%; }
+  /* The last row holds the two personal preferences: sound to the left, the
+     language to the right. Both groups put their control in a row of the
+     slider's height, so the two labels sit on one line. */
+  #settings-grid #prefs-row {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: row;   /* .ctrl-group stacks its children; this row must not */
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  #sfx-group { flex: 0 1 220px; min-width: 0; }
+  #sfx-group label { cursor: pointer; }
+  /* margin-left: auto keeps it on the right even when the sound group is hidden
+     (sound.js failed to load), where space-between alone would put it left. */
+  #lang-group { flex: 0 0 auto; margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; }
+  #lang-group #lang-toggle { min-height: 30px; }
+  /* On touch the slider grows to 42px; the toggle follows, so the two controls
+     stay centred on one line. */
+  @media (pointer: coarse) {
+    #lang-group #lang-toggle { min-height: 42px; }
+  }
   #settings-foot {
     display: flex;
     align-items: center;
@@ -1252,9 +1274,16 @@
             <span id="online-status" role="status">off</span>
           </div>
         </div>
-        <div class="ctrl-group">
-          <div class="ctrl-label" data-i18n="language">LANGUAGE</div>
-          <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
+        <div class="ctrl-group" id="prefs-row">
+          <div id="sfx-group">
+            <div class="ctrl-label"><label for="sfx-volume" data-i18n="soundFx">SOUND FX</label></div>
+            <input type="range" id="sfx-volume" min="0" max="100" step="1" value="67"
+                   aria-label="Sound effects volume">
+          </div>
+          <div id="lang-group">
+            <div class="ctrl-label" data-i18n="language">LANGUAGE</div>
+            <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
+          </div>
         </div>
       </div>
       <div id="settings-foot">
@@ -1264,6 +1293,10 @@
     </div>
   </div>
 </div>
+
+<!-- Sound lives in its own file (the root build keeps it inline). It has to
+     load before the game script, which reads the global it publishes. -->
+<script src="sound.js"></script>
 
 <script>
 // Register the service worker that makes the game installable and lets it
@@ -1315,7 +1348,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v45';
+  const BUILD = 'v46';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1392,6 +1425,7 @@ if ('serviceWorker' in navigator) {
       wind: 'WIND', angle: 'ANGLE', power: 'POWER', weapon: 'WEAPON',
       tanks: 'TANKS', opponents: 'OPPONENTS', cpuLevel: 'CPU LEVEL',
       settings: 'SETTINGS', language: 'LANGUAGE', version: 'VERSION',
+      soundFx: 'SOUND FX', sfxVolume: 'Sound effects volume',
       closeSettings: 'Close settings',
       fire: 'FIRE', playAgain: 'Play Again', time: 'TIME',
       timerMs: '{m}m {s}s', timerS: '{s}s',
@@ -1428,6 +1462,7 @@ if ('serviceWorker' in navigator) {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
       tanks: 'TANKLAR', opponents: 'RAKİPLER', cpuLevel: 'BİLGİSAYAR SEVİYESİ',
       settings: 'AYARLAR', language: 'DİL', version: 'SÜRÜM',
+      soundFx: 'SES EFEKTLERİ', sfxVolume: 'Ses efektleri seviyesi',
       closeSettings: 'Ayarları kapat',
       fire: 'ATEŞ', playAgain: 'Tekrar Oyna', time: 'SÜRE',
       timerMs: '{m}d {s}sn', timerS: '{s}sn',
@@ -1508,6 +1543,8 @@ if ('serviceWorker' in navigator) {
   }
 
   const langCheckbox = document.getElementById('lang-tr');
+  const sfxGroup = document.getElementById('sfx-group');
+  const sfxSlider = document.getElementById('sfx-volume');
 
   function applyLanguage() {
     document.documentElement.lang = lang;
@@ -1534,6 +1571,7 @@ if ('serviceWorker' in navigator) {
     // put them on the element.
     onlineCodeInput.placeholder = txt('roomCode');
     onlineCodeInput.setAttribute('aria-label', txt('roomCodeLabel'));
+    sfxSlider.setAttribute('aria-label', txt('sfxVolume'));
     lastTimerText = ''; // force the clock to redraw in the new language
     // the weapon <option> labels and ammo readout are rebuilt from here
     if (tanks.length) { updateHUD(); syncControlsFromTank(); }
@@ -2150,6 +2188,7 @@ if ('serviceWorker' in navigator) {
 
   function resetGame() {
     turnToken++;
+    stopAllSound(); // a round can end mid-burn; nothing sustained may survive it
     roundStart = performance.now();
     lastTimerText = '';
     buildTanks();
@@ -2327,6 +2366,7 @@ if ('serviceWorker' in navigator) {
   // pick one degree out of 180, especially with a fingertip.
   function nudge(which, delta) {
     if (isAi(currentPlayer)) return; // same condition that gates the sliders
+    Sound.tick();
     const t = tanks[currentPlayer];
     if (which === 'angle') t.angle = Math.max(0, Math.min(180, t.angle + delta));
     else t.power = Math.max(0, Math.min(100, t.power + delta));
@@ -2365,6 +2405,110 @@ if ('serviceWorker' in navigator) {
   bindNudge('power-inc', 'power', 1);
   // a press held while the tab loses focus would otherwise repeat forever
   window.addEventListener('blur', () => nudgeStops.forEach(fn => fn()));
+
+  // ---------- Sound ----------
+  // The synthesis is in sound.js. What stays here is the part that has to know
+  // the game: where things are, what is in the air, and the slider.
+  //
+  // A page whose sound.js failed to load still plays — silently — rather than
+  // dying on the first shot: every voice becomes a no-op and the slider hides.
+  const SND = window.BarrageSound || (() => {
+    const silent = new Proxy({}, { get: () => () => 0 });
+    return {
+      SOUND: { enabled: false, volume: 0 }, Sound: silent, FLIGHT: {}, flightOf: () => null,
+      panOf: () => 0, soundAvailable: () => false, stopAllSound() {}, setSoundOn() {},
+      setSfxLevel() {}, sliderToLevel: () => 0, levelToSlider: () => 0, loadLevel: () => 0,
+      wake() {}, isOn: () => false, level: () => 0
+    };
+  })();
+  const { SOUND, Sound, FLIGHT, flightOf, panOf, soundAvailable, stopAllSound,
+          setSoundOn, setSfxLevel, sliderToLevel, levelToSlider } = SND;
+
+  // Sounds are placed where things are on screen, not in the world: zoomed in
+  // on the left of the battlefield, a blast at its centre is off to your right.
+  // 0 is the view's left edge, 1 its right; panOf clamps anything beyond.
+  function screenX01(x) {
+    return (x - camX) / camViewW();
+  }
+
+  function initSound() {
+    if (!SOUND.enabled) { sfxGroup.style.display = 'none'; return; }
+    sfxSlider.value = String(levelToSlider(SND.loadLevel()));
+    sfxSlider.addEventListener('input', () => {
+      const level = sliderToLevel(sfxSlider.value);
+      // Only on a crossing: setSoundOn jumps the gain, which would zipper a drag.
+      if ((level > 0) !== SND.isOn()) setSoundOn(level > 0);
+      setSfxLevel(level);
+    });
+    // One tick at the new level on release, so it can be judged without firing.
+    sfxSlider.addEventListener('change', () => Sound.tick());
+    for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
+      window.addEventListener(ev, SND.wake);
+    }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) SND.wake(); });
+  }
+
+  // How long until a ballistic shell comes down, found by stepping it forward
+  // under the same gravity and wind stepProjectile applies, against the real
+  // terrain — a hill in the way lands it early, and the whistle's build-up has
+  // to know that. Coarse steps are plenty for a sound, and the cap bounds what
+  // a shell far off the top of the world costs per frame.
+  function secondsToImpact(p) {
+    const dt = 1 / 30;
+    let x = p.x, y = p.y, vx = p.vx, vy = p.vy;
+    for (let t = 0; t < 6; t += dt) {
+      if (x < 0 || x > W) return Infinity; // leaving the field: nothing to build to
+      if (y >= groundHeightAt(x)) return t;
+      vx += wind * physScale * dt;
+      vy += GRAVITY * physScale * dt;
+      x += vx * dt;
+      y += vy * dt;
+    }
+    return Infinity;
+  }
+
+  // Driven from the frame loop rather than from the events that start and end
+  // these things: derived state cannot forget to stop, which is the whole risk
+  // with a sustained sound. That matters more here than in the root build — a
+  // snapshot from another client can replace the projectiles or the heli at any
+  // moment, and whatever it leaves is simply what sounds next frame.
+  function updateSoundLoops() {
+    if (!soundAvailable() || !SND.isOn()) return;
+    // Each sustained sound also carries where its source is, so it pans with it.
+    Sound.rotor(!!heli, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
+    let burning = false, burnX = 0.5, rolling = 0, rollX = 0.5;
+    let flying = false, fall = 0, flyX = 0.5, impactIn = Infinity, speed = 0, flight = null;
+    for (const p of projectiles) {
+      if (p.burnLeft > 0) { burning = true; burnX = screenX01(p.x); }
+      if (p.rolling) {
+        const speed = Math.abs(p.vx) / (300 * physScale);
+        if (speed >= rolling) { rolling = speed; rollX = screenX01(p.x); }
+        continue;
+      }
+      // A shell under power has its motor instead, and the first moments belong
+      // to the muzzle blast — the whistle would only muddy it.
+      if (p.burnLeft > 0 || (p.age || 0) < 0.12) continue;
+      // With a MIRV in the air this picks the warhead nearest its impact, so
+      // three splitting warheads sing one descending note rather than a chord.
+      const eta = secondsToImpact(p);
+      if (!flying || eta < impactIn) {
+        impactIn = eta; fall = p.vy; flyX = screenX01(p.x); speed = Math.hypot(p.vx, p.vy);
+        flight = flightOf(p);
+      }
+      flying = true;
+    }
+    Sound.motor(burning, burnX);
+    Sound.rumble(rolling > 0, rolling, rollX);
+    // vy runs negative climbing and positive falling, so this maps a rising
+    // shell high and a falling one low.
+    Sound.whistle(flying, {
+      pitch01: 0.5 - fall / (1040 * physScale),
+      speed01: speed / (620 * physScale), // 620 is a full-power shot leaving the barrel
+      impactIn,
+      x01: flyX,
+      flight
+    });
+  }
 
   // ---------- Settings dialog ----------
   // Setup lives here rather than in the rail; the controls inside it are the
@@ -2461,6 +2605,8 @@ if ('serviceWorker' in navigator) {
     }];
     shotExploded = false;
     state = 'FIRING';
+    // Everyone hears it: a remote player's turn is replayed through here too.
+    Sound.fire(shooter.power, currentPlayer, screenX01(shooter.x));
     updateHUD();
   }
 
@@ -2483,7 +2629,7 @@ if ('serviceWorker' in navigator) {
         const falloff = 1 - dist / w.radius;
         const dmg = w.damageMax * falloff;
         t.hp -= dmg;
-        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; Sound.destroyed(screenX01(t.x)); }
       }
     }
     craterAt(px, py, w.radius);
@@ -2491,6 +2637,7 @@ if ('serviceWorker' in navigator) {
   }
 
   function spawnExplosionFx(x, y, radius, color) {
+    Sound.explode(radius, screenX01(x)); // the one place every blast in the game passes through
     explosions.push({ x, y, r: 4, maxR: radius * 1.15, t: 0, color });
     const count = Math.round(radius * 0.9);
     for (let i = 0; i < count; i++) {
@@ -3147,6 +3294,7 @@ if ('serviceWorker' in navigator) {
     camFollow(dt);
     netCheckTurnClock();
     updateHeli(dt);
+    updateSoundLoops();
     updateTimer();
 
     // Compared against what was last *announced*, not against the start of this
@@ -4757,6 +4905,7 @@ if ('serviceWorker' in navigator) {
   pruneWeaponOptions();
   buildWeaponPicker();
   initLanguage();
+  initSound();
   refreshOpponentUi();
   resetGame();
   requestAnimationFrame(step);
@@ -4794,11 +4943,14 @@ if ('serviceWorker' in navigator) {
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     heliOut, netAnnounceHeli, heliAuthority, heliSignature,
+    SOUND, Sound, FLIGHT, flightOf, panOf, setSoundOn, setSfxLevel, sliderToLevel, levelToSlider,
+    stopAllSound, updateSoundLoops, soundAvailable, secondsToImpact, screenX01,
+    get sfxLevel() { return SND.level(); },
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
       settingsModal, settingsBtn, windHud,
-      nudgeBtns, cards, hpText, langCheckbox
+      nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider
     },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },
     get terrain() { return terrain; }, set terrain(v) { terrain = v; },

@@ -7,6 +7,7 @@ is different here.
 
 ```
 index.html           the game, forked from the root copy
+sound.js             the synthesised sound, lifted out of the root's Sound section
 manifest.webmanifest what makes it installable to a home screen
 sw.js                service worker: offline start, and Chrome's install prompt
 icon-*.png           launcher icons, from `node tools/icons.mjs` at the root
@@ -44,6 +45,28 @@ never sees the match: that is a WebSocket, and there is no offline mode for an
 online game. Three things have to agree, and nothing fails loudly if they do
 not — the file list in `sw.js`, the `COPY` lines in the Dockerfile, and the
 icons in the manifest. Bump `VERSION` in `sw.js` when any of them changes.
+Scripts (`*.js`) are network-first like the page, so a deploy never pairs a new
+`index.html` with an old `sound.js`.
+
+## Sound
+
+`sound.js` is the root build's `// ---------- Sound ----------` section — the
+synthesis, the voices, `FLIGHT`, `RELOADS`, the level — moved into its own file,
+which this build can do because the relay serves real files. It publishes
+`window.BarrageSound` and knows nothing about the game. **Keep it in step with
+the root copy**: a sound retuned in one belongs in both.
+
+The page loads it before the game script, and `tests/harness.mjs` runs it in the
+vm first for the same reason. What needs the game stays in `index.html` under
+`// ---------- Sound ----------`: `updateSoundLoops()` in the frame loop,
+`secondsToImpact()`, the slider wiring, and `screenX01()`. That last one is the
+one real difference from the root build: sounds pan by where things are **on
+screen**, through the camera, not by world position — zoomed in on the left of
+the field, a blast at its centre is heard to your right.
+
+If `sound.js` fails to load, the page swaps in silent no-ops and hides the
+slider rather than dying on the first shot. The SFX slider and the language
+toggle share the settings panel's last row.
 
 ## What differs from the single-player build
 
