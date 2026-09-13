@@ -19,11 +19,12 @@
 // there is no offline mode for an online match. /health is the relay's, so it
 // is left alone too.
 
-const VERSION = 'barrage-online-v3';
+const VERSION = 'barrage-online-v4';
 
 const SHELL = [
   './',
   './index.html',
+  './sound.js',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
@@ -73,6 +74,24 @@ self.addEventListener('fetch', (e) => {
           return res;
         })
         .catch(() => caches.match('./index.html').then((hit) => hit || Response.error()))
+    );
+    return;
+  }
+
+  // Scripts the page loads ride with the page: network first as well. Served
+  // cache-first, a deploy would pair a new index.html with the sound.js from
+  // the build before, and the two share an interface.
+  if (url.pathname.endsWith('.js')) {
+    e.respondWith(
+      fetch(e.request, { cache: 'no-store' })
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(VERSION).then((c) => c.put(e.request, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(e.request).then((hit) => hit || Response.error()))
     );
     return;
   }

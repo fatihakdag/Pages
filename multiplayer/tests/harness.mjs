@@ -16,6 +16,9 @@ import vm from 'node:vm';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const HTML = readFileSync(join(ROOT, 'index.html'), 'utf8');
+// The page loads sound.js ahead of its own script, and the game reads the
+// global it leaves behind — so the vm runs it first, the same way.
+const SOUND_JS = readFileSync(join(ROOT, 'sound.js'), 'utf8');
 
 // Re-run the suite against a different world with BARRAGE_SEED=<n>: assertions
 // that quietly depend on one particular terrain or wind roll show up as a
@@ -291,6 +294,7 @@ export function load(opts = {}) {
   sandbox.clearInterval = clock.clear;
 
   const ctx = vm.createContext(sandbox);
+  vm.runInContext(SOUND_JS, ctx, { filename: 'sound.js' });
   vm.runInContext(gameSource(HTML), ctx, { filename: 'index.html' });
 
   const g = ctx.window.__BARRAGE_TEST__;
