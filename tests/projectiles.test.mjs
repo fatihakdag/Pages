@@ -1,5 +1,5 @@
 // The weapons that do something other than fly straight and explode: the
-// roller mine, the MIRV, the cluster bomb and the guided missile.
+// roller mine, the MIRV and the guided missile (cluster bomblets are in explosions.test.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadFlat } from './harness.mjs';
@@ -97,39 +97,6 @@ test('a flat MIRV shot does not split in the shooter\'s lap', () => {
   g.stepProjectile(p, 0.05);
 
   assert.notEqual(p.dead, true, 'the age floor keeps it together off the muzzle');
-});
-
-test('a cluster bomb queues sub-explosions on impact', () => {
-  const h = loadFlat();
-  const { g } = h;
-  h.flatTerrain(400);
-  h.placeTanksAt([200, 700]);
-  const p = shell({ x: 500, y: 399, vx: 0, vy: 200, weapon: 'cluster' });
-  g.projectiles = [p];
-  g.state = 'FIRING';
-
-  g.stepProjectile(p, 0.05);
-
-  assert.equal(p.dead, true);
-  assert.equal(g.clusterQueue.length, g.WEAPONS.cluster.clusterCount);
-  assert.ok(g.clusterQueue.every(c => c.delay >= 0), 'the bomblets go off in sequence');
-});
-
-test('cluster bomblets go off and the turn still ends', () => {
-  const h = loadFlat();
-  const { g } = h;
-  h.flatTerrain(400);
-  h.placeTanksAt([200, 700]);
-  g.currentPlayer = 0;
-  g.tanks[0].weapon = 'cluster';
-  g.tanks[0].angle = 45;
-  g.tanks[0].power = 60;
-  g.state = 'AIMING';
-
-  h.fireAndSettle();
-
-  assert.equal(g.clusterQueue.length, 0, 'every bomblet resolved');
-  assert.equal(g.currentPlayer, 1, 'and the turn moved on');
 });
 
 test('a guided missile lights its motor at the apex', (t) => {

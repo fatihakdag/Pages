@@ -1315,7 +1315,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v44';
+  const BUILD = 'v45';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1963,7 +1963,6 @@ if ('serviceWorker' in navigator) {
   // explosion apart from a shot that simply flew off the map.
   let shotExploded = false;
   let explosions = []; // active explosion animations {x,y,r,maxR,t}
-  let clusterQueue = []; // pending sub-explosions for cluster bomb
   let particles = [];
 
   // Each weapon as its own silhouette, drawn in the colour its shell is drawn
@@ -2037,6 +2036,7 @@ if ('serviceWorker' in navigator) {
   const ROLL_FRICTION = 0.55;  // fraction of speed kept per second
   const ROLL_MAX_TIME = 3.5;   // s before it gives up and detonates where it is
   const ROLL_MIN_SPEED = 18;   // px/s under which it has effectively stopped
+  const ROLL_MAX_SLOPE = 3;    // ground steeper than this (~70°) is a wall or a ledge, not a slope
 
   function weaponEnabled(key) {
     const w = WEAPONS[key];
@@ -2159,7 +2159,6 @@ if ('serviceWorker' in navigator) {
     shotExploded = false;
     explosions = [];
     particles = [];
-    clusterQueue = [];
     heli = null;
     nextTheme();
     newTerrain();
@@ -2473,9 +2472,12 @@ if ('serviceWorker' in navigator) {
     // and under-credits exactly the hits that should do the most damage.
     for (const t of tanks) {
       if (!t.alive) continue;
-      const tankTopY = groundHeightAt(t.x) - TANK_H;
+      const groundY = groundHeightAt(t.x);
+      const tankTopY = groundY - TANK_H;
       const dx = t.x - px;
-      const dy = tankTopY - py;
+      // To the nearest point of the hull's height, not just its roof: a burst at
+      // the tank's tracks is as close to it as one on top of the turret.
+      const dy = py < tankTopY ? tankTopY - py : Math.max(0, py - groundY);
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < w.radius) {
         const falloff = 1 - dist / w.radius;
@@ -2807,7 +2809,26 @@ if ('serviceWorker' in navigator) {
       const sdt = dt / sub;
       p.vx += groundGradientAt(p.x) * ROLL_ACCEL * physScale * sdt;
       p.vx *= Math.pow(ROLL_FRICTION, sdt);
-      p.x += p.vx * sdt;
+      const nx = p.x + p.vx * sdt;
+      // Small lips are allowed so a crater rim or a tank pad's edge doesn't
+      // catch it; anything steeper is a cliff.
+      const limit = ROLL_MAX_SLOPE * Math.max(1, Math.abs(nx - p.x)) + 2 * physScale;
+      const rise = p.y - groundHeightAt(nx); // positive: the ground ahead is higher
+      if (rise > limit) {
+        // A wall: it knocks back off the face rather than riding straight up
+        // it, and stalls at the foot.
+        p.vx *= -0.2;
+        continue;
+      }
+      if (-rise > limit) {
+        // Over a ledge: it falls as a shell and settles again where it lands.
+        p.x = nx;
+        p.vy = 0;
+        p.rolling = false;
+        p.trail = [];
+        return;
+      }
+      p.x = nx;
       p.y = groundHeightAt(p.x);
     }
 
@@ -2848,6 +2869,28 @@ if ('serviceWorker' in navigator) {
       });
     }
     spawnDust(p.x, p.y, w.color);
+  }
+
+  // ---------- Cluster bomb ----------
+  // The casing bursts on impact and throws its bomblets up and out of the
+  // crater, fanned like a MIRV's warheads. From there they are ordinary shells:
+  // they fly, drift with the wind and burst on whatever they come down on —
+  // including a cliff face beside the crater — and they cannot scatter again.
+  function scatterBomblets(p, x, y) {
+    const w = WEAPONS[p.weapon];
+    for (let i = 0; i < w.clusterCount; i++) {
+      const offset = i - (w.clusterCount - 1) / 2; // -2 .. +2 for five
+      spawnQueue.push({
+        x, y,
+        vx: (offset * 32 + (Math.random() * 2 - 1) * 12) * physScale,
+        vy: -(150 + Math.random() * 70) * physScale,
+        weapon: p.weapon,
+        firedBy: p.firedBy,
+        bomblet: true,
+        age: 0,
+        trail: []
+      });
+    }
   }
 
   // ---------- Guided missile ----------
@@ -2948,11 +2991,41 @@ if ('serviceWorker' in navigator) {
     if (p.trail.length > 60) p.trail.shift();
   }
 
+  // Walks a shell's path for one frame a pixel at a time and reports the first
+  // thing on it. Testing only where the frame ends let a fast shell sink several
+  // pixels into a cliff face before noticing, and the burst then went to the
+  // surface of that column — the top of the cliff. It also let a shell step over
+  // a thin peak. `px, py` is the last point in open air, which is where anything
+  // that goes off on contact should go off.
+  function firstContact(x0, y0, x1, y1) {
+    const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+    let px = x0, py = y0;
+    for (let i = 1; i <= n; i++) {
+      const x = x0 + (x1 - x0) * i / n;
+      const y = y0 + (y1 - y0) * i / n;
+      let what = null;
+      if (x < -20 || x > W + 20 || y > H + 60) what = 'off';
+      else if (heliHitBy(x, y)) what = 'heli';
+      else if (y >= groundHeightAt(x)) what = 'ground';
+      else {
+        for (const t of tanks) {
+          if (!t.alive) continue;
+          const topY = groundHeightAt(t.x) - TANK_H;
+          if (Math.abs(x - t.x) < TANK_W / 2 && y > topY - 4 && y < topY + TANK_H) { what = 'tank'; break; }
+        }
+      }
+      if (what) return { what, x, y, px, py };
+      px = x; py = y;
+    }
+    return null;
+  }
+
   function stepProjectile(p, dt) {
     if (p.rolling) { stepRoller(p, dt); return; }
 
     const w = WEAPONS[p.weapon];
     p.age = (p.age || 0) + dt;
+    const x0 = p.x, y0 = p.y;
     if (w.guides && p.burnLeft > 0) {
       flyMissile(p, dt);
     } else {
@@ -2976,13 +3049,13 @@ if ('serviceWorker' in navigator) {
     // what keeps those from splitting in the shooter's own lap.
     if (w.mirvCount && !p.split && p.vy >= 0 && p.age > 0.15) { splitMirv(p); return; }
 
-    let hit = false;
-    let hitGround = false;
-    if (p.x < -20 || p.x > W + 20 || p.y > H + 60) {
+    const c = firstContact(x0, y0, p.x, p.y);
+    if (c && c.what === 'off') {
       p.dead = true; // off the map
       return;
     }
-    if (heliHitBy(p.x, p.y) || missileFuzed(p)) {
+    if ((c && c.what === 'heli') || (!c && missileFuzed(p))) {
+      if (c) { p.x = c.x; p.y = c.y; }
       // the shell bursts on the airframe; the wreck falls on its own from here
       spawnExplosionFx(p.x, p.y, 32, '#ffd27a');
       heli.falling = true;
@@ -2991,28 +3064,22 @@ if ('serviceWorker' in navigator) {
       shotExploded = true;
       return;
     }
-    if (p.y >= groundHeightAt(p.x)) {
-      hit = true;
-      hitGround = true;
-    } else {
-      // direct tank hit check
-      for (const t of tanks) {
-        if (!t.alive) continue;
-        const topY = groundHeightAt(t.x) - TANK_H;
-        if (Math.abs(p.x - t.x) < TANK_W / 2 && p.y > topY - 4 && p.y < topY + TANK_H) {
-          hit = true;
-          break;
-        }
-      }
-    }
-    if (!hit) return;
+    if (!c) return;
 
-    const px = p.x, py = Math.min(p.y, groundHeightAt(p.x));
-    if (w.rolls && hitGround) {
+    const px = c.px, py = c.py;
+    if (w.rolls && c.what === 'ground') {
+      if (groundHeightAt(px) - py > 4 * physScale) {
+        // Struck a cliff face rather than landing: it glances off and drops to
+        // the foot of the wall, where it settles like any other landing.
+        p.x = px;
+        p.y = py;
+        p.vx *= -0.3;
+        return;
+      }
       // Landed on the ground rather than straight onto a tank: settle it on
       // the surface and hand it to the roll phase instead of detonating.
       p.rolling = true;
-      p.rollTime = 0;
+      p.rollTime = p.rollTime || 0; // a drop off a ledge doesn't restart its clock
       p.x = px;
       p.y = groundHeightAt(px);
       p.vy = 0;
@@ -3021,20 +3088,8 @@ if ('serviceWorker' in navigator) {
       spawnDust(p.x, p.y, w.color);
       return;
     }
-    if (p.weapon === 'cluster') {
-      applyDamageAndCrater(px, py, p.weapon);
-      for (let i = 0; i < w.clusterCount; i++) {
-        clusterQueue.push({
-          x: px + (Math.random() * 2 - 1) * 60 * physScale,
-          vy: -(80 + Math.random() * 60) * physScale,
-          vx: (Math.random() * 2 - 1) * 40 * physScale,
-          delay: i * 0.08
-        });
-      }
-      spawnClusterTimer = 0;
-    } else {
-      applyDamageAndCrater(px, py, p.weapon);
-    }
+    applyDamageAndCrater(px, py, p.weapon);
+    if (w.clusterCount && !p.bomblet) scatterBomblets(p, px, py);
     p.dead = true;
     shotExploded = true;
     updateHUD();
@@ -3054,8 +3109,8 @@ if ('serviceWorker' in navigator) {
 
     if (state === 'FIRING') {
       for (const p of projectiles) stepProjectile(p, dt);
-      // Warheads a MIRV split off this frame join the flight next frame, so
-      // the list isn't mutated while it is being walked.
+      // Warheads a MIRV split off, or bomblets a cluster bomb threw, join the
+      // flight next frame, so the list isn't mutated while it is being walked.
       projectiles = projectiles.filter(p => !p.dead).concat(spawnQueue);
       spawnQueue = [];
       if (projectiles.length === 0) {
@@ -3068,32 +3123,8 @@ if ('serviceWorker' in navigator) {
 
     if (state === 'EXPLODING') {
       explodeTimer += dt;
-      if (clusterQueue.length) {
-        spawnClusterTimer += dt;
-        const remaining = [];
-        for (const c of clusterQueue) {
-          c.delay -= dt;
-          if (c.delay <= 0) {
-            // simulate a short lob then explode
-            let x = c.x, y = groundHeightAt(c.x) - 200 * physScale;
-            let vx = c.vx, vy = c.vy;
-            let t = 0;
-            while (y < groundHeightAt(x) && t < 2) {
-              vx += wind * physScale * 0.05; // bomblets drift like any other shell
-              vy += GRAVITY * physScale * 0.05;
-              x += vx * 0.05;
-              y += vy * 0.05;
-              t += 0.05;
-            }
-            applyDamageAndCrater(x, groundHeightAt(x), 'cluster');
-          } else {
-            remaining.push(c);
-          }
-        }
-        clusterQueue = remaining;
-      }
       updateHUD();
-      if (explodeTimer > 0.9 && clusterQueue.length === 0 && explosions.every(e => e.t > e.maxR / 90)) {
+      if (explodeTimer > 0.9 && explosions.every(e => e.t > e.maxR / 90)) {
         state = 'RESOLVED';
       }
     }
@@ -3128,7 +3159,6 @@ if ('serviceWorker' in navigator) {
     requestAnimationFrame(step);
   }
   let explodeTimer = 0;
-  let spawnClusterTimer = 0;
 
   // ---------- Rendering ----------
   let decorClock = 0;
@@ -3867,9 +3897,10 @@ if ('serviceWorker' in navigator) {
         ctx.fill();
         ctx.restore();
       } else {
-        // An unsplit MIRV is drawn fatter than the warheads it carries.
+        // An unsplit MIRV is drawn fatter than the warheads it carries, and a
+        // cluster bomb's bomblets smaller than the casing they came out of.
         ctx.beginPath();
-        ctx.arc(p.x, p.y, WEAPONS[p.weapon].mirvCount && !p.split ? 6 : 4, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, pw.mirvCount && !p.split ? 6 : p.bomblet ? 3 : 4, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -4613,7 +4644,6 @@ if ('serviceWorker' in navigator) {
     heli = snap.heli ? { ...snap.heli, seen: new Set(snap.heli.seen || []) } : null;
     if (typeof snap.heliTimer === 'number') heliTimer = snap.heliTimer;
     projectiles = [];
-    clusterQueue = [];
     wind = snap.wind;
     showWind();       // shown, not re-rolled: the snapshot is the authority
     // A snapshot hands the turn over, so the clock starts again here too --
@@ -4747,7 +4777,7 @@ if ('serviceWorker' in navigator) {
     get hudWindVisible() { return hudWindVisible; },
     freshAmmo, weaponEnabled, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
     pickWeapon, weaponButtons, WEAPON_ICONS,
-    fire, applyDamageAndCrater, stepProjectile, stepRoller, detonateRoller, splitMirv,
+    fire, applyDamageAndCrater, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
     endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, showWind, windStrength, windForce, isAi, txt, upper, playerName,
@@ -4776,7 +4806,6 @@ if ('serviceWorker' in navigator) {
     get state() { return state; }, set state(v) { state = v; },
     get currentPlayer() { return currentPlayer; }, set currentPlayer(v) { currentPlayer = v; },
     get projectiles() { return projectiles; }, set projectiles(v) { projectiles = v; },
-    get clusterQueue() { return clusterQueue; }, set clusterQueue(v) { clusterQueue = v; },
     get heli() { return heli; }, set heli(v) { heli = v; },
     get heliTimer() { return heliTimer; }, set heliTimer(v) { heliTimer = v; },
     get cpuMode() { return cpuMode; }, set cpuMode(v) { cpuMode = v; },
