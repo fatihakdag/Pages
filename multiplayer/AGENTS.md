@@ -243,6 +243,15 @@ helicopter is part of the replay. A shot-down wreck holds the turn in
 agrees on what it did; `heliIn()` ignores news of the one this screen last
 brought down (`heliDownId`).
 
+It is **drawn** between steps, not at them (`heliDrawPos()`): carried forward
+by the time since its last fixed step, so it moves every frame at any refresh
+rate instead of only on the frames a step happens to land. And a correction from
+the network for the same aircraft on the same heading — every copy is behind the
+one it is sent by however long the message took, so one arrives at the start of
+each shot, at its end, and with each announcement — glides away over a few
+frames (`replaceHeli()`, `heliDrawOffset`) rather than jumping. Both are drawing
+only; nothing that decides a shot reads them.
+
 `nextTurn()` captures `actor` before advancing, because by the time a turn with
 no shot is published `currentPlayer` is already the *next* seat.
 
