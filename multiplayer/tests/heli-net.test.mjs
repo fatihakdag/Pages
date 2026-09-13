@@ -362,3 +362,29 @@ test('the two sides cannot disagree about whether a tank survived', () => {
   assert.equal(guest.g.tanks[1].alive, host.g.tanks[1].alive);
   assert.equal(guest.g.state, host.g.state, 'and one view of whether it is over');
 });
+
+test('a wreck that has crashed here is not put back in the sky by late news', () => {
+  const { guest, gs } = liveMatch();
+  guest.flatTerrain(400);
+  guest.placeTanksAt([150, 850]);
+  const falling = {
+    id: 7, x: 500, y: 200, dir: 1, speed: 60, vy: 120,
+    falling: true, spin: 0, legs: 1, seen: [0, 1]
+  };
+  gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: falling, heliTimer: 90 } });
+  assert.ok(guest.advanceUntil(() => guest.g.heli === null, { maxMs: 12000 }), 'it crashes here');
+
+  // The shooter's screen was behind this one, so its word that the wreck is
+  // falling — and a snapshot taken while it was — arrive after the crash.
+  gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: falling, heliTimer: 90 } });
+  assert.equal(guest.g.heli, null, 'the falling wreck is not brought back');
+  const snap = guest.g.netSnapshot();
+  snap.heli = falling;
+  guest.g.netApplyState(JSON.parse(JSON.stringify(snap)));
+  assert.equal(guest.g.heli, null, 'nor by a snapshot of it mid-fall');
+
+  // A different helicopter is a different matter.
+  const next = { ...falling, id: 8, y: 120, vy: 0, falling: false };
+  gs.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: next, heliTimer: 90 } });
+  assert.equal(guest.g.heli && guest.g.heli.id, 8, 'the next one still arrives');
+});

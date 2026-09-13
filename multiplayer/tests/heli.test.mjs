@@ -139,6 +139,27 @@ test('a falling helicopter comes down and detonates on the ground', () => {
   assert.ok(g.terrain[450] > 400, 'and leave a crater where it hit');
 });
 
+test('the turn is not over until a shot-down wreck has landed', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.flatTerrain(400);
+  h.placeTanksAt([150, 850]);
+  g.currentPlayer = 0;
+  // The frame after a shell burst on the airframe, high up: the fall takes
+  // well over the 0.9s the shell's own blast holds the turn for.
+  g.spawnHeli();
+  Object.assign(g.heli, { x: 500, y: 60, dir: 1, speed: 60, falling: true, vy: 20 });
+  g.projectiles = [];
+  g.state = 'FIRING';
+
+  assert.ok(h.advanceUntil(() => g.heli === null || g.currentPlayer !== 0, { maxMs: 8000 }));
+  assert.equal(g.heli, null, 'the wreck lands first');
+  assert.equal(g.currentPlayer, 0, 'still inside the shooter’s turn');
+
+  h.advanceUntil(() => g.state === 'AIMING');
+  assert.equal(g.currentPlayer, 1, 'and only then does play move on');
+});
+
 test('summoning is ignored once the round is over', () => {
   const h = loadFlat();
   const { g } = h;
