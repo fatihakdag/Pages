@@ -162,3 +162,50 @@ test('only one helicopter is up at a time', () => {
 
   assert.equal(g.heli, first);
 });
+
+test('the wreck\'s blast is measured to the whole hull, not just its roof', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.flatTerrain(400);
+  h.placeTanksAt([200, 700]);
+  g.state = 'FIRING';
+  const t = g.tanks[1];
+
+  g.heliCrash(t.x + 40, g.groundHeightAt(t.x)); // on the ground beside the tracks
+
+  assert.ok(Math.abs(t.hp - (100 - 80 * (1 - 40 / 74))) < 1e-6,
+    `took ${(100 - t.hp).toFixed(2)}, expected the blast at 40px`);
+});
+
+test('a wreck crashing beside a ledge does not crush the tank up on it', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.flatTerrain(400);
+  for (let x = 380; x <= 420; x++) g.terrain[x] = 250; // a pillar with a tank on top
+  h.placeTanksAt([400, 900]);
+  g.state = 'FIRING';
+  const t = g.tanks[0];
+
+  g.heliCrash(425, 400); // at its foot: 25px across, 150px down
+
+  assert.equal(t.alive, true, 'only a wreck that comes down on a tank crushes it');
+  assert.equal(t.hp, 100, 'and 150px below the hull is outside the blast');
+});
+
+test('a wreck falling into a cliff face goes off on the face, not on top', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.flatTerrain(400);
+  for (let x = 500; x < g.W; x++) g.terrain[x] = 200;
+  h.placeTanksAt([100, 850]);
+  g.state = 'FIRING';
+  g.spawnHeli();
+  Object.assign(g.heli, { x: 470, y: 300, vy: 0, dir: 1, speed: 3000, falling: true });
+
+  g.updateHeli(0.05); // ~52px sideways in one frame, straight into the face
+
+  assert.equal(g.heli, null, 'it crashed');
+  const e = g.explosions[g.explosions.length - 1];
+  assert.ok(e.x <= 500, `burst at x ${e.x.toFixed(1)}, the face is at 500`);
+  assert.ok(e.y > 280 && e.y < 320, `burst at y ${e.y.toFixed(1)}, not on the cliff top at 200`);
+});
