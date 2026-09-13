@@ -754,7 +754,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v47';
+  const BUILD = 'v48';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2416,6 +2416,17 @@
     updateHUD();
   }
 
+  // How far a blast at (px, py) is from a tank: measured to the nearest point of
+  // the hull's height, not just its roof, so a burst at the tracks is as close
+  // as one on top of the turret. Every blast in the game measures with this.
+  function hullDistance(t, px, py) {
+    const groundY = groundHeightAt(t.x);
+    const topY = groundY - TANK_H;
+    const dx = t.x - px;
+    const dy = py < topY ? topY - py : Math.max(0, py - groundY);
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
   function applyDamageAndCrater(px, py, weaponKey) {
     const w = WEAPONS[weaponKey];
     // Compute damage using terrain heights BEFORE cratering — otherwise a
@@ -2424,13 +2435,7 @@
     // and under-credits exactly the hits that should do the most damage.
     for (const t of tanks) {
       if (!t.alive) continue;
-      const groundY = groundHeightAt(t.x);
-      const tankTopY = groundY - TANK_H;
-      const dx = t.x - px;
-      // To the nearest point of the hull's height, not just its roof: a burst at
-      // the tank's tracks is as close to it as one on top of the turret.
-      const dy = py < tankTopY ? tankTopY - py : Math.max(0, py - groundY);
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const dist = hullDistance(t, px, py);
       if (dist < w.radius) {
         const falloff = 1 - dist / w.radius;
         const dmg = w.damageMax * falloff;
@@ -3198,9 +3203,10 @@
     const CRUSH = 26, BLAST = 74, BLAST_DMG = 80;
     for (const t of tanks) {
       if (!t.alive) continue;
-      if (Math.abs(t.x - x) < CRUSH) { t.hp = 0; t.alive = false; continue; }
-      const tankTopY = groundHeightAt(t.x) - TANK_H;
-      const dist = Math.sqrt((t.x - x) * (t.x - x) + (tankTopY - y) * (tankTopY - y));
+      const dist = hullDistance(t, x, y);
+      // Crushed only if the wreck comes down on it. Testing the horizontal
+      // alone flattened a tank on a ledge far above or below the crash.
+      if (dist < CRUSH) { t.hp = 0; t.alive = false; continue; }
       if (dist < BLAST) {
         t.hp -= BLAST_DMG * (1 - dist / BLAST);
         if (t.hp <= 0) { t.hp = 0; t.alive = false; }
@@ -3270,6 +3276,7 @@
       }
       return;
     }
+    const x0 = heli.x, y0 = heli.y;
     heli.vy += GRAVITY * physScale * dt * 0.75;
     heli.x += heli.dir * heli.speed * 0.35 * dt;
     heli.y += heli.vy * dt;
@@ -3283,12 +3290,14 @@
       });
     }
     if (heli.x < -60 || heli.x > W + 60) { heli = null; return; } // fell off the map
-    if (heli.y >= groundHeightAt(heli.x) - 4) {
-      const cx = Math.max(0, Math.min(W - 1, heli.x));
-      const cy = groundHeightAt(cx);
-      heli = null;
-      heliCrash(cx, cy);
-    }
+    // Walked from where the frame started, like a shell, so a wreck falling
+    // into a cliff face goes off against the face rather than on top of the
+    // cliff. Offset by the 4px the airframe hangs below its centre.
+    const c = firstContact(x0, y0 + 4, heli.x, heli.y + 4);
+    if (!c) return;
+    heli = null;
+    if (c.what === 'off') return;
+    heliCrash(Math.max(0, Math.min(W - 1, c.px)), c.py);
   }
 
   function drawHeli() {
@@ -3729,7 +3738,7 @@
     groundHeightAt, craterAt, bedrockY, newTerrain, rebuildTerrainToWidth,
     placeTanks, levelTankPads, groundGradientAt, buildTanks,
     freshAmmo, weaponEnabled, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
-    fire, applyDamageAndCrater, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
+    fire, applyDamageAndCrater, hullDistance, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
     endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
