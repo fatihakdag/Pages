@@ -1395,7 +1395,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v53';
+  const BUILD = 'v54';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2994,7 +2994,7 @@ if ('serviceWorker' in navigator) {
     t.weapon = shot.weapon;
     if (fromElsewhere) {
       if (typeof shot.wind === 'number') wind = shot.wind;
-      if ('heli' in shot) heli = heliIn(shot.heli);
+      if ('heli' in shot) replaceHeli(shot.heli);
     }
     simRandom = seededRandom(shot.seed || 0);
     launchShot();
@@ -3687,6 +3687,10 @@ if ('serviceWorker' in navigator) {
     rotorAngle += dt * 26;
     if (!heli) heliArrivalTick(dt);
     else if (!inShot()) heliFollowClock();   // inside a shot, simStep flies it
+    // A correction glides away rather than snapping (replaceHeli).
+    const glide = heli ? Math.exp(-dt / HELI_GLIDE_S) : 0;
+    heliDrawOffset.x *= glide;
+    heliDrawOffset.y *= glide;
     updateSoundLoops();
     updateTimer();
 
@@ -4136,11 +4140,55 @@ if ('serviceWorker' in navigator) {
     heliCrash(Math.max(0, Math.min(W - 1, c.px)), c.py);
   }
 
+  // Where the helicopter is drawn, as against where the simulation has it: the
+  // gap a correction from the network leaves, closed over a few frames.
+  const heliDrawOffset = { x: 0, y: 0 };
+  const HELI_GLIDE_S = 0.12;    // how quickly that gap closes (a time constant)
+  const HELI_GLIDE_MAX = 150;   // further than this is somewhere else, not a correction
+
+  /**
+   * Where to draw the helicopter this frame. The simulation moves it in fixed
+   * 1/60s steps, which never line up with the screen's frames: drawn at the
+   * step it was left on, it moved no steps on some frames and two on others,
+   * and only every other frame on a 120Hz screen. Carried forward by the time
+   * since that step it glides, plus whatever is left of a correction's offset.
+   * Drawing only — nothing that decides a shot reads this.
+   */
+  function heliDrawPos() {
+    const ahead = inShot() ? simAccum : Math.max(0, Math.min(SIM_DT, netNow() - heli.t));
+    const vx = heli.dir * heli.speed * (heli.falling ? 0.35 : 1);
+    const vy = heli.falling ? heli.vy : 0;
+    return { x: heli.x + vx * ahead + heliDrawOffset.x, y: heli.y + vy * ahead + heliDrawOffset.y };
+  }
+
+  /**
+   * Take the helicopter the network says is up. Each screen's copy is a little
+   * ahead of or behind the one it is sent — by however long the message took —
+   * so replacing it outright made the aircraft jump every time one arrived: at
+   * the start of a shot, at its end, on every turnaround. If it is the same
+   * aircraft on the same heading, it is drawn from where it was and glides onto
+   * the new position instead.
+   */
+  function replaceHeli(h) {
+    const was = heli && { id: heli.id, dir: heli.dir, falling: heli.falling, ...heliDrawPos() };
+    heli = heliIn(h);
+    heliDrawOffset.x = heliDrawOffset.y = 0;
+    if (!was || !heli || heli.id !== was.id || heli.dir !== was.dir || heli.falling !== was.falling) return;
+    // Against where the new copy will be drawn, not its bare position: drawing
+    // carries it forward past its last step too.
+    const will = heliDrawPos();
+    const dx = was.x - will.x, dy = was.y - will.y;
+    if (Math.hypot(dx, dy) > HELI_GLIDE_MAX) return;
+    heliDrawOffset.x = dx;
+    heliDrawOffset.y = dy;
+  }
+
   function drawHeli() {
     if (!heli) return;
     const w = heliSize(), h = w * 0.34;
+    const at = heliDrawPos();
     ctx.save();
-    ctx.translate(heli.x, heli.y);
+    ctx.translate(at.x, at.y);
     if (heli.falling) ctx.rotate(heli.spin);
     ctx.scale(heli.dir, 1);
 
@@ -5151,7 +5199,7 @@ if ('serviceWorker' in navigator) {
       return;
     }
     if (d.k === 'heli') {
-      heli = heliIn(d.heli);
+      replaceHeli(d.heli);
       if (typeof d.heliTimer === 'number') heliTimer = d.heliTimer;
       return;
     }
@@ -5372,7 +5420,7 @@ if ('serviceWorker' in navigator) {
     state = snap.state;
     // Rebuilt from the snapshot rather than merged over whatever we had, so a
     // stale local helicopter cannot leave fields behind.
-    heli = heliIn(snap.heli);
+    replaceHeli(snap.heli);
     if (typeof snap.heliTimer === 'number') heliTimer = snap.heliTimer;
     projectiles = [];
     wind = snap.wind;
@@ -5530,6 +5578,7 @@ if ('serviceWorker' in navigator) {
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     heliOut, heliIn, moveHeli, heliFollowClock, netAnnounceHeli, heliAuthority, heliSignature,
+    heliDrawPos, replaceHeli, heliDrawOffset,
     SOUND, Sound, FLIGHT, flightOf, panOf, setSoundOn, setSfxLevel, sliderToLevel, levelToSlider,
     stopAllSound, updateSoundLoops, soundAvailable, secondsToImpact, screenX01,
     get sfxLevel() { return SND.level(); },

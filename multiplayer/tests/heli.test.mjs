@@ -160,6 +160,57 @@ test('the turn is not over until a shot-down wreck has landed', () => {
   assert.equal(g.currentPlayer, 1, 'and only then does play move on');
 });
 
+/** A helicopter in level flight, stamped now. */
+function levelHeli(g, over = {}) {
+  return { id: 4, t: g.netNow(), x: 300, y: 120, dir: 1, speed: 60, vy: 0,
+           falling: false, spin: 0, legs: 0, seen: [0, 1], ...over };
+}
+
+test('between fixed steps the helicopter is drawn where the clock says, so it glides', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.state = 'AIMING';
+  g.heli = g.heliIn(levelHeli(g));
+
+  // 7ms frames against 1/60s steps: the simulation moves on only some frames.
+  const drawn = [];
+  for (let i = 0; i < 40; i++) { h.advance(7, 7); drawn.push(g.heliDrawPos().x); }
+  const moves = drawn.slice(1).map((x, i) => x - drawn[i]);
+  assert.ok(moves.every(d => Math.abs(d - 60 * 0.007) < 1e-6),
+    `the same distance every frame: ${moves.map(d => d.toFixed(3)).join(' ')}`);
+});
+
+test('a correction from the network glides into place instead of jumping', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.state = 'AIMING';
+  g.heli = g.heliIn(levelHeli(g));
+  h.advance(100);
+  const before = g.heliDrawPos().x;
+
+  // Word that it is 30 units further on than this screen had it — a message's
+  // worth of delay at a faster helicopter.
+  g.netReceive({ k: 'heli', heli: { ...levelHeli(g), x: g.heli.x + 30, t: g.heli.t }, heliTimer: 90 });
+  assert.ok(Math.abs(g.heliDrawPos().x - before) < 1e-6, 'drawn exactly where it was a moment ago');
+
+  h.advance(600);
+  assert.ok(Math.abs(g.heliDrawPos().x - g.heli.x) < 1.5, 'and has glided onto the corrected position');
+});
+
+test('a turnaround or a different helicopter is drawn where it is, not glided to', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.state = 'AIMING';
+  g.heli = g.heliIn(levelHeli(g));
+  h.advance(100);
+
+  g.netReceive({ k: 'heli', heli: levelHeli(g, { dir: -1, x: 900, y: 150, t: g.heli.t }), heliTimer: 90 });
+  assert.deepEqual([g.heliDrawOffset.x, g.heliDrawOffset.y], [0, 0], 'a new heading is news, not drift');
+
+  g.netReceive({ k: 'heli', heli: levelHeli(g, { id: 5, x: 310, t: g.heli.t }), heliTimer: 90 });
+  assert.deepEqual([g.heliDrawOffset.x, g.heliDrawOffset.y], [0, 0], 'nor is another aircraft');
+});
+
 test('summoning is ignored once the round is over', () => {
   const h = loadFlat();
   const { g } = h;
