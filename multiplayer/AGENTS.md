@@ -68,6 +68,23 @@ If `sound.js` fails to load, the page swaps in silent no-ops and hides the
 slider rather than dying on the first shot. The SFX slider and the language
 toggle share the settings panel's last row.
 
+## Themes
+
+This build has more `THEMES` than the root one, and a THEME select in Settings
+(`#theme-select`, stored as `barrage.theme`). `random` — the default — rolls a
+different environment each round, as before; a named theme is used every
+round. The option values are the English theme names, so adding a theme means
+an entry in `THEMES`, an `<option>` in the same position, and a Turkish name in
+`STRINGS.tr`. A theme may set `shape: 'dunes'` (Sandstorm does) to get
+`generateDuneShape()` — smooth crests with one-sided slip faces — or
+`shape: 'craters'` (Lunar Base) for `generateCraterShape()`, rimmed bowls
+pressed into midpoint plains; anything else is plain midpoint displacement.
+`planet: true` draws Earth in a starry sky (`drawEarth()`). Theme looks never
+touch physics — the moon has the same gravity as everywhere else, since a
+per-theme gravity would have to travel in the snapshot. In a match the theme travels in the snapshot, so it is the
+preference of whoever deals the round (the host) that everyone sees; picking
+one mid-match waits for the next round rather than repainting one screen.
+
 ## What differs from the single-player build
 
 **The simulation is in world units, not canvas pixels.** This is the whole
