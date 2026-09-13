@@ -2,7 +2,7 @@
 // does not leave until everyone has had a shot at it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadFlat } from './harness.mjs';
+import { loadFlat, routeHeli } from './harness.mjs';
 
 test('the hit box tracks the airframe', () => {
   const h = loadFlat();
@@ -104,22 +104,29 @@ test('the helicopter stays until every living seat has seen it', () => {
   h.flatTerrain(400);
   g.state = 'AIMING';
   g.currentPlayer = 0;
-  g.spawnHeli();
-  const w = g.heliSize();
+  g.heli = g.heliIn(routeHeli(g, { x: g.W, speed: 300, seen: [0] }));
 
-  // Seat 1 has not had a turn while it is up, so it must come back for another pass.
-  g.heli.x = g.heli.dir > 0 ? g.W + w * 2 : -w * 2;
-  g.updateHeli(0.016);
-  assert.notEqual(g.heli, null, 'it turned around instead of leaving');
+  // Seat 1 has not had a turn while it is up, so it comes back for another pass.
+  h.advance(1000);
+  assert.ok(g.heli, 'it turned around instead of leaving');
   assert.equal(g.heli.legs, 1);
+  assert.equal(g.heli.dir, -1);
 
-  // Once everyone has seen it, it leaves after its minimum number of passes.
-  g.tanks.forEach((t, i) => g.heli.seen.add(i));
-  for (let leg = 0; leg < 6 && g.heli; leg++) {
-    g.heli.x = g.heli.dir > 0 ? g.W + w * 2 : -w * 2;
-    g.updateHeli(0.016);
-  }
-  assert.equal(g.heli, null, 'it eventually goes home');
+  // Seat 1's turn comes round: now everyone has had a go, so this leg is its last.
+  g.advanceTurn(false);
+  assert.equal(g.heli.legsTotal, 2, 'it finishes the leg it is on, two legs at least');
+  assert.ok(h.advanceUntil(() => g.heli === null, { maxMs: 10000 }), 'and then goes home');
+});
+
+test('left alone, it flies its maximum legs and goes', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.state = 'AIMING';
+  g.heli = g.heliIn(routeHeli(g, { x: 0, speed: 1000, seen: [0] }));
+  let legs = 0;
+  h.advanceUntil(() => { if (g.heli) legs = Math.max(legs, g.heli.legs); return g.heli === null; }, { maxMs: 20000 });
+  assert.equal(g.heli, null);
+  assert.equal(legs + 1, g.HELI_MAX_LEGS);
 });
 
 test('a falling helicopter comes down and detonates on the ground', () => {
@@ -160,19 +167,13 @@ test('the turn is not over until a shot-down wreck has landed', () => {
   assert.equal(g.currentPlayer, 1, 'and only then does play move on');
 });
 
-/** A helicopter in level flight, stamped now. */
-function levelHeli(g, over = {}) {
-  return { id: 4, t: g.netNow(), x: 300, y: 120, dir: 1, speed: 60, vy: 0,
-           falling: false, spin: 0, legs: 0, seen: [0, 1], ...over };
-}
-
-test('between fixed steps the helicopter is drawn where the clock says, so it glides', () => {
+test('it is drawn where the clock says, the same distance every frame', () => {
   const h = loadFlat();
   const { g } = h;
   g.state = 'AIMING';
-  g.heli = g.heliIn(levelHeli(g));
+  g.heli = g.heliIn(routeHeli(g));
 
-  // 7ms frames against 1/60s steps: the simulation moves on only some frames.
+  // 7ms frames against 1/60s steps.
   const drawn = [];
   for (let i = 0; i < 40; i++) { h.advance(7, 7); drawn.push(g.heliDrawPos().x); }
   const moves = drawn.slice(1).map((x, i) => x - drawn[i]);
@@ -180,35 +181,29 @@ test('between fixed steps the helicopter is drawn where the clock says, so it gl
     `the same distance every frame: ${moves.map(d => d.toFixed(3)).join(' ')}`);
 });
 
-test('a correction from the network glides into place instead of jumping', () => {
+test('news of the helicopter it already has does not move it', () => {
   const h = loadFlat();
   const { g } = h;
   g.state = 'AIMING';
-  g.heli = g.heliIn(levelHeli(g));
-  h.advance(100);
-  const before = g.heliDrawPos().x;
+  const route = routeHeli(g);
+  g.heli = g.heliIn(route);
+  h.advance(700);
+  const before = g.heliDrawPos();
 
-  // Word that it is 30 units further on than this screen had it — a message's
-  // worth of delay at a faster helicopter.
-  g.netReceive({ k: 'heli', heli: { ...levelHeli(g), x: g.heli.x + 30, t: g.heli.t }, heliTimer: 90 });
-  assert.ok(Math.abs(g.heliDrawPos().x - before) < 1e-6, 'drawn exactly where it was a moment ago');
-
-  h.advance(600);
-  assert.ok(Math.abs(g.heliDrawPos().x - g.heli.x) < 1.5, 'and has glided onto the corrected position');
+  // However late it arrives, the same route puts it in the same place now.
+  g.netReceive({ k: 'heli', heli: route, heliTimer: 90 });
+  assert.deepEqual(g.heliDrawPos(), before);
 });
 
-test('a turnaround or a different helicopter is drawn where it is, not glided to', () => {
-  const h = loadFlat();
-  const { g } = h;
-  g.state = 'AIMING';
-  g.heli = g.heliIn(levelHeli(g));
-  h.advance(100);
-
-  g.netReceive({ k: 'heli', heli: levelHeli(g, { dir: -1, x: 900, y: 150, t: g.heli.t }), heliTimer: 90 });
-  assert.deepEqual([g.heliDrawOffset.x, g.heliDrawOffset.y], [0, 0], 'a new heading is news, not drift');
-
-  g.netReceive({ k: 'heli', heli: levelHeli(g, { id: 5, x: 310, t: g.heli.t }), heliTimer: 90 });
-  assert.deepEqual([g.heliDrawOffset.x, g.heliDrawOffset.y], [0, 0], 'nor is another aircraft');
+test('where it is follows from the route and the time alone, turnarounds included', () => {
+  const { g } = loadFlat();
+  const route = routeHeli(g, { x: 900, speed: 200 });
+  const w = g.heliSize();
+  const T = route.t0 + (g.W + w * 2.5) / 200 + 0.5;   // half a second into the second leg
+  const at = g.heliRouteAt(route, T);
+  assert.equal(at.legs, 1);
+  assert.equal(at.dir, -1, 'heading back');
+  assert.ok(Math.abs(at.x - (g.W + w * 1.5 - 100)) < 1e-9, 'having come back in over the edge it left by');
 });
 
 test('summoning is ignored once the round is over', () => {

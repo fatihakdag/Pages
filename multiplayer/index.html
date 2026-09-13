@@ -1395,7 +1395,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v54';
+  const BUILD = 'v55';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2782,6 +2782,7 @@ if ('serviceWorker' in navigator) {
       power: shooter.power,
       weapon: shooter.weapon,
       turn: turnSeq,                                  // the board it was fired from
+      at: netNow(),                                   // when, on the match clock — where the helicopter is follows from it
       seed: Math.floor(Math.random() * 4294967296),   // for whatever chance decides in flight
       // The wind and the helicopter it was fired into, as this screen has them.
       wind,
@@ -2910,7 +2911,7 @@ if ('serviceWorker' in navigator) {
    * The world only: no screen, no network, so resolveShot() can run it on a
    * copy to work out the board a shot leaves behind, new wind included.
    */
-  function advanceTurn(rollWind) {
+  function advanceTurn(rollWind, T = netNow()) {
     turnSeq++;
     if (tanks.filter(t => t.alive).length <= 1) {
       state = 'GAMEOVER';
@@ -2920,7 +2921,17 @@ if ('serviceWorker' in navigator) {
     // at least two tanks are alive here, so this always lands on someone else
     do { currentPlayer = (currentPlayer + 1) % tanks.length; }
     while (!tanks[currentPlayer].alive);
-    if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
+    if (heli) {
+      heli.seen.add(currentPlayer); // this player now gets a crack at it
+      // Once every living seat has had a turn with it up, it finishes the leg
+      // it is on and goes — after two legs at least. Decided here, where the
+      // turn changes and inside the result everyone takes, rather than at the
+      // edge, which each screen reaches at its own moment. T is when the turn
+      // changed: the shot's own time when a shot ends it.
+      if (!heli.falling && tanks.every((t, i) => !t.alive || heli.seen.has(i))) {
+        heli.legsTotal = Math.min(heli.legsTotal, Math.max(HELI_MIN_LEGS, heliLegAt(heli, T) + 1));
+      }
+    }
     if (rollWind) wind = (Math.random() * 2 - 1) * WIND_MAX;
     state = 'AIMING';
   }
@@ -2994,8 +3005,12 @@ if ('serviceWorker' in navigator) {
     t.weapon = shot.weapon;
     if (fromElsewhere) {
       if (typeof shot.wind === 'number') wind = shot.wind;
-      if ('heli' in shot) replaceHeli(shot.heli);
+      if ('heli' in shot) heli = heliIn(shot.heli);
     }
+    // The shot's own place on the match clock (see SHOT_CATCHUP_FULL_S).
+    simClock = Number.isFinite(shot.at) ? shot.at : netNow();
+    shotBudget = 0;
+    shotLead = resolving ? 0 : Math.max(0, simClock - netNow());
     simRandom = seededRandom(shot.seed || 0);
     launchShot();
   }
@@ -3007,6 +3022,7 @@ if ('serviceWorker' in navigator) {
       terrain: terrain.slice(),
       wind, currentPlayer, state, turnSeq, lastWinner, shotExploded, explodeTimer,
       heliTimer, heliDownId, simRandom, activeShot, projectiles, spawnQueue,
+      simClock, shotBudget, shotLead,
       explosions: explosions.map(e => ({ ...e })),
       particles: particles.map(p => ({ ...p })),
       heli: heli ? { ...heli, seen: new Set(heli.seen) } : null
@@ -3020,6 +3036,7 @@ if ('serviceWorker' in navigator) {
     heliTimer = s.heliTimer; heliDownId = s.heliDownId; simRandom = s.simRandom;
     activeShot = s.activeShot; projectiles = s.projectiles; spawnQueue = s.spawnQueue;
     explosions = s.explosions; particles = s.particles; heli = s.heli;
+    simClock = s.simClock; shotBudget = s.shotBudget; shotLead = s.shotLead;
   }
 
   /**
@@ -3032,7 +3049,7 @@ if ('serviceWorker' in navigator) {
     try {
       beginShot(shot);
       for (let i = 0; i < SHOT_MAX_STEPS && state !== 'RESOLVED'; i++) simStep(SIM_DT);
-      advanceTurn(true);
+      advanceTurn(true, simClock);
       return netSnapshot();
     } finally {
       resolving--;
@@ -3568,6 +3585,7 @@ if ('serviceWorker' in navigator) {
       spawnExplosionFx(p.x, p.y, 32, '#ffd27a');
       heli.falling = true;
       heli.vy = 20;
+      heli.t = simClock;   // the wreck's own clock starts at the step it was hit on
       p.dead = true;
       shotExploded = true;
       return;
@@ -3616,11 +3634,31 @@ if ('serviceWorker' in navigator) {
   let simAccum = 0;
   let explodeTimer = 0;
 
+  // A shot keeps time with the match clock: step k of a shot fired at `shot.at`
+  // happens at shot.at + k × SIM_DT (simClock), on every screen. That is when it
+  // meets the helicopter, whose position comes from the same clock. A replay
+  // starts late — by however long the message took, which across the world is
+  // a good part of a second — so it catches up by playing faster: at double
+  // speed when well behind, and never less than a third faster until level, so
+  // the tail closes too instead of creeping in. A typical 0.1–0.3s delay is made
+  // up in about half a second. Further behind than SHOT_SKIP_S and it jumps most
+  // of the way at once. The steps are the same either way, so the outcome never
+  // changes, only how quickly this screen shows them.
+  const SHOT_CATCHUP_FULL_S = 0.3;   // this far behind or more plays at double speed
+  const SHOT_CATCHUP_MIN = 0.35;     // and until level, at least this much faster
+  const SHOT_SKIP_S = 1;             // further behind than this skips ...
+  const SHOT_SKIP_TO_S = 0.5;        // ... to this far behind
+  let simClock = 0;     // match time of the next fixed step
+  let shotBudget = 0;   // step time this frame may still run
+  let shotLead = 0;     // a shot stamped ahead of our clock plays at normal speed from arrival
+
   /** A shot is on: the world belongs to it until it lands. */
   function inShot() { return state === 'FIRING' || state === 'EXPLODING' || state === 'RESOLVED'; }
 
   /** One fixed step: the shells in the air, their blasts, and the helicopter while a shot is on. */
   function simStep(dt) {
+    // Where the helicopter is at this step's moment, before anything can hit it.
+    if (heli && !heli.falling && inShot()) heliFlyTo(simClock);
     if (state === 'FIRING') {
       for (const p of projectiles) stepProjectile(p, dt);
       // Warheads a MIRV split off, or bomblets a cluster bomb threw, join the
@@ -3654,7 +3692,18 @@ if ('serviceWorker' in navigator) {
     // Blasts age in the step, not the frame: the turn waits for them to finish.
     explosions.forEach(e => { e.t += dt * 90; e.r = Math.min(e.maxR, 4 + e.t); });
     explosions = explosions.filter(e => e.r < e.maxR - 0.5);
-    if (heli && inShot()) moveHeli(dt);
+    if (heli && heli.falling && inShot()) moveHeli(dt);
+    simClock += dt;
+  }
+
+  /** Run up to n steps of the shot on screen; stops when that shot lands. */
+  function runShotSteps(n) {
+    const shot = activeShot;
+    for (let i = 0; i < n && activeShot === shot; i++) {
+      simStep(SIM_DT);
+      if (++shot.steps > SHOT_MAX_STEPS) state = 'RESOLVED';
+      if (state === 'RESOLVED') finishShot();
+    }
   }
 
   function step(ts) {
@@ -3664,12 +3713,31 @@ if ('serviceWorker' in navigator) {
     const dt = Math.max(0, Math.min((ts - lastTime) / 1000, SIM_DT * SIM_MAX_STEPS_PER_FRAME));
     lastTime = ts;
 
-    simAccum += dt;
-    while (simAccum >= SIM_DT) {
-      simAccum -= SIM_DT;
-      simStep(SIM_DT);
-      if (activeShot && ++activeShot.steps > SHOT_MAX_STEPS) state = 'RESOLVED';
-      if (state === 'RESOLVED') finishShot();
+    if (activeShot) {
+      // On the match clock, never ahead of it (see SHOT_CATCHUP_FULL_S).
+      const target = netNow() + shotLead;
+      let behind = target - simClock;
+      if (behind > SHOT_SKIP_S) {
+        runShotSteps(Math.min(SHOT_MAX_STEPS, Math.floor((behind - SHOT_SKIP_TO_S) / SIM_DT)));
+        behind = target - simClock;
+      }
+      shotBudget += dt * (behind > SIM_DT
+        ? 1 + Math.max(SHOT_CATCHUP_MIN, Math.min(1, behind / SHOT_CATCHUP_FULL_S))
+        : 1);
+      while (activeShot && shotBudget >= SIM_DT && simClock + SIM_DT <= target + 1e-9) {
+        shotBudget -= SIM_DT;
+        runShotSteps(1);
+      }
+      shotBudget = Math.min(shotBudget, SIM_DT);
+      simAccum = 0;
+    } else {
+      simAccum += dt;
+      while (simAccum >= SIM_DT) {
+        simAccum -= SIM_DT;
+        simClock = netNow() - simAccum;
+        simStep(SIM_DT);
+        if (state === 'RESOLVED') finishShot();
+      }
     }
     // A turn the clock skipped goes straight to RESOLVED without a step.
     if (state === 'RESOLVED') finishShot();
@@ -3686,11 +3754,8 @@ if ('serviceWorker' in navigator) {
     netCheckTurnClock();
     rotorAngle += dt * 26;
     if (!heli) heliArrivalTick(dt);
-    else if (!inShot()) heliFollowClock();   // inside a shot, simStep flies it
-    // A correction glides away rather than snapping (replaceHeli).
-    const glide = heli ? Math.exp(-dt / HELI_GLIDE_S) : 0;
-    heliDrawOffset.x *= glide;
-    heliDrawOffset.y *= glide;
+    // Inside a shot, simStep puts it where it is at the shot's own time.
+    else if (!inShot()) { if (heli.falling) heliFollowClock(); else heliFlyTo(netNow()); }
     updateSoundLoops();
     updateTimer();
 
@@ -3812,15 +3877,20 @@ if ('serviceWorker' in navigator) {
   // the top of the canvas. On a low or flat map a fixed altitude left the
   // helicopter miles above every barrel and simply unreachable; anchoring to
   // the terrain keeps the shot on the table whatever the map looks like, while
-  // still passing over every hill. Craters only ever lower ground, so as a
-  // round chews the map down the fly-by drifts down with it.
-  function heliCruiseY() {
+  // still passing over every hill. Every leg's altitude is rolled when it
+  // spawns, from the map as it is then: each screen reaches a leg at its own
+  // moment, and the altitude has to be the same whenever that is. Craters only
+  // ever lower ground, so a later leg is never lower than it should be.
+  function heliCruiseAltitudes(legs) {
     let peak = H * 0.5;
     for (let x = 0; x < terrain.length; x++) if (terrain[x] < peak) peak = terrain[x];
-    // clearance comfortably exceeds TANK_H, so it clears a tank sat on the peak
-    // Seeded mid-shot: a turnaround during a shot happens on every screen's replay.
-    const clearance = Math.max(34, H * 0.075) + (inShot() ? simRandom : Math.random)() * H * 0.03;
-    return Math.max(H * 0.05, peak - clearance);
+    const ys = [];
+    for (let k = 0; k < legs; k++) {
+      // clearance comfortably exceeds TANK_H, so it clears a tank sat on the peak
+      const clearance = Math.max(34, H * 0.075) + Math.random() * H * 0.03;
+      ys.push(Math.max(H * 0.05, peak - clearance));
+    }
+    return ys;
   }
 
   // It turns back at the edges rather than leaving on the first pass, so the
@@ -3832,23 +3902,26 @@ if ('serviceWorker' in navigator) {
   const HELI_MIN_LEGS = 2, HELI_MAX_LEGS = 6;
 
   function spawnHeli() {
-    const fromLeft = Math.random() < 0.5;
-    const w = heliSize();
     heli = {
       id: Math.floor(Math.random() * 2 ** 31),   // so a late word about it can be recognised (heliIn)
-      t: netNow(),   // the moment on the match clock this state describes (heliFollowClock)
-      x: fromLeft ? -w : W + w,
-      y: heliCruiseY(),
-      dir: fromLeft ? 1 : -1,
+      // Its whole route, fixed here: when and on which side it came in, how
+      // fast, and the altitude of every leg. Where it is at any moment follows
+      // from these and the match clock (heliRouteAt), so every screen draws it
+      // in the same place without being told again.
+      t0: netNow(),
+      fromLeft: Math.random() < 0.5,
       speed: W / (9 + Math.random() * 5),   // ~9-14s to cross, whatever the width
-      vy: 0,
+      ys: heliCruiseAltitudes(HELI_MAX_LEGS),
+      legsTotal: HELI_MAX_LEGS,   // cut short once everyone has had a turn at it (advanceTurn)
       falling: false,
-      spin: 0,
-      legs: 0,
       // whoever is aiming right now can already shoot at it; anyone mid-shot
       // cannot, and gets counted when their next turn starts
-      seen: new Set(state === 'AIMING' ? [currentPlayer] : [])
+      seen: new Set(state === 'AIMING' ? [currentPlayer] : []),
+      // Where it is, kept up to date from the route (heliFlyTo); once it is
+      // shot down these, vy, spin and t are the wreck's own.
+      x: 0, y: 0, dir: 1, legs: 0, vy: 0, spin: 0, t: 0
     };
+    heliFlyTo(netNow());
   }
 
   function heliHitBy(px, py) {
@@ -4051,15 +4124,60 @@ if ('serviceWorker' in navigator) {
    * Math.random, so one player is shooting at a helicopter the other cannot
    * see — and the two disagree about whether the shot hit anything.
    *
-   * Movement is not gated: it is the same arithmetic from the same state on
-   * both sides, and any drift is erased by the next sync.
+   * Movement needs no authority at all: the route is fixed when it spawns, and
+   * every screen works out the same position from it and the match clock.
    */
   function heliAuthority() { return !netPlaying() || currentPlayer === online.seat; }
 
   function updateHeli(dt) {
     rotorAngle += dt * 26;
     if (!heli) { heliArrivalTick(dt); return; }
-    moveHeli(dt);
+    if (heli.falling) moveHeli(dt); else heliFlyTo(netNow());
+  }
+
+  /** Leg k of a route: when it starts, where, and which way it heads. */
+  function heliLeg(h, k) {
+    const w = heliSize();
+    const dir0 = h.fromLeft ? 1 : -1;
+    if (k === 0) return { t: h.t0, x: h.fromLeft ? -w : W + w, dir: dir0 };
+    const dir = k % 2 ? -dir0 : dir0;
+    return {
+      t: h.t0 + (W + w * 2.5) / h.speed + (k - 1) * (W + w * 3) / h.speed,
+      // It turns back just past the edge and comes in over the one it left by,
+      // rather than reappearing on the far side.
+      x: dir > 0 ? -w * 1.5 : W + w * 1.5,
+      dir
+    };
+  }
+
+  /** Which leg of its route a helicopter is on at match time T. */
+  function heliLegAt(h, T) {
+    const w = heliSize();
+    const first = (W + w * 2.5) / h.speed;
+    const e = T - h.t0;
+    if (!(e >= first)) return 0;
+    return 1 + Math.floor((e - first) / ((W + w * 3) / h.speed));
+  }
+
+  /** Where a helicopter in level flight is at match time T, or null once it has flown its last leg. */
+  function heliRouteAt(h, T) {
+    const k = heliLegAt(h, T);
+    if (k >= h.legsTotal) return null;
+    const leg = heliLeg(h, k);
+    return {
+      x: leg.x + leg.dir * h.speed * Math.max(0, T - leg.t),
+      y: h.ys[Math.min(k, h.ys.length - 1)],
+      dir: leg.dir,
+      legs: k
+    };
+  }
+
+  /** Put the helicopter where its route has it at time T — gone, if the route is over. */
+  function heliFlyTo(T) {
+    if (!heli || heli.falling) return;
+    const at = heliRouteAt(heli, T);
+    if (!at) { heli = null; return; }
+    heli.x = at.x; heli.y = at.y; heli.dir = at.dir; heli.legs = at.legs;
   }
 
   /** Count down to the next fly-by, on the client whose turn it is — never mid-shot. */
@@ -4074,43 +4192,20 @@ if ('serviceWorker' in navigator) {
   const HELI_CLOCK_SLACK_S = 20;
 
   /**
-   * Between shots, fly the helicopter to where it is *now* on the match clock.
-   * It used to move by each screen's own frame times, so the copies drifted
-   * apart until the snapshot at the end of a turn yanked them back into place.
-   * Stepping from the stamped state (heli.t) to the shared time in the same
-   * fixed steps puts it in the same place on every screen.
+   * Between shots, bring a falling wreck up to *now* on the match clock, in the
+   * same fixed steps a shot uses. A wreck only ever falls between shots when a
+   * snapshot hands one over mid-fall; normally it comes down inside the shot.
    */
   function heliFollowClock() {
     const now = netNow();
     if (!(Math.abs(now - heli.t) <= HELI_CLOCK_SLACK_S)) heli.t = now;
-    while (heli && heli.t + SIM_DT <= now) moveHeli(SIM_DT);
+    while (heli && heli.falling && heli.t + SIM_DT <= now) moveHeli(SIM_DT);
   }
 
+  /** One step of a shot-down wreck coming down. Level flight is heliFlyTo's. */
   function moveHeli(dt) {
+    if (!heli.falling) return;
     heli.t = (Number.isFinite(heli.t) ? heli.t : netNow()) + dt;
-    const w = heliSize();
-    if (!heli.falling) {
-      heli.x += heli.dir * heli.speed * dt;
-      if (heli.x < -w * 1.5 || heli.x > W + w * 1.5) {
-        // The turnaround rerolls an altitude and may retire the aircraft, so
-        // between shots it belongs to one client and everyone else parks
-        // off-screen until told. Mid-shot every screen does it, from the seed.
-        if (!inShot() && !heliAuthority()) return;
-        heli.legs++;
-        const allHadATurn = tanks.every((t, i) => !t.alive || heli.seen.has(i));
-        if ((allHadATurn && heli.legs >= HELI_MIN_LEGS) || heli.legs >= HELI_MAX_LEGS) {
-          heli = null;
-        } else {
-          // Come back in over the edge it just left, rather than reappearing on
-          // the far side, at a slightly different altitude each time.
-          const leftOverRight = heli.x > W;
-          heli.dir = leftOverRight ? -1 : 1;
-          heli.x = leftOverRight ? W + w * 1.5 : -w * 1.5;
-          heli.y = heliCruiseY();
-        }
-      }
-      return;
-    }
     const x0 = heli.x, y0 = heli.y;
     heli.vy += GRAVITY * physScale * dt * 0.75;
     heli.x += heli.dir * heli.speed * 0.35 * dt;
@@ -4140,47 +4235,19 @@ if ('serviceWorker' in navigator) {
     heliCrash(Math.max(0, Math.min(W - 1, c.px)), c.py);
   }
 
-  // Where the helicopter is drawn, as against where the simulation has it: the
-  // gap a correction from the network leaves, closed over a few frames.
-  const heliDrawOffset = { x: 0, y: 0 };
-  const HELI_GLIDE_S = 0.12;    // how quickly that gap closes (a time constant)
-  const HELI_GLIDE_MAX = 150;   // further than this is somewhere else, not a correction
-
   /**
-   * Where to draw the helicopter this frame. The simulation moves it in fixed
-   * 1/60s steps, which never line up with the screen's frames: drawn at the
-   * step it was left on, it moved no steps on some frames and two on others,
-   * and only every other frame on a 120Hz screen. Carried forward by the time
-   * since that step it glides, plus whatever is left of a correction's offset.
-   * Drawing only — nothing that decides a shot reads this.
+   * Where to draw the helicopter this frame. In level flight that is its route
+   * at the match clock's *now* — on every screen, during shots too, whatever
+   * time the shot on screen has reached. Nothing a message brings can move it,
+   * because every copy of a route gives the same answer at the same moment, so
+   * there is nothing to rewind at the start of a shot or correct at its end.
+   * A falling wreck is the shot's, carried forward from its last fixed step so
+   * it moves on every frame. Drawing only: shots read heli.x and heli.y.
    */
   function heliDrawPos() {
-    const ahead = inShot() ? simAccum : Math.max(0, Math.min(SIM_DT, netNow() - heli.t));
-    const vx = heli.dir * heli.speed * (heli.falling ? 0.35 : 1);
-    const vy = heli.falling ? heli.vy : 0;
-    return { x: heli.x + vx * ahead + heliDrawOffset.x, y: heli.y + vy * ahead + heliDrawOffset.y };
-  }
-
-  /**
-   * Take the helicopter the network says is up. Each screen's copy is a little
-   * ahead of or behind the one it is sent — by however long the message took —
-   * so replacing it outright made the aircraft jump every time one arrived: at
-   * the start of a shot, at its end, on every turnaround. If it is the same
-   * aircraft on the same heading, it is drawn from where it was and glides onto
-   * the new position instead.
-   */
-  function replaceHeli(h) {
-    const was = heli && { id: heli.id, dir: heli.dir, falling: heli.falling, ...heliDrawPos() };
-    heli = heliIn(h);
-    heliDrawOffset.x = heliDrawOffset.y = 0;
-    if (!was || !heli || heli.id !== was.id || heli.dir !== was.dir || heli.falling !== was.falling) return;
-    // Against where the new copy will be drawn, not its bare position: drawing
-    // carries it forward past its last step too.
-    const will = heliDrawPos();
-    const dx = was.x - will.x, dy = was.y - will.y;
-    if (Math.hypot(dx, dy) > HELI_GLIDE_MAX) return;
-    heliDrawOffset.x = dx;
-    heliDrawOffset.y = dy;
+    if (!heli.falling) return heliRouteAt(heli, netNow()) || { x: heli.x, y: heli.y, dir: heli.dir };
+    const ahead = Math.max(0, Math.min(SIM_DT, netNow() - heli.t));
+    return { x: heli.x + heli.dir * heli.speed * 0.35 * ahead, y: heli.y + heli.vy * ahead, dir: heli.dir };
   }
 
   function drawHeli() {
@@ -4190,7 +4257,7 @@ if ('serviceWorker' in navigator) {
     ctx.save();
     ctx.translate(at.x, at.y);
     if (heli.falling) ctx.rotate(heli.spin);
-    ctx.scale(heli.dir, 1);
+    ctx.scale(at.dir, 1);
 
     ctx.fillStyle = heli.falling ? '#6b4a34' : '#46525f';
     ctx.beginPath();
@@ -4620,7 +4687,8 @@ if ('serviceWorker' in navigator) {
   // sent, and only once the shot on screen has landed (netReceive).
 
   // 2: `turn` carries its result, and the relay answers `time`.
-  const NET_PROTOCOL = 2;
+  // 3: the helicopter travels as its route, and `turn` carries `at`.
+  const NET_PROTOCOL = 3;
 
   // A turn nobody takes would otherwise hold the game up for ever: a hidden tab
   // never disconnects, so no timeout at the socket level can ever fire. The seat
@@ -4689,6 +4757,28 @@ if ('serviceWorker' in navigator) {
         }
       }, ms);
     }
+    // And again every so often: over a long match the page's clock drifts, and
+    // a round trip that was slow when we joined may be quick now.
+    setTimeout(() => {
+      if (ws && online.ws === ws && ws.readyState === 1) netSyncClock();
+    }, CLOCK_RESYNC_MS);
+  }
+
+  const CLOCK_RESYNC_MS = 60 * 1000;
+
+  /**
+   * The clock moved by `shift` seconds — from this page's own to the relay's,
+   * on the first answer, which is a jump of decades. What this page stamped on
+   * the old clock moves with it, or a helicopter up at that moment would be
+   * somewhere else entirely and the shot on screen would try to catch up years.
+   */
+  function netRebaseClock(shift) {
+    if (heli) {
+      if (Number.isFinite(heli.t0)) heli.t0 += shift;
+      if (Number.isFinite(heli.t)) heli.t += shift;
+    }
+    simClock += shift;
+    if (activeShot && Number.isFinite(activeShot.shot.at)) activeShot.shot.at += shift;
   }
 
   function netClockSample(m) {
@@ -4696,7 +4786,10 @@ if ('serviceWorker' in navigator) {
     const rtt = now - m.c;
     if (typeof m.s !== 'number' || !(rtt >= 0) || rtt > clockBestRttMs) return;
     clockBestRttMs = rtt;
+    const was = clockOffsetMs;
     clockOffsetMs = m.s + rtt / 2 - now;
+    const shift = (clockOffsetMs - was) / 1000;
+    if (Math.abs(shift) > 1) netRebaseClock(shift);
   }
 
   // The relay hands out a fresh member id on every connection and remembers
@@ -5199,7 +5292,7 @@ if ('serviceWorker' in navigator) {
       return;
     }
     if (d.k === 'heli') {
-      replaceHeli(d.heli);
+      heli = heliIn(d.heli);
       if (typeof d.heliTimer === 'number') heliTimer = d.heliTimer;
       return;
     }
@@ -5317,13 +5410,12 @@ if ('serviceWorker' in navigator) {
   }
 
   /**
-   * Everything discrete about the helicopter: whether there is one, which way
-   * it is going, how many legs it has flown, whether it is coming down. A
-   * change in any of these is something the other clients cannot work out for
-   * themselves, because it comes from a roll or a decision made here.
+   * What the other clients cannot work out for themselves about the helicopter:
+   * whether there is one (and which), whether it is coming down, and how many
+   * legs it will fly. Turnarounds are not news — they are part of the route.
    */
   function heliSignature() {
-    return heli ? `${heli.dir}|${heli.legs}|${heli.falling ? 1 : 0}` : 'none';
+    return heli ? `${heli.id}|${heli.falling ? 1 : 0}|${heli.legsTotal}` : 'none';
   }
 
   // The last wreck this screen brought down. Screens land a wreck at slightly
@@ -5335,14 +5427,22 @@ if ('serviceWorker' in navigator) {
   /** A helicopter as it arrives from another client, or null. */
   function heliIn(h) {
     if (!h || (h.id != null && h.id === heliDownId)) return null;
-    return { ...h, t: Number.isFinite(h.t) ? h.t : netNow(), seen: new Set(h.seen || []) };
+    const out = { ...h, ys: (h.ys || []).slice(), seen: new Set(h.seen || []) };
+    if (out.falling) {
+      if (!Number.isFinite(out.t)) out.t = netNow();
+      return out;
+    }
+    // In level flight only the route matters; where it is comes from the clock.
+    const at = heliRouteAt(out, netNow());
+    return at ? Object.assign(out, at) : null;
   }
 
   function heliOut() {
     return heli ? {
-      id: heli.id, t: heli.t, x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed,
-      vy: heli.vy, falling: heli.falling, spin: heli.spin, legs: heli.legs,
-      seen: [...heli.seen]
+      id: heli.id, t0: heli.t0, fromLeft: heli.fromLeft, speed: heli.speed, ys: heli.ys,
+      legsTotal: heli.legsTotal, seen: [...heli.seen], falling: heli.falling,
+      // The wreck is off its route: where it is, and how it is coming down.
+      t: heli.t, x: heli.x, y: heli.y, dir: heli.dir, vy: heli.vy, spin: heli.spin
     } : null;
   }
 
@@ -5420,7 +5520,7 @@ if ('serviceWorker' in navigator) {
     state = snap.state;
     // Rebuilt from the snapshot rather than merged over whatever we had, so a
     // stale local helicopter cannot leave fields behind.
-    replaceHeli(snap.heli);
+    heli = heliIn(snap.heli);
     if (typeof snap.heliTimer === 'number') heliTimer = snap.heliTimer;
     projectiles = [];
     wind = snap.wind;
@@ -5578,7 +5678,9 @@ if ('serviceWorker' in navigator) {
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     heliOut, heliIn, moveHeli, heliFollowClock, netAnnounceHeli, heliAuthority, heliSignature,
-    heliDrawPos, replaceHeli, heliDrawOffset,
+    heliDrawPos, heliRouteAt, heliLegAt, heliFlyTo, HELI_MIN_LEGS, HELI_MAX_LEGS,
+    SHOT_SKIP_S, SHOT_SKIP_TO_S, SHOT_CATCHUP_FULL_S, CLOCK_RESYNC_MS, netRebaseClock,
+    get simClock() { return simClock; },
     SOUND, Sound, FLIGHT, flightOf, panOf, setSoundOn, setSfxLevel, sliderToLevel, levelToSlider,
     stopAllSound, updateSoundLoops, soundAvailable, secondsToImpact, screenX01,
     get sfxLevel() { return SND.level(); },

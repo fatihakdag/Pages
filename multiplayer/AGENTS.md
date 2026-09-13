@@ -193,7 +193,7 @@ the seat, `fire()` first runs the whole shot to the end on a copy of the world
 flight, blasts, craters, damage, a helicopter brought down and where its wreck
 lands, the turn handed on and the new wind. Then one message goes out:
 
-- **`turn`** — `{seat, angle, power, weapon, ai, turn, seed, wind, heli, result}`.
+- **`turn`** — `{seat, angle, power, weapon, ai, turn, at, seed, wind, heli, result}`.
   `result` is the snapshot the shot leaves behind. Every screen, the shooter's
   too, replays the shot from the inputs (`beginShot()`) and takes `result` as
   the board when it lands (`finishShot()`).
@@ -208,14 +208,16 @@ watches, and nothing about the outcome depends on which screen animates fastest.
 
 What makes a replay land exactly on `result` (there are tests for each):
 
-- **Fixed steps.** `step()` accumulates frame time and runs `simStep(SIM_DT)`;
-  only sparks, smoke, sound and the camera use the frame's own `dt`. A 30fps
-  laptop and a 144Hz phone do the same arithmetic `resolveShot()` did.
-- **A seed per shot.** Chance that changes the outcome — cluster scatter, a
-  helicopter's new altitude when it turns mid-shot — draws from `simRandom`,
-  seeded from `turn.seed`. Anything cosmetic stays on `Math.random`.
-- **The same starting world.** The message carries the wind and the helicopter
-  it was fired into; terrain and tanks are the previous `result`.
+- **Fixed steps.** A shot runs `simStep(SIM_DT)` in fixed steps timed by the
+  match clock (see below); only sparks, smoke, sound and the camera use the
+  frame's own `dt`. A 30fps laptop and a 144Hz phone do the same arithmetic
+  `resolveShot()` did.
+- **A seed per shot.** Chance that changes the outcome — cluster scatter —
+  draws from `simRandom`, seeded from `turn.seed`. Anything cosmetic stays on
+  `Math.random`.
+- **The same starting world.** The message carries the wind, the helicopter's
+  route and the moment it was fired (`at`); terrain and tanks are the previous
+  `result`.
 - **Nothing lands on a replay in progress.** `turn`, `heli`, `timeout` and
   `sync` go through `netReceive()`: applied in the order sent, and only when no
   shot is playing (`activeShot`) — otherwise queued in `online.inbox` and
@@ -231,26 +233,48 @@ Snapshots carry `turn` (`turnSeq`, the round's count of resolved turns), and
 always applies. A match resumed mid-shot is handed that shot's `result`, since
 the arrival has nothing to replay it from.
 
-**The helicopter flies on a shared clock.** Its state carries `t`, the moment on
-the match clock it describes, and between shots `heliFollowClock()` steps it in
-`SIM_DT` steps up to `netNow()` — so every screen shows it in the same place
-instead of each adding up its own frames. The clock is the relay's: on joining,
-a client sends three `time` samples and keeps the offset from the fastest round
-trip (`netClockSample`). Arrivals and turnarounds between shots are still
-decided by the seat holding the turn and announced (`heli`); mid-shot the
-helicopter is part of the replay. A shot-down wreck holds the turn in
-`EXPLODING` until it lands, so every screen crashes it inside the shot and
-agrees on what it did; `heliIn()` ignores news of the one this screen last
-brought down (`heliDownId`).
+**The helicopter flies a route on the match clock.** When it spawns, the seat
+holding the turn fixes its whole route — `t0`, `fromLeft`, `speed`, and `ys`,
+the altitude of every leg — and announces it (`heli`). Where it is at any time
+`T` is then plain arithmetic (`heliRouteAt()`, `heliLeg()`, `heliLegAt()`):
+leg 0 comes in from just off one edge, every later leg turns back just past
+the edge and comes in over the one it left by. So:
 
-It is **drawn** between steps, not at them (`heliDrawPos()`): carried forward
-by the time since its last fixed step, so it moves every frame at any refresh
-rate instead of only on the frames a step happens to land. And a correction from
-the network for the same aircraft on the same heading — every copy is behind the
-one it is sent by however long the message took, so one arrives at the start of
-each shot, at its end, and with each announcement — glides away over a few
-frames (`replaceHeli()`, `heliDrawOffset`) rather than jumping. Both are drawing
-only; nothing that decides a shot reads them.
+- It is **drawn at `netNow()` on every screen, always** (`heliDrawPos()`) —
+  between shots, during them, whatever time the shot on screen has reached. No
+  message can move it, because every copy of a route gives the same answer at
+  the same moment: nothing is rewound when a late shot starts, corrected when
+  its result lands, or announced at a turnaround.
+- **A shot meets it at the shot's own time.** Step `k` of a shot fired at
+  `turn.at` happens at `simClock = at + k × SIM_DT`, and `simStep()` puts the
+  helicopter where the route has it then (`heliFlyTo(simClock)`) before anything
+  can hit it. The shooter's `resolveShot()` and every replay get the same answer.
+- **When it leaves is decided at a turn change, not at an edge.** In
+  `advanceTurn()`, once every living seat has had a turn with it up, `legsTotal`
+  becomes the leg it is on plus one (two at least, `HELI_MAX_LEGS` at most). That
+  is inside the result everyone takes, where an edge is reached by each screen at
+  its own moment. Past its last leg the route is over and each screen drops it.
+- A shot-down wreck leaves its route: it becomes `x, y, vy, spin, t` stepped by
+  `moveHeli()` inside the shot, and holds the turn in `EXPLODING` until it lands,
+  so every screen crashes it inside the shot and agrees on what it did.
+  `heliIn()` ignores news of the one this screen last brought down (`heliDownId`).
+
+**Shots play on the match clock too** (`step()`). A replay starts late by however
+long the message took — most of a second across the world — so it catches up:
+double speed at `SHOT_CATCHUP_FULL_S` (0.3s) behind or more, and never less than
+35% faster until level, so 0.1–0.3s is made up in about half a second. More than
+`SHOT_SKIP_S` (1s) behind and it runs straight to `SHOT_SKIP_TO_S` (0.5s) behind
+first. It never runs ahead of the clock. The steps are the same whatever the
+speed, so only how quickly a screen shows the shot changes, never how it ends.
+
+**The clock** is the relay's: on joining a client sends three `time` samples and
+keeps the offset from the fastest round trip (`netClockSample`), and does it
+again every `CLOCK_RESYNC_MS` (a minute) for long matches. A jump of more than a
+second — the first answer, which moves from the page's own clock to the relay's —
+shifts what the page has already stamped with it (`netRebaseClock`). Clock error
+between two screens is typically 10–30ms across the world: a helicopter a unit or
+so apart on the two screens, and never a different outcome, since hits use the
+route at the shot's own time.
 
 `nextTurn()` captures `actor` before advancing, because by the time a turn with
 no shot is published `currentPlayer` is already the *next* seat.

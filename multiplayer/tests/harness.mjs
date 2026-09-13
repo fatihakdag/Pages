@@ -402,6 +402,20 @@ export function load(opts = {}) {
   return api;
 }
 
+/**
+ * A helicopter route, as it travels, that passes x heading `dir` at this
+ * game's current match time — on its first leg, at altitude y.
+ */
+export function routeHeli(g, { x = 300, y = 120, dir = 1, speed = 60, id = 4, legsTotal = 6, seen = [0, 1] } = {}) {
+  const w = g.heliSize();
+  const fromLeft = dir > 0;
+  const start = fromLeft ? -w : g.W + w;
+  return {
+    id, t0: g.netNow() - Math.abs(x - start) / speed, fromLeft, speed,
+    ys: new Array(6).fill(y), legsTotal, seen, falling: false
+  };
+}
+
 /** A two-human game on flat ground with no wind: the most predictable setup. */
 export function loadFlat(opts = {}) {
   const h = load(opts);
