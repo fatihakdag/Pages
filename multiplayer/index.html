@@ -1259,6 +1259,26 @@
             <option value="brutal">Brutal</option>
           </select>
         </div>
+        <div class="ctrl-group" id="theme-group">
+          <div class="ctrl-label" data-i18n="theme">THEME</div>
+          <!-- Values are the THEMES names; the labels are rewritten per language
+               by applyLanguage(). Keep the order the same as THEMES. -->
+          <select id="theme-select">
+            <option value="random" selected>Random</option>
+            <option value="Dusk Ridge">Dusk Ridge</option>
+            <option value="Salt Flats">Salt Flats</option>
+            <option value="Ash Peaks">Ash Peaks</option>
+            <option value="Glacier">Glacier</option>
+            <option value="Verdant Hills">Verdant Hills</option>
+            <option value="Night Crater">Night Crater</option>
+            <option value="Rust Canyon">Rust Canyon</option>
+            <option value="Toxic Marsh">Toxic Marsh</option>
+            <option value="Cherry Blossom">Cherry Blossom</option>
+            <option value="Lunar Base">Lunar Base</option>
+            <option value="Sandstorm">Sandstorm</option>
+            <option value="Aurora Tundra">Aurora Tundra</option>
+          </select>
+        </div>
         <div class="ctrl-group" id="online-group">
           <div class="ctrl-label"><span data-i18n="online">ONLINE</span></div>
           <div class="online-row">
@@ -1348,7 +1368,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v47';
+  const BUILD = 'v50';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1457,6 +1477,7 @@ if ('serviceWorker' in navigator) {
       netAiTook: '{name} — CPU TAKING OVER',
       netNoRoom: 'no such room', netFull: 'room is full',
       netVersion: 'update the page', netLost: 'connection lost',
+      theme: 'THEME', randomTheme: 'Random',
     },
     tr: {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
@@ -1494,7 +1515,12 @@ if ('serviceWorker' in navigator) {
       netAiTook: '{name} — CPU DEVRALIYOR',
       netNoRoom: 'oda bulunamadı', netFull: 'oda dolu',
       netVersion: 'sayfayı yenileyin', netLost: 'bağlantı koptu',
-      'Rust Canyon': 'Pas Kanyonu'
+      theme: 'TEMA', randomTheme: 'Rastgele',
+      'Dusk Ridge': 'Alacakaranlık Sırtı', 'Salt Flats': 'Tuz Düzlükleri',
+      'Ash Peaks': 'Kül Tepeleri', 'Glacier': 'Buzul', 'Verdant Hills': 'Yeşil Tepeler',
+      'Night Crater': 'Gece Krateri', 'Rust Canyon': 'Pas Kanyonu',
+      'Toxic Marsh': 'Zehirli Bataklık', 'Cherry Blossom': 'Kiraz Çiçeği',
+      'Lunar Base': 'Ay Üssü', 'Sandstorm': 'Kum Fırtınası', 'Aurora Tundra': 'Aurora Tundrası'
     }
   };
 
@@ -1561,6 +1587,7 @@ if ('serviceWorker' in navigator) {
     relabel(countSelect, ['tanks2', 'tanks3', 'tanks4']);
     relabel(modeSelect, ['vsCpu', 'allHuman', 'onlineMode']);
     relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
+    relabel(themeSelect, ['randomTheme', ...THEMES.map(th => th.name)]);
     const aria = { 'zoom-in': 'zoomIn', 'zoom-out': 'zoomOut', 'zoom-fit': 'zoomFit',
                    'angle-left': 'aimLeft', 'angle-right': 'aimRight',
                    'power-dec': 'powerDown', 'power-inc': 'powerUp',
@@ -1831,8 +1858,57 @@ if ('serviceWorker' in navigator) {
       rim: 'rgba(255,180,120,0.30)',
       decor: 'dust', decorColor: 'rgba(255,200,150,0.35)',
       roughness: 0.74, falloff: 0.69, points: 130, baseLo: 0.26, baseHi: 0.70
+    },
+    {
+      name: 'Toxic Marsh',
+      skyTop: '#2f3b1e', skyBot: '#8a9a3a',
+      ground1: '#4d5a2a', ground2: '#1f2612',
+      rim: 'rgba(190,255,90,0.30)',
+      decor: 'embers', decorColor: 'rgba(170,255,80,0.40)',   // rising spores
+      roughness: 0.30, falloff: 0.55, points: 190, baseLo: 0.48, baseHi: 0.78
+    },
+    {
+      name: 'Cherry Blossom',
+      skyTop: '#f2b8c6', skyBot: '#fde8d8',
+      ground1: '#7a9a5a', ground2: '#3e4f2c',
+      rim: 'rgba(255,220,235,0.45)',
+      decor: 'snow', decorColor: 'rgba(255,150,190,0.75)',    // falling petals
+      roughness: 0.42, falloff: 0.58, points: 170, baseLo: 0.40, baseHi: 0.76
+    },
+    {
+      name: 'Lunar Base',
+      // no atmosphere: a black sky all the way down, and pale regolith
+      skyTop: '#000000', skyBot: '#0b0c12',
+      ground1: '#c2c2c6', ground2: '#505057',
+      rim: 'rgba(255,255,255,0.50)',
+      decor: 'stars', decorColor: 'rgba(255,255,255,0.80)', planet: true,
+      // shape: 'craters' presses impact craters into gentle midpoint plains
+      shape: 'craters', roughness: 0.20, falloff: 0.55, points: 240, baseLo: 0.44, baseHi: 0.72
+    },
+    {
+      name: 'Sandstorm',
+      skyTop: '#b8844a', skyBot: '#e8c58a',
+      ground1: '#c9a46a', ground2: '#6e5230',
+      rim: 'rgba(255,230,180,0.35)',
+      decor: 'dust', decorColor: 'rgba(120,80,40,0.35)',
+      // shape: 'dunes' replaces midpoint displacement (roughness/falloff unused)
+      shape: 'dunes', points: 200, baseLo: 0.40, baseHi: 0.76
+    },
+    {
+      name: 'Aurora Tundra',
+      skyTop: '#06202a', skyBot: '#1f6e5e',
+      ground1: '#e6eef2', ground2: '#7f94a3',
+      rim: 'rgba(140,255,200,0.40)',
+      decor: 'snow', decorColor: 'rgba(220,255,240,0.55)',
+      roughness: 0.50, falloff: 0.60, points: 160, baseLo: 0.36, baseHi: 0.76
     }
   ];
+
+  // The player's pick in Settings: 'random', or a theme's English name. A name
+  // rather than an index, so a stored choice survives the table being reordered.
+  const themeSelect = document.getElementById('theme-select');
+  let themePref = 'random';
+  const themeByName = (name) => THEMES.find(t => t.name === name) || null;
 
   let theme = THEMES[0];
   let decorItems = []; // clouds / stars / embers positions for the current theme
@@ -1887,11 +1963,31 @@ if ('serviceWorker' in navigator) {
   }
 
   function nextTheme() {
-    // advance through environments, avoiding an immediate repeat
+    const chosen = themeByName(themePref);
+    if (chosen) { applyTheme(chosen); return; }
+    // random: a different environment every round, never an immediate repeat
     let idx;
     do { idx = Math.floor(Math.random() * THEMES.length); }
     while (THEMES.length > 1 && THEMES[idx] === theme);
     applyTheme(THEMES[idx]);
+  }
+
+  themeSelect.addEventListener('change', () => {
+    themePref = themeByName(themeSelect.value) ? themeSelect.value : 'random';
+    try { localStorage.setItem('barrage.theme', themePref); } catch (e) { /* private mode */ }
+    // Offline the look changes at once; the ground keeps its craters and the
+    // theme's terrain shape arrives with the next round. In a match the board's
+    // theme belongs to whoever deals the round, so the pick waits for that —
+    // repainting now would show a sky nobody else is looking at.
+    const chosen = themeByName(themePref);
+    if (chosen && !netPlaying()) applyTheme(chosen);
+  });
+
+  function initTheme() {
+    let stored = null;
+    try { stored = localStorage.getItem('barrage.theme'); } catch (e) { /* private mode */ }
+    themePref = themeByName(stored) ? stored : 'random';
+    themeSelect.value = themePref;
   }
 
   // ---------- Terrain ----------
@@ -1899,7 +1995,71 @@ if ('serviceWorker' in navigator) {
   let terrain = []; // heightmap, index = x pixel, value = y of ground surface
   let terrainSeedShape = []; // normalized 0..1 shape independent of width, resampled on resize
 
+  // Sand piled by one wind: each dune climbs a long gentle windward slope to a
+  // rounded crest, then drops down a shorter, steeper slip face. Shape values
+  // grow downward (0 = high ground), so a crest is the smaller number.
+  function generateDuneShape() {
+    const n = theme.points;
+    const arr = new Array(n);
+    const windFromLeft = Math.random() < 0.5; // which way the slip faces point
+    const trough = () => theme.baseHi - Math.random() * 0.1;
+    let lo = 0;
+    let loVal = trough();
+    while (lo < n - 1) {
+      const len = Math.max(8, Math.round(n * (0.22 + Math.random() * 0.12)));
+      let hi = Math.min(n - 1, lo + len);
+      // a sliver left at the edge would be a spike, not a dune: fold it in
+      if (n - 1 - hi < n * 0.15) hi = n - 1;
+      const hiVal = trough();
+      const crestVal = Math.max(theme.baseLo, Math.min(loVal, hiVal) - (0.12 + Math.random() * 0.12));
+      // the crest sits past the middle, on the downwind side
+      const crest = Math.round(lo + (hi - lo) * (windFromLeft ? 0.62 : 0.38));
+      for (let i = lo; i <= hi; i++) {
+        const fromLo = i <= crest;
+        const a = fromLo ? loVal : crestVal, b = fromLo ? crestVal : hiVal;
+        const s = fromLo ? lo : crest, e = fromLo ? crest : hi;
+        const f = e > s ? (i - s) / (e - s) : 0;
+        // cosine easing rounds both the crest and the trough
+        arr[i] = a + (b - a) * (1 - Math.cos(Math.PI * f)) / 2;
+      }
+      lo = hi;
+      loVal = hiVal;
+    }
+    for (let i = 0; i < n; i++) arr[i] = Math.max(0.05, Math.min(0.85, arr[i]));
+    return arr;
+  }
+
+  // Old impacts on gentle plains: each crater is a bowl sunk into the ground
+  // with a raised rim around it, wider craters digging deeper. They overlap
+  // freely, which is what makes it read as the moon rather than as potholes.
+  function generateCraterShape() {
+    const arr = generateMidpointShape();
+    const n = arr.length;
+    const count = 4 + Math.floor(Math.random() * 4);
+    for (let k = 0; k < count; k++) {
+      const c = Math.random() * (n - 1);
+      const r = n * (0.025 + Math.random() * 0.045);
+      const depth = (r / n) * (0.9 + Math.random() * 0.6);
+      const from = Math.max(0, Math.floor(c - 2 * r));
+      const to = Math.min(n - 1, Math.ceil(c + 2 * r));
+      for (let i = from; i <= to; i++) {
+        const u = Math.abs(i - c) / r;
+        const bowl = u < 1 ? depth * (1 - u * u) : 0;
+        const rim = depth * 0.45 * Math.exp(-(((u - 1) / 0.3) ** 2));
+        arr[i] += bowl - rim; // shape values grow downward: a bowl adds, a rim subtracts
+      }
+    }
+    for (let i = 0; i < n; i++) arr[i] = Math.max(0.05, Math.min(0.85, arr[i]));
+    return arr;
+  }
+
   function generateTerrainShape() {
+    if (theme.shape === 'dunes') return generateDuneShape();
+    if (theme.shape === 'craters') return generateCraterShape();
+    return generateMidpointShape();
+  }
+
+  function generateMidpointShape() {
     // midpoint displacement, tuned per theme so each environment has its own feel
     const n = theme.points;
     const arr = new Array(n);
@@ -3316,6 +3476,45 @@ if ('serviceWorker' in navigator) {
   // ---------- Rendering ----------
   let decorClock = 0;
 
+  // Earth hanging over the lunar horizon, half in shadow. Drawn after the
+  // stars so it covers the ones behind it; fixed in the sky, like the real one.
+  function drawEarth() {
+    const r = W * 0.03, cx = W * 0.82, cy = H * 0.15;
+    ctx.save();
+    const glow = ctx.createRadialGradient(cx, cy, r * 0.9, cx, cy, r * 1.8);
+    glow.addColorStop(0, 'rgba(120,170,255,0.28)');
+    glow.addColorStop(1, 'rgba(120,170,255,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = '#2f6fc4';
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.fillStyle = '#4f9a4a';
+    for (const [dx, dy, s] of [[-0.35, -0.2, 0.38], [0.3, 0.3, 0.3], [0.15, -0.55, 0.2]]) {
+      ctx.beginPath();
+      ctx.arc(cx + dx * r, cy + dy * r, s * r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    for (const [dx, dy, rx, ry] of [[-0.1, 0.1, 0.55, 0.1], [0.35, -0.35, 0.35, 0.08], [-0.45, 0.55, 0.3, 0.07]]) {
+      ctx.beginPath();
+      ctx.ellipse(cx + dx * r, cy + dy * r, rx * r, ry * r, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // night side: everything outside a lit disc shifted toward the sun
+    ctx.fillStyle = 'rgba(0,0,8,0.72)';
+    ctx.beginPath();
+    ctx.rect(cx - r, cy - r, r * 2, r * 2);
+    ctx.arc(cx - r * 0.45, cy - r * 0.15, r * 1.05, 0, Math.PI * 2);
+    ctx.fill('evenodd');
+    ctx.restore();
+  }
+
   function drawDecor() {
     const kind = theme.decor;
     decorClock += 0.016;
@@ -3330,6 +3529,7 @@ if ('serviceWorker' in navigator) {
         ctx.fill();
       }
       ctx.globalAlpha = 1;
+      if (theme.planet) drawEarth();
       return;
     }
 
@@ -4915,6 +5115,7 @@ if ('serviceWorker' in navigator) {
   buildWeaponPicker();
   initLanguage();
   initSound();
+  initTheme();
   refreshOpponentUi();
   resetGame();
   requestAnimationFrame(step);
@@ -4959,8 +5160,11 @@ if ('serviceWorker' in navigator) {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
       settingsModal, settingsBtn, windHud,
-      nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider
+      nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider, themeSelect
     },
+    initTheme, nextTheme, generateTerrainShape,
+    get theme() { return theme; },
+    get themePref() { return themePref; },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },
     get terrain() { return terrain; }, set terrain(v) { terrain = v; },
     get wind() { return wind; }, set wind(v) { wind = v; },
