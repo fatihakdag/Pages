@@ -187,6 +187,18 @@ test('a seventh player is turned away rather than seated', async () => {
   });
 });
 
+test('the relay answers a clock sample with its own time', async () => {
+  await withRelay(async (h) => {
+    const a = await h.client();
+    const before = Date.now();
+    a.send({ t: 'time', c: 12.5 });
+    const m = await a.next();
+    assert.equal(m.t, 'time');
+    assert.equal(m.c, 12.5, 'the sample comes back, so the round trip can be measured');
+    assert.ok(m.s >= before && m.s <= Date.now(), 'with the relay’s clock beside it');
+  });
+});
+
 test('a client speaking another protocol version is refused', async () => {
   await withRelay(async (h) => {
     const a = await h.client();

@@ -1395,7 +1395,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v52';
+  const BUILD = 'v53';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2193,6 +2193,20 @@ if ('serviceWorker' in navigator) {
   // message, so a client can tell a result it has already played past from one
   // it has not (see netApplyState).
   let turnSeq = 0;
+  // The shot playing out on this screen: its inputs, and the board it ends on
+  // when the shooter resolved it before sending (see "Shots"). Null between shots.
+  let activeShot = null;
+  // The last shot this screen played to the end: `{turn, seat, ai}`. A player's
+  // own shot for that turn can still arrive after a stand-in's (netStandInLost).
+  let lastShot = null;
+  // Where chance decides how a shot ends — a bomblet's scatter, a turning
+  // helicopter's new altitude — it draws from this, seeded per shot, so every
+  // screen replaying the shot draws the same numbers. Sparks and smoke stay on
+  // Math.random: they change nothing.
+  let simRandom = Math.random;
+  // Non-zero while resolveShot() runs a shot on a copy of the world: nothing
+  // may be heard, sent or shown from inside it.
+  let resolving = 0;
   let explosions = []; // active explosion animations {x,y,r,maxR,t}
   let particles = [];
 
@@ -2389,6 +2403,9 @@ if ('serviceWorker' in navigator) {
     buildTanks();
     currentPlayer = 0;
     turnSeq = 0;
+    activeShot = null;
+    lastShot = null;
+    simRandom = Math.random;
     state = 'AIMING';
     projectiles = [];
     shotExploded = false;
@@ -2753,22 +2770,38 @@ if ('serviceWorker' in navigator) {
   fireBtn.addEventListener('click', fire);
   restartBtn.addEventListener('click', onRestartClicked);
 
-  function fire() {
-    if (state !== 'AIMING') return;
-    // Sent before the shot is simulated, so the other client starts the same
-    // flight at roughly the same moment rather than seeing only the aftermath.
+  // `opts.byAi` marks a shot the CPU chose while standing in for a seat. A click
+  // never is one, even on a seat the CPU holds: that is its player coming back.
+  function fire(opts) {
+    if (state !== 'AIMING' || !tanks[currentPlayer]) return;
+    const byAi = !!(opts && opts.byAi === true);
+    const shooter = tanks[currentPlayer];
+    const shot = {
+      seat: currentPlayer,
+      angle: shooter.angle,
+      power: shooter.power,
+      weapon: shooter.weapon,
+      turn: turnSeq,                                  // the board it was fired from
+      seed: Math.floor(Math.random() * 4294967296),   // for whatever chance decides in flight
+      // The wind and the helicopter it was fired into, as this screen has them.
+      wind,
+      heli: heliOut()
+    };
+    let result = null;
     if (netWeDrive(currentPlayer)) {
-      const byAi = netSeatIsAi(currentPlayer);
-      if (!byAi) netSeatResponded(currentPlayer);   // we turned up; the clock resets
-      netSend('turn', {
-        seat: currentPlayer,
-        angle: tanks[currentPlayer].angle,
-        power: tanks[currentPlayer].power,
-        weapon: tanks[currentPlayer].weapon,
-        ai: byAi,  // so nobody mistakes the CPU playing for the player returning
-        turn: turnSeq   // the board it was fired from
-      });
+      shot.ai = byAi;   // so nobody mistakes the CPU playing for the player returning
+      if (!byAi) netSeatResponded(currentPlayer);   // they turned up: the clock resets, the CPU stands down
+      // Worked out to the end before anyone watches it, and sent with the
+      // inputs: every screen then knows how the turn ends before it starts.
+      result = resolveShot(shot);
+      netSend('turn', { ...shot, result });
     }
+    activeShot = { shot, result, steps: 0 };
+    beginShot(shot);
+  }
+
+  /** Put the shell in the air, from the inputs beginShot() has just set. */
+  function launchShot() {
     const shooter = tanks[currentPlayer];
     let weaponKey = shooter.weapon;
     if (!weaponAvailable(shooter, weaponKey)) weaponKey = 'standard'; // safety net; syncWeaponOptions gets there first
@@ -2800,10 +2833,12 @@ if ('serviceWorker' in navigator) {
         : 0,
       trail: []
     }];
+    spawnQueue = [];
     shotExploded = false;
+    explodeTimer = 0;
     state = 'FIRING';
     // Everyone hears it: a remote player's turn is replayed through here too.
-    Sound.fire(shooter.power, currentPlayer, screenX01(shooter.x));
+    if (!resolving) Sound.fire(shooter.power, currentPlayer, screenX01(shooter.x));
     updateHUD();
   }
 
@@ -2831,7 +2866,7 @@ if ('serviceWorker' in navigator) {
         const falloff = 1 - dist / w.radius;
         const dmg = w.damageMax * falloff;
         t.hp -= dmg;
-        if (t.hp <= 0) { t.hp = 0; t.alive = false; Sound.destroyed(screenX01(t.x)); }
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; if (!resolving) Sound.destroyed(screenX01(t.x)); }
       }
     }
     craterAt(px, py, w.radius);
@@ -2839,7 +2874,7 @@ if ('serviceWorker' in navigator) {
   }
 
   function spawnExplosionFx(x, y, radius, color) {
-    Sound.explode(radius, screenX01(x)); // the one place every blast in the game passes through
+    if (!resolving) Sound.explode(radius, screenX01(x)); // the one place every blast in the game passes through
     explosions.push({ x, y, r: 4, maxR: radius * 1.15, t: 0, color });
     const count = Math.round(radius * 0.9);
     for (let i = 0; i < count; i++) {
@@ -2870,42 +2905,159 @@ if ('serviceWorker' in navigator) {
     return false;
   }
 
-  function nextTurn() {
-    // Captured before the turn moves on: this is who just played.
-    const actor = currentPlayer;
+  /**
+   * Hand the turn on — to the next living seat, or to the end of the round.
+   * The world only: no screen, no network, so resolveShot() can run it on a
+   * copy to work out the board a shot leaves behind, new wind included.
+   */
+  function advanceTurn(rollWind) {
     turnSeq++;
-    if (endTurnCheckWin()) { netPublishTurn(actor); return; }
+    if (tanks.filter(t => t.alive).length <= 1) {
+      state = 'GAMEOVER';
+      lastWinner = tanks.findIndex(tk => tk.alive);
+      return;
+    }
     // at least two tanks are alive here, so this always lands on someone else
     do { currentPlayer = (currentPlayer + 1) % tanks.length; }
     while (!tanks[currentPlayer].alive);
-    turnToken++;
     if (heli) heli.seen.add(currentPlayer); // this player now gets a crack at it
+    if (rollWind) wind = (Math.random() * 2 - 1) * WIND_MAX;
+    state = 'AIMING';
+  }
+
+  /** A turn ended that no shot's result covers: work out the next one here. */
+  function nextTurn() {
+    // Captured before the turn moves on: this is who just played.
+    const actor = currentPlayer;
     // Only the client that is about to publish this turn rolls the new wind.
     // Everyone else keeps the old one until the snapshot arrives: rolling
     // locally put a different figure on each screen for as long as the message
     // took, and a player starting to aim in that window aimed against a wind
     // that never existed.
-    if (!netPlaying() || netWeDrive(actor) || netPublishNext) setWind();
-    state = 'AIMING';
+    const rollWind = !netPlaying() || netWeDrive(actor) || netPublishNext;
+    advanceTurn(rollWind);
+    if (state === 'GAMEOVER') {
+      refreshOverlayText();
+      overlay.classList.add('show');
+      updateHUD();
+      syncControlsFromTank(); // releases the settings the CPU seat was holding
+      netPublishTurn(actor);
+      return;
+    }
+    turnToken++;
+    if (rollWind) showWind();
     camPanned = false; // a new turn releases the camera back to whoever is aiming
     netResetTurnClock();
     updateHUD();
     syncControlsFromTank();
-    // The player who took the turn is the authority on how it ended.
     netPublishTurn(actor);
     netPlayAiTurn();
-    // A shot somebody fired while ours was still landing is watched first. It
-    // was fired from the board as it now stands, and any result held for it
-    // stays held until the replay lands, as if the two had arrived in order.
-    const heldTurn = online.pendingTurn;
-    online.pendingTurn = null;
-    if (heldTurn) netReplayTurn(heldTurn);
-    if (online.pendingSync && state === 'AIMING') {
-      const held = online.pendingSync;
-      online.pendingSync = null;
-      netApplyState(held);
-    }
     maybeAiTurn();
+  }
+
+  // ---------- Shots: resolved once, played everywhere ----------
+  // A shot is worked out to the end the moment it is fired, by the client that
+  // fires it, on a copy of the world (resolveShot): flight, blasts, craters,
+  // damage, a helicopter brought down and where its wreck lands, then the turn
+  // handed on, new wind and all. That result goes out with the inputs in one
+  // `turn` message. Every screen — the shooter's too — then plays the shot out
+  // from the same inputs and seed in fixed steps (beginShot, step), and when it
+  // lands takes the result as the board (finishShot).
+  //
+  // So how a turn ends never depends on which screen finished animating first:
+  // the answer is known before anyone starts watching. And the replay is the
+  // same arithmetic in the same fixed steps, so taking the result at the end
+  // changes nothing you can see.
+
+  // mulberry32: tiny, and the same sequence on every engine for a given seed.
+  function seededRandom(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /**
+   * Set a shot's inputs and put it in the air. A shot from elsewhere also
+   * brings the wind and the helicopter it was fired into, so the replay starts
+   * from exactly what the shooter had.
+   */
+  function beginShot(shot, fromElsewhere = false) {
+    const t = tanks[shot.seat];
+    currentPlayer = shot.seat;
+    t.angle = shot.angle;
+    t.power = shot.power;
+    t.weapon = shot.weapon;
+    if (fromElsewhere) {
+      if (typeof shot.wind === 'number') wind = shot.wind;
+      if ('heli' in shot) heli = heliIn(shot.heli);
+    }
+    simRandom = seededRandom(shot.seed || 0);
+    launchShot();
+  }
+
+  // Everything a shot can change, copied, so resolveShot() can put it back.
+  function saveWorld() {
+    return {
+      tanks: tanks.map(t => ({ ...t, ammo: { ...t.ammo } })),
+      terrain: terrain.slice(),
+      wind, currentPlayer, state, turnSeq, lastWinner, shotExploded, explodeTimer,
+      heliTimer, heliDownId, simRandom, activeShot, projectiles, spawnQueue,
+      explosions: explosions.map(e => ({ ...e })),
+      particles: particles.map(p => ({ ...p })),
+      heli: heli ? { ...heli, seen: new Set(heli.seen) } : null
+    };
+  }
+
+  function restoreWorld(s) {
+    tanks = s.tanks; terrain = s.terrain; wind = s.wind;
+    currentPlayer = s.currentPlayer; state = s.state; turnSeq = s.turnSeq;
+    lastWinner = s.lastWinner; shotExploded = s.shotExploded; explodeTimer = s.explodeTimer;
+    heliTimer = s.heliTimer; heliDownId = s.heliDownId; simRandom = s.simRandom;
+    activeShot = s.activeShot; projectiles = s.projectiles; spawnQueue = s.spawnQueue;
+    explosions = s.explosions; particles = s.particles; heli = s.heli;
+  }
+
+  /**
+   * Run a shot to the end on a copy of the world and return the board it
+   * leaves, turn handed on. The world is exactly as it was afterwards.
+   */
+  function resolveShot(shot) {
+    const saved = saveWorld();
+    resolving++;
+    try {
+      beginShot(shot);
+      for (let i = 0; i < SHOT_MAX_STEPS && state !== 'RESOLVED'; i++) simStep(SIM_DT);
+      advanceTurn(true);
+      return netSnapshot();
+    } finally {
+      resolving--;
+      restoreWorld(saved);
+    }
+  }
+
+  /** The shot on screen has landed: the turn is over. */
+  function finishShot() {
+    const done = activeShot;
+    activeShot = null;
+    lastShot = done ? { turn: done.shot.turn, seat: done.shot.seat, ai: !!done.shot.ai } : null;
+    simRandom = Math.random;
+    if (done && done.result) {
+      // The board the shooter worked out before sending. The replay just
+      // played the same steps, so this is what is already on screen.
+      netApplyState(done.result, { force: true });
+      turnToken++;
+      camPanned = false; // a new turn releases the camera back to whoever is aiming
+      heliAnnounced = heliSignature();   // the result told everyone where it is
+      netPlayAiTurn();
+    } else {
+      nextTurn();
+    }
+    netDrainInbox();
   }
 
   // ---------- AI: trajectory-solving aim, scaled by difficulty ----------
@@ -3238,8 +3390,8 @@ if ('serviceWorker' in navigator) {
       const offset = i - (w.clusterCount - 1) / 2; // -2 .. +2 for five
       spawnQueue.push({
         x, y,
-        vx: (offset * 32 + (Math.random() * 2 - 1) * 12) * physScale,
-        vy: -(150 + Math.random() * 70) * physScale,
+        vx: (offset * 32 + (simRandom() * 2 - 1) * 12) * physScale,
+        vy: -(150 + simRandom() * 70) * physScale,
         weapon: p.weapon,
         firedBy: p.firedBy,
         bomblet: true,
@@ -3452,17 +3604,23 @@ if ('serviceWorker' in navigator) {
   }
 
   // ---------- Physics step ----------
+  // The world moves in fixed steps, whatever the frame rate. Every screen
+  // replays a shot from the same inputs, and a 30fps laptop and a 120Hz phone
+  // stepping it by their own frame times landed it a few units apart — which
+  // the result then snapped away, visibly. Fixed steps make the replay the same
+  // arithmetic everywhere, and the same arithmetic resolveShot() did.
+  const SIM_DT = 1 / 60;
+  const SIM_MAX_STEPS_PER_FRAME = 15;   // a quarter of a second: a long stall is not caught up
+  const SHOT_MAX_STEPS = 120 * 60;      // two minutes; a shot still going then never resolves
   let lastTime = null;
-  function step(ts) {
-    if (lastTime === null) lastTime = ts;
-    let dt = (ts - lastTime) / 1000;
-    // Clamped at both ends. The ceiling keeps a long stall from teleporting a
-    // shell through the ground; the floor guards against a timestamp that goes
-    // backwards — which a negative dt turns into a negative explosion radius,
-    // and createRadialGradient throws on that, killing the render loop.
-    dt = Math.max(0, Math.min(dt, 0.033));
-    lastTime = ts;
+  let simAccum = 0;
+  let explodeTimer = 0;
 
+  /** A shot is on: the world belongs to it until it lands. */
+  function inShot() { return state === 'FIRING' || state === 'EXPLODING' || state === 'RESOLVED'; }
+
+  /** One fixed step: the shells in the air, their blasts, and the helicopter while a shot is on. */
+  function simStep(dt) {
     if (state === 'FIRING') {
       for (const p of projectiles) stepProjectile(p, dt);
       // Warheads a MIRV split off, or bomblets a cluster bomb threw, join the
@@ -3493,13 +3651,29 @@ if ('serviceWorker' in navigator) {
       }
     }
 
-    if (state === 'RESOLVED') {
-      nextTurn();
-    }
-
-    // explosion fx aging
+    // Blasts age in the step, not the frame: the turn waits for them to finish.
     explosions.forEach(e => { e.t += dt * 90; e.r = Math.min(e.maxR, 4 + e.t); });
     explosions = explosions.filter(e => e.r < e.maxR - 0.5);
+    if (heli && inShot()) moveHeli(dt);
+  }
+
+  function step(ts) {
+    if (lastTime === null) lastTime = ts;
+    // Clamped at both ends. The ceiling keeps a long stall from being caught up
+    // all at once; the floor guards against a timestamp that goes backwards.
+    const dt = Math.max(0, Math.min((ts - lastTime) / 1000, SIM_DT * SIM_MAX_STEPS_PER_FRAME));
+    lastTime = ts;
+
+    simAccum += dt;
+    while (simAccum >= SIM_DT) {
+      simAccum -= SIM_DT;
+      simStep(SIM_DT);
+      if (activeShot && ++activeShot.steps > SHOT_MAX_STEPS) state = 'RESOLVED';
+      if (state === 'RESOLVED') finishShot();
+    }
+    // A turn the clock skipped goes straight to RESOLVED without a step.
+    if (state === 'RESOLVED') finishShot();
+
     particles.forEach(p => {
       p.age += dt;
       p.vy += 220 * dt;
@@ -3510,7 +3684,9 @@ if ('serviceWorker' in navigator) {
     windPulse = Math.max(0, windPulse - dt * 1.6);
     camFollow(dt);
     netCheckTurnClock();
-    updateHeli(dt);
+    rotorAngle += dt * 26;
+    if (!heli) heliArrivalTick(dt);
+    else if (!inShot()) heliFollowClock();   // inside a shot, simStep flies it
     updateSoundLoops();
     updateTimer();
 
@@ -3518,12 +3694,14 @@ if ('serviceWorker' in navigator) {
     // frame: that way a change is caught wherever it came from — updateHeli, a
     // shell knocking it out of the sky in stepProjectile, anywhere. Four
     // separate bugs came from announcing at a list of call sites instead.
-    if (heliSignature() !== heliAnnounced) netAnnounceHeli();
+    // Never mid-shot: every screen is replaying the helicopter along with the
+    // shot, news of it would overwrite a replay in progress, and the shot's
+    // result says where it ended up anyway.
+    if (!inShot() && heliSignature() !== heliAnnounced) netAnnounceHeli();
 
     render();
     requestAnimationFrame(step);
   }
-  let explodeTimer = 0;
 
   // ---------- Rendering ----------
   let decorClock = 0;
@@ -3636,7 +3814,8 @@ if ('serviceWorker' in navigator) {
     let peak = H * 0.5;
     for (let x = 0; x < terrain.length; x++) if (terrain[x] < peak) peak = terrain[x];
     // clearance comfortably exceeds TANK_H, so it clears a tank sat on the peak
-    const clearance = Math.max(34, H * 0.075) + Math.random() * H * 0.03;
+    // Seeded mid-shot: a turnaround during a shot happens on every screen's replay.
+    const clearance = Math.max(34, H * 0.075) + (inShot() ? simRandom : Math.random)() * H * 0.03;
     return Math.max(H * 0.05, peak - clearance);
   }
 
@@ -3653,6 +3832,7 @@ if ('serviceWorker' in navigator) {
     const w = heliSize();
     heli = {
       id: Math.floor(Math.random() * 2 ** 31),   // so a late word about it can be recognised (heliIn)
+      t: netNow(),   // the moment on the match clock this state describes (heliFollowClock)
       x: fromLeft ? -w : W + w,
       y: heliCruiseY(),
       dir: fromLeft ? 1 : -1,
@@ -3677,13 +3857,15 @@ if ('serviceWorker' in navigator) {
   // blast. This is deliberately harsher than any shell in the game.
   function heliCrash(x, y) {
     const CRUSH = 26, BLAST = 74, BLAST_DMG = 80;
-    // Damage and terrain belong to one client. Only discrete state is shared,
-    // not the aircraft's position, so two clients working out the blast from
-    // their own copy get slightly different answers -- enough for one to kill a
-    // tank and the other to leave it on 1 hp, and then the two disagree about
-    // whether the round is over. The wreck is drawn everywhere; what it did is
-    // decided in one place and published.
-    const ours = heliAuthority();
+    // Inside a shot every screen works the crash out: each is replaying the same
+    // shot in the same fixed steps and gets the same answer, and the shooter's
+    // result carries it regardless. Between turns (a wreck that arrived mid-fall
+    // in a snapshot) each client flies its own copy, and working the blast out
+    // from those gave slightly different answers -- enough for one to kill a
+    // tank and the other to leave it on 1 hp. There it is decided in one place
+    // and published; the wreck is drawn everywhere.
+    const between = !inShot();
+    const ours = !between || heliAuthority();
     if (ours) {
       for (const t of tanks) {
         if (!t.alive) continue;
@@ -3709,7 +3891,8 @@ if ('serviceWorker' in navigator) {
       });
     }
     updateHUD();
-    if (!ours) return;
+    // Inside a shot the turn resolves when the shot does, and its result says how.
+    if (!ours || !between) return;
     // A crash can kill between turns, so the round may need resolving here.
     if (state === 'AIMING') {
       if (!endTurnCheckWin() && !tanks[currentPlayer].alive) nextTurn();
@@ -3724,7 +3907,9 @@ if ('serviceWorker' in navigator) {
   // Hidden: double-click the wind readout to call one in. Wherever the readout
   // happens to be - the bar's pill above 900px, the canvas gauge below it.
   function summonHeli() {
-    if (heli || state === 'GAMEOVER' || !terrain.length) return;
+    // Not mid-shot either: the shot was resolved without it, and every other
+    // screen is replaying it without it.
+    if (heli || state !== 'AIMING' || !terrain.length) return;
     // In a match, calling one in on someone else's turn would conjure it for us
     // alone until the next snapshot wiped it again.
     if (!heliAuthority()) return;
@@ -3869,20 +4054,44 @@ if ('serviceWorker' in navigator) {
 
   function updateHeli(dt) {
     rotorAngle += dt * 26;
-    if (!heli) {
-      if (state !== 'GAMEOVER' && heliAuthority()) {
-        heliTimer -= dt;
-        if (heliTimer <= 0) { spawnHeli(); heliTimer = 120 + Math.random() * 60; }
-      }
-      return;
-    }
+    if (!heli) { heliArrivalTick(dt); return; }
+    moveHeli(dt);
+  }
+
+  /** Count down to the next fly-by, on the client whose turn it is — never mid-shot. */
+  function heliArrivalTick(dt) {
+    if (inShot() || state === 'GAMEOVER' || !heliAuthority()) return;
+    heliTimer -= dt;
+    if (heliTimer <= 0) { spawnHeli(); heliTimer = 120 + Math.random() * 60; }
+  }
+
+  // Further apart than this and the stamp is from another clock (the page was
+  // offline, or the relay only just answered) rather than a moment ago.
+  const HELI_CLOCK_SLACK_S = 20;
+
+  /**
+   * Between shots, fly the helicopter to where it is *now* on the match clock.
+   * It used to move by each screen's own frame times, so the copies drifted
+   * apart until the snapshot at the end of a turn yanked them back into place.
+   * Stepping from the stamped state (heli.t) to the shared time in the same
+   * fixed steps puts it in the same place on every screen.
+   */
+  function heliFollowClock() {
+    const now = netNow();
+    if (!(Math.abs(now - heli.t) <= HELI_CLOCK_SLACK_S)) heli.t = now;
+    while (heli && heli.t + SIM_DT <= now) moveHeli(SIM_DT);
+  }
+
+  function moveHeli(dt) {
+    heli.t = (Number.isFinite(heli.t) ? heli.t : netNow()) + dt;
     const w = heliSize();
     if (!heli.falling) {
       heli.x += heli.dir * heli.speed * dt;
       if (heli.x < -w * 1.5 || heli.x > W + w * 1.5) {
-        // The turnaround rerolls an altitude and may retire the aircraft, so it
-        // belongs to one client. Everyone else parks off-screen until told.
-        if (!heliAuthority()) return;
+        // The turnaround rerolls an altitude and may retire the aircraft, so
+        // between shots it belongs to one client and everyone else parks
+        // off-screen until told. Mid-shot every screen does it, from the seed.
+        if (!inShot() && !heliAuthority()) return;
         heli.legs++;
         const allHadATurn = tanks.every((t, i) => !t.alive || heli.seen.has(i));
         if ((allHadATurn && heli.legs >= HELI_MIN_LEGS) || heli.legs >= HELI_MAX_LEGS) {
@@ -4355,13 +4564,15 @@ if ('serviceWorker' in navigator) {
   // is simulates the shot and tells the others what happened, so there is no
   // second copy of the physics anywhere.
   //
-  // Per turn two messages go out. `turn` carries the inputs, so the other side
-  // can watch the same shot fly rather than have the result appear. `sync`
-  // carries the state afterwards, which is what actually decides the outcome —
-  // small divergences in the replay are erased every turn instead of
-  // accumulating, so the two clients never drift apart.
+  // Per turn one message goes out: `turn`, with the inputs, the seed and the
+  // board the shot leaves behind, worked out before it was sent (see "Shots").
+  // Everyone watches the same shot fly and then takes that board. `sync` is left
+  // for changes no shot carries — a turn skipped by the clock, a crash between
+  // turns. Messages that change the board are applied in the order they were
+  // sent, and only once the shot on screen has landed (netReceive).
 
-  const NET_PROTOCOL = 1;
+  // 2: `turn` carries its result, and the relay answers `time`.
+  const NET_PROTOCOL = 2;
 
   // A turn nobody takes would otherwise hold the game up for ever: a hidden tab
   // never disconnects, so no timeout at the socket level can ever fire. The seat
@@ -4401,12 +4612,44 @@ if ('serviceWorker' in navigator) {
     aiSeats: [],       // seats the CPU is playing until their player returns
     peerAway: false,   // their window is hidden, so their game loop is stopped
 
-    pendingSync: null, // a sync that arrived while a shot was still in the air
-    pendingTurn: null  // a turn fired elsewhere while ours was still landing
+    inbox: []          // board-changing messages waiting for the shot on screen to land
   };
 
   /** True once we are in a match, as opposed to merely connected. */
   function netPlaying() { return online.status === 'playing'; }
+
+  // The match clock. The helicopter flies between shots on every screen at
+  // once, so where it is has to come from the time rather than from each screen
+  // adding up its own frames. It is the relay's clock, which everyone in the
+  // room reads, less half the round trip of asking.
+  let clockOffsetMs = 0;          // relay time minus performance.now()
+  let clockBestRttMs = Infinity;  // the offset comes from the fastest sample so far
+
+  /** Seconds on the clock the room shares — this page's own until the relay answers. */
+  function netNow() { return (performance.now() + clockOffsetMs) / 1000; }
+
+  function netSyncClock() {
+    clockBestRttMs = Infinity;
+    const ws = online.ws;
+    // A few samples a moment apart: the shortest round trip is the least skewed.
+    // Only on the connection that asked — a reconnect in between is not open
+    // yet, and gets its own samples once it has joined.
+    for (const ms of [0, 700, 1400]) {
+      setTimeout(() => {
+        if (ws && online.ws === ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ t: 'time', c: performance.now() }));
+        }
+      }, ms);
+    }
+  }
+
+  function netClockSample(m) {
+    const now = performance.now();
+    const rtt = now - m.c;
+    if (typeof m.s !== 'number' || !(rtt >= 0) || rtt > clockBestRttMs) return;
+    clockBestRttMs = rtt;
+    clockOffsetMs = m.s + rtt / 2 - now;
+  }
 
   // The relay hands out a fresh member id on every connection and remembers
   // nobody, so a reconnecting player is a stranger to it. This is what makes a
@@ -4502,7 +4745,13 @@ if ('serviceWorker' in navigator) {
   function netPlayAiTurn() {
     if (!netPlaying() || state !== 'AIMING') return;
     const seat = currentPlayer;
-    if (!netSeatIsAi(seat) || !netWeDrive(seat)) return;
+    if (!netSeatIsAi(seat)) return;
+    // Played by the client covering the seat, not by the seat's own client —
+    // that is where its player comes back, and a CPU firing for them there too
+    // sent two shots for one turn. The seat's own client stands in only when
+    // nobody else can (everyone else is CPU-held too), or the game would stall.
+    const cover = netActsForSeat(seat);
+    if (!(cover === online.seat || (cover === -1 && seat === online.seat))) return;
     const token = turnToken;
     const stillTheirTurn = () =>
       turnToken === token && state === 'AIMING' && currentPlayer === seat;
@@ -4514,7 +4763,7 @@ if ('serviceWorker' in navigator) {
       t.power = shot.power;
       if (!weaponAvailable(t, t.weapon)) t.weapon = 'standard';
       updateHUD();
-      setTimeout(() => { if (stillTheirTurn()) fire(); }, aiFireDelayMs());
+      setTimeout(() => { if (stillTheirTurn()) fire({ byAi: true }); }, aiFireDelayMs());
     }, 500);
   }
 
@@ -4704,7 +4953,10 @@ if ('serviceWorker' in navigator) {
       return;
     }
 
+    if (m.t === 'time') { netClockSample(m); return; }
+
     if (m.t === 'joined') {
+      netSyncClock();
       online.rejoin = null;   // we are back in
       online.id = m.id;
       online.room = m.room;
@@ -4814,8 +5066,9 @@ if ('serviceWorker' in navigator) {
       refreshOpponentUi();
       // A new or resumed match replaces the board outright, whatever turn this
       // client thinks it is on.
-      online.pendingSync = null;
-      online.pendingTurn = null;
+      online.inbox = [];
+      activeShot = null;
+      lastShot = null;
       netApplyState(d.state, { force: true });
       refreshOnlineUi();
       return;
@@ -4823,28 +5076,10 @@ if ('serviceWorker' in navigator) {
 
     if (!netPlaying()) return;
 
-    if (d.k === 'turn') {
-      // A turn the player took themselves means they are back: the clock
-      // resets and the CPU hands the seat over. A CPU-played turn does not.
-      if (!d.ai) netSeatResponded(d.seat);
-      // Their screen finished the last shot before ours did and they have fired
-      // again. Dropping this lost their shot here, and our result for the last
-      // turn then went out stale; it waits for our turn to resolve instead.
-      if (state !== 'AIMING' && state !== 'GAMEOVER') { online.pendingTurn = d; return; }
-      netReplayTurn(d);
-      return;
-    }
-
-    if (d.k === 'heli') {
-      heli = heliIn(d.heli);
-      if (typeof d.heliTimer === 'number') heliTimer = d.heliTimer;
-      return;
-    }
-
-    if (d.k === 'timeout') {
-      online.missed[d.seat] = d.missed;
-      if (d.ai && !netSeatIsAi(d.seat)) online.aiSeats.push(d.seat);
-      updateHUD();
+    // Everything that changes the board goes through the inbox, in the order it
+    // was sent (netReceive).
+    if (d.k === 'turn' || d.k === 'heli' || d.k === 'timeout' || d.k === 'sync') {
+      netReceive(d);
       return;
     }
 
@@ -4855,32 +5090,78 @@ if ('serviceWorker' in navigator) {
       return;
     }
 
-    if (d.k === 'sync') {
-      // Snapping mid-flight would cut the shot off, so hold it until the local
-      // replay has finished and then correct whatever drifted.
-      // A finished round is applied at once even mid-flight: there is nothing
-      // left to watch, and holding it would leave this screen playing on.
-      if (state === 'AIMING' || state === 'GAMEOVER' || d.state.state === 'GAMEOVER') {
-        netApplyState(d.state);
-      } else {
-        online.pendingSync = d.state;
-      }
-      return;
-    }
   }
 
-  /** Replay somebody else's inputs so the shot is watched, not merely reported. */
-  function netReplayTurn(d) {
-    const t = tanks[d.seat];
-    if (!t || state !== 'AIMING') return;
-    // Fired from a board we have already moved past — its result has been
-    // applied here, and replaying it would land the same shot twice.
-    if (typeof d.turn === 'number' && d.turn < turnSeq) return;
-    currentPlayer = d.seat;
-    t.angle = d.angle;
-    t.power = d.power;
-    t.weapon = d.weapon;
-    fire();
+  /**
+   * A message that changes the board. They are applied in the order they were
+   * sent, and never while a shot is still playing out on this screen: a
+   * helicopter, a timeout or the next shot applied on the spot landed on top of
+   * a replay that had not finished, and every race this file has had came from
+   * that. They wait in the inbox until the shot lands.
+   *
+   * A screen a whole shot behind — one shot already waiting and another
+   * arrives — skips the rest of the one it is showing. Its result is known, and
+   * keeping up matters more than the tail of an animation.
+   */
+  function netReceive(d) {
+    if (d.k === 'turn' && !d.ai && d.result && netStandInLost(d)) return;
+    if (activeShot && d.k === 'turn' && online.inbox.some(m => m.k === 'turn')) finishShot();
+    if (activeShot) { online.inbox.push(d); return; }
+    netApplyMessage(d);
+  }
+
+  /**
+   * A seat's own player outranks the CPU standing in for it. The player can come
+   * back and fire in the same moment the client covering their seat fires for
+   * them, and then two shots are out for one turn. Every screen that took the
+   * stand-in's takes the player's result instead — mid-replay, the replay lands
+   * on it; already played, the board is replaced — and the seat is handed back.
+   * A stand-in's shot arriving after the player's is simply stale.
+   */
+  function netStandInLost(d) {
+    const same = s => s && s.turn === d.turn && s.seat === d.seat && s.ai;
+    if (activeShot && same(activeShot.shot)) {
+      netSeatResponded(d.seat);
+      activeShot.result = d.result;
+      return true;
+    }
+    if (!activeShot && same(lastShot) && turnSeq === d.turn + 1) {
+      netSeatResponded(d.seat);
+      lastShot = null;
+      netApplyState(d.result, { force: true });
+      return true;
+    }
+    return false;
+  }
+
+  function netDrainInbox() {
+    while (!activeShot && online.inbox.length) netApplyMessage(online.inbox.shift());
+  }
+
+  function netApplyMessage(d) {
+    if (d.k === 'turn') {
+      // A turn the player took themselves means they are back: the clock
+      // resets and the CPU hands the seat over. A CPU-played turn does not.
+      if (!d.ai) netSeatResponded(d.seat);
+      if (state === 'GAMEOVER' || !tanks[d.seat]) return;
+      // Fired from a board this screen has already moved past.
+      if (typeof d.turn === 'number' && d.turn < turnSeq) return;
+      activeShot = { shot: d, result: d.result || null, steps: 0 };
+      beginShot(d, true);
+      return;
+    }
+    if (d.k === 'heli') {
+      heli = heliIn(d.heli);
+      if (typeof d.heliTimer === 'number') heliTimer = d.heliTimer;
+      return;
+    }
+    if (d.k === 'timeout') {
+      online.missed[d.seat] = d.missed;
+      if (d.ai && !netSeatIsAi(d.seat)) online.aiSeats.push(d.seat);
+      updateHUD();
+      return;
+    }
+    if (d.k === 'sync') netApplyState(d.state);
   }
 
   /** Host only: deal seats and hand out the world everyone will play on. */
@@ -4936,8 +5217,10 @@ if ('serviceWorker' in navigator) {
     online.status = 'playing';
     refreshOpponentUi();
     // The same message a fresh match uses — the state it carries is simply the
-    // game in progress rather than a new one.
-    netSend('start', { seats: online.seats, tokens: online.seatTokens, state: netSnapshot() });
+    // game in progress rather than a new one. Mid-shot, that is the board the
+    // shot ends on: they have nothing to replay it from.
+    const board = activeShot && activeShot.result ? activeShot.result : netSnapshot();
+    netSend('start', { seats: online.seats, tokens: online.seatTokens, state: board });
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
@@ -5004,12 +5287,12 @@ if ('serviceWorker' in navigator) {
   /** A helicopter as it arrives from another client, or null. */
   function heliIn(h) {
     if (!h || (h.id != null && h.id === heliDownId)) return null;
-    return { ...h, seen: new Set(h.seen || []) };
+    return { ...h, t: Number.isFinite(h.t) ? h.t : netNow(), seen: new Set(h.seen || []) };
   }
 
   function heliOut() {
     return heli ? {
-      id: heli.id, x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed,
+      id: heli.id, t: heli.t, x: heli.x, y: heli.y, dir: heli.dir, speed: heli.speed,
       vy: heli.vy, falling: heli.falling, spin: heli.spin, legs: heli.legs,
       seen: [...heli.seen]
     } : null;
@@ -5112,21 +5395,23 @@ if ('serviceWorker' in navigator) {
     syncControlsFromTank();
   }
 
-  /**
-   * Publish how a turn ended. `actor` is the seat that *took* the turn, which
-   * by this point is no longer `currentPlayer` — the turn has already moved on.
-   */
   /** Publish the world as it stands, for a change that no turn will carry. */
   function netPublishState() {
     if (!netPlaying()) return;
     netSend('sync', { state: netSnapshot() });
   }
 
+  /**
+   * Publish a turn that ended with no shot's result to carry it — a skip the
+   * turn clock called on somebody else's behalf, a round ended some other way.
+   * A shot never gets here: finishShot takes its result instead of running
+   * nextTurn, and that result already went out in the `turn` message.
+   * `actor` is the seat that *took* the turn, no longer `currentPlayer`.
+   */
   function netPublishTurn(actor) {
-    if (!netPlaying()) return;
     const ours = netWeDrive(actor) || netPublishNext;
     netPublishNext = false;
-    if (!ours) return;
+    if (!ours || !netPlaying()) return;
     netSend('sync', { state: netSnapshot() });
   }
 
@@ -5229,6 +5514,7 @@ if ('serviceWorker' in navigator) {
     pickWeapon, weaponButtons, WEAPON_ICONS,
     fire, applyDamageAndCrater, hullDistance, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
+    simStep, inShot, SIM_DT, resolveShot, beginShot, finishShot, advanceTurn,
     endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, showWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
@@ -5237,13 +5523,13 @@ if ('serviceWorker' in navigator) {
     netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
-    netPlaying, NET_PROTOCOL,
+    netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus,
            netPill, netStatusEl, netRejoinBtn, netInviteBtn },
     syncControlsFromTank, updateHUD, nudge,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
-    heliOut, netAnnounceHeli, heliAuthority, heliSignature,
+    heliOut, heliIn, moveHeli, heliFollowClock, netAnnounceHeli, heliAuthority, heliSignature,
     SOUND, Sound, FLIGHT, flightOf, panOf, setSoundOn, setSfxLevel, sliderToLevel, levelToSlider,
     stopAllSound, updateSoundLoops, soundAvailable, secondsToImpact, screenX01,
     get sfxLevel() { return SND.level(); },
@@ -5276,6 +5562,7 @@ if ('serviceWorker' in navigator) {
     get camPanned() { return camPanned; }, set camPanned(v) { camPanned = v; },
     get turnToken() { return turnToken; }, get lastWinner() { return lastWinner; },
     get turnSeq() { return turnSeq; },
+    get activeShot() { return activeShot; },
     get shotExploded() { return shotExploded; },
     get explosions() { return explosions; }, get particles() { return particles; }
   };

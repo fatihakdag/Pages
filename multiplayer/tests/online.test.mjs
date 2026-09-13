@@ -129,7 +129,7 @@ test('the seat we do not drive is locked, exactly like a CPU seat', () => {
   assert.equal(h.g.el.weaponSelect.disabled, true, 'nor change what they are about to fire');
 });
 
-test('firing publishes the inputs before the shell is simulated', () => {
+test('firing sends the inputs and the board they end on, in one message', () => {
   const h = loadFlat();
   const sock = hostAMatch(h);
   h.flatTerrain(400);
@@ -143,9 +143,22 @@ test('firing publishes the inputs before the shell is simulated', () => {
   h.g.fire();
 
   const [turn] = sock.payloads('turn');
-  assert.deepEqual(turn,
-    { k: 'turn', seat: 0, angle: 40, power: 70, weapon: 'standard', ai: false, turn: 0 },
-    'ai: false marks it as the player themselves, not the CPU standing in');
+  assert.equal(turn.seat, 0);
+  assert.equal(turn.angle, 40);
+  assert.equal(turn.power, 70);
+  assert.equal(turn.weapon, 'standard');
+  assert.equal(turn.ai, false, 'the player themselves, not the CPU standing in');
+  assert.equal(turn.turn, 0, 'fired from the first board of the round');
+  assert.equal(typeof turn.seed, 'number', 'with the seed its replay draws from');
+  assert.equal(turn.wind, h.g.wind, 'and the wind it was fired into');
+  assert.ok(turn.result, 'and the result, worked out before anyone watches');
+  assert.equal(turn.result.turn, 1);
+  assert.equal(turn.result.currentPlayer, 1, 'which says whose turn comes next');
+
+  assert.equal(h.g.state, 'FIRING', 'here the shell has only just left the barrel');
+  assert.equal(h.g.turnSeq, 0);
+  assert.deepEqual(Array.from(h.g.terrain), new Array(h.g.W).fill(400),
+    'working the result out left the world on screen untouched');
 });
 
 test('their turn is replayed here, not merely reported', () => {
@@ -165,7 +178,7 @@ test('their turn is replayed here, not merely reported', () => {
   assert.equal(h.g.tanks[0].angle, 45, 'their aim is mirrored so the barrel matches');
 });
 
-test('a sync that lands mid-flight waits for the shot to finish', () => {
+test('a message that lands mid-flight waits for the shot to finish', () => {
   const h = loadFlat();
   const sock = joinAMatch(h);
   const host = loadFlat();
@@ -186,11 +199,11 @@ test('a sync that lands mid-flight waits for the shot to finish', () => {
   sock.deliver({ t: 'msg', from: 1, d: { k: 'sync', state: authoritative } });
 
   assert.equal(h.g.tanks[1].hp, 100, 'the flight is not cut short by the snap');
-  assert.equal(h.g.online.pendingSync !== null, true, 'it is held instead');
+  assert.equal(h.g.online.inbox.length, 1, 'it waits in the inbox instead');
 
   h.advanceUntil(() => h.g.state === 'AIMING' || h.g.state === 'GAMEOVER');
-  assert.equal(h.g.tanks[1].hp, 42, 'and applied once the turn resolves');
-  assert.equal(h.g.online.pendingSync, null);
+  assert.equal(h.g.tanks[1].hp, 42, 'and is applied once the shot lands');
+  assert.equal(h.g.online.inbox.length, 0);
 });
 
 test('a result that arrives after our own next shot does not undo it', () => {
@@ -249,7 +262,8 @@ test('a shot fired while ours is still landing is watched, not dropped', () => {
   h.advanceUntil(() => h.g.state === 'AIMING');
   assert.equal(h.g.currentPlayer, 0, 'and play comes back round to us');
   assert.equal(h.g.turnSeq, 2);
-  assert.equal(sock.payloads('sync').length, syncsBefore + 1, 'only our own turn is published from here');
+  assert.equal(sock.payloads('turn').length, 1, 'our own result went out with our shot');
+  assert.equal(sock.payloads('sync').length, syncsBefore, 'and nothing else is published from here');
 });
 
 test('a snapshot survives the round trip, unlimited ammo included', () => {
@@ -277,7 +291,7 @@ test('a snapshot survives the round trip, unlimited ammo included', () => {
     'the standard shell is unlimited, which JSON cannot carry directly');
 });
 
-test('finishing our turn publishes the result', () => {
+test('our result goes out with our shot, and the board we land on is that result', () => {
   const h = loadFlat();
   const sock = hostAMatch(h);
   h.flatTerrain(400);
@@ -288,9 +302,12 @@ test('finishing our turn publishes the result', () => {
   h.g.state = 'AIMING';
 
   h.fireAndSettle();
-  const syncs = sock.payloads('sync');
-  assert.equal(syncs.length, 1, 'exactly one result per turn');
-  assert.equal(syncs[0].state.currentPlayer, 1, 'and it says whose turn it now is');
+  const turns = sock.payloads('turn');
+  assert.equal(turns.length, 1, 'exactly one message per turn');
+  assert.deepEqual(sock.payloads('sync'), [], 'no snapshot chasing it');
+  assert.equal(h.g.currentPlayer, 1, 'play has moved on here');
+  assert.equal(turns[0].result.currentPlayer, 1, 'as the result said it would');
+  assert.deepEqual(Array.from(h.g.terrain), turns[0].result.terrain, 'onto exactly the board that was sent');
 });
 
 test('a refused join is reported rather than left hanging', () => {
@@ -503,7 +520,7 @@ test('every online string has a Turkish counterpart', () => {
   }
 });
 
-test('only the client publishing a turn rolls the new wind', () => {
+test('the new wind comes with the shot, so every screen shows the same one', () => {
   const host = load();
   const hs = hostAMatch(host);
   const guest = load();
@@ -528,11 +545,208 @@ test('only the client publishing a turn rolls the new wind', () => {
 
   // Rolling locally showed a figure on the guest's wind gauge that existed
   // nowhere else — and anyone starting to aim in that window aimed against it.
-  assert.equal(guest.g.wind, shared, 'the guest keeps the wind it knows about');
-  assert.notEqual(host.g.wind, shared, 'the publisher rolled a new one');
+  assert.notEqual(host.g.wind, shared, 'the shooter rolled a new one');
+  assert.equal(guest.g.wind, host.g.wind, 'and the guest has it the moment the shot lands');
+  assert.deepEqual(hs.payloads('sync'), [], 'without waiting on a snapshot for it');
+});
 
-  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('sync').slice(-1)[0] });
-  assert.equal(guest.g.wind, host.g.wind, 'and the snapshot settles it');
+test('a replay on its own lands on exactly the board the shooter sent', () => {
+  const host = loadFlat();
+  const hs = hostAMatch(host);
+  const guest = loadFlat({ width: 390, height: 844 });   // a different screen, too
+  const gs = joinAMatch(guest);
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
+  for (const c of [host, guest]) { c.flatTerrain(400); c.placeTanksAt([200, 700]); c.g.wind = 0; }
+
+  host.g.currentPlayer = 0;
+  Object.assign(host.g.tanks[0], { angle: 58, power: 64, weapon: 'cluster' });   // chance decides where bomblets go
+  host.g.state = 'AIMING';
+  host.g.fire();
+
+  // The inputs alone, without the result to fall back on: if the replay drew
+  // anything differently, the board would show it.
+  const { result, ...inputs } = hs.payloads('turn')[0];
+  gs.deliver({ t: 'msg', from: 1, d: inputs });
+  guest.advanceUntil(() => guest.g.state === 'AIMING' || guest.g.state === 'GAMEOVER');
+
+  assert.ok(result.terrain.some(y => y > 400), 'the shot did carve the ground');
+  assert.deepEqual(Array.from(guest.g.terrain), result.terrain, 'every crater where the result has it');
+  assert.deepEqual(Array.from(guest.g.tanks, t => t.hp), result.tanks.map(t => t.hp), 'and exactly its damage');
+});
+
+test('a shot lands in the same place whatever the frame rate', () => {
+  const boards = [16, 33, 7].map(frameMs => {
+    const h = loadFlat();
+    h.flatTerrain(400);
+    h.placeTanksAt([200, 700]);
+    h.g.currentPlayer = 0;
+    Object.assign(h.g.tanks[0], { angle: 50, power: 66, weapon: 'cluster' });
+    h.g.state = 'AIMING';
+    h.g.fire();
+    for (let ms = 0; ms < 30000 && h.g.state !== 'AIMING' && h.g.state !== 'GAMEOVER'; ms += frameMs) {
+      h.advance(frameMs, frameMs);
+    }
+    return { terrain: Array.from(h.g.terrain), hp: Array.from(h.g.tanks, t => t.hp) };
+  });
+  assert.ok(boards[0].terrain.some(y => y > 400), 'the shot did carve the ground');
+  assert.deepEqual(boards[1], boards[0], '30fps lands it where 60fps does');
+  assert.deepEqual(boards[2], boards[0], 'and so does 144Hz');
+});
+
+test('a helicopter announced mid-shot waits for the shot to land', () => {
+  const h = loadFlat();
+  const sock = joinAMatch(h);
+  const host = loadFlat();
+  const hostSock = hostAMatch(host);
+  sock.deliver({ t: 'msg', from: 1, d: hostSock.payloads('start')[0] });
+  h.flatTerrain(400);
+  h.placeTanksAt([200, 700]);
+  h.g.currentPlayer = 0;
+  h.g.state = 'AIMING';
+
+  sock.deliver({ t: 'msg', from: 1,
+    d: { k: 'turn', seat: 0, angle: 45, power: 40, weapon: 'standard', ai: false, turn: 0, seed: 1, wind: 0, heli: null } });
+  assert.equal(h.g.state, 'FIRING');
+
+  const arriving = { id: 5, x: 500, y: 120, dir: 1, speed: 60, vy: 0, falling: false, spin: 0, legs: 0, seen: [1] };
+  sock.deliver({ t: 'msg', from: 1, d: { k: 'heli', heli: arriving, heliTimer: 90 } });
+  assert.equal(h.g.heli, null, 'not dropped into a replay in progress');
+
+  h.advanceUntil(() => h.g.state === 'AIMING');
+  assert.equal(h.g.heli && h.g.heli.id, 5, 'and there once the shot has landed');
+});
+
+test('a screen a whole shot behind skips ahead to the result', () => {
+  const host = loadFlat();
+  const hs = hostAMatch(host);
+  host.flatTerrain(400);
+  host.placeTanksAt([200, 700]);
+  host.g.currentPlayer = 0;
+  Object.assign(host.g.tanks[0], { angle: 45, power: 40 });
+  host.g.state = 'AIMING';
+  host.g.fire();
+  const first = hs.payloads('turn')[0];
+
+  const guest = loadFlat();
+  const gs = joinAMatch(guest);
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
+  guest.flatTerrain(400);
+  guest.placeTanksAt([200, 700]);
+  guest.g.state = 'AIMING';
+
+  gs.deliver({ t: 'msg', from: 1, d: first });
+  assert.equal(guest.g.activeShot.shot.turn, 0, 'watching the first shot');
+
+  const second = { ...first, seat: 1, turn: 1, result: { ...first.result, turn: 2, currentPlayer: 0 } };
+  gs.deliver({ t: 'msg', from: 2, d: second });
+  assert.equal(guest.g.activeShot.shot.turn, 0, 'one shot waiting is simply queued');
+  assert.equal(guest.g.online.inbox.length, 1);
+
+  const third = { ...first, turn: 2, result: { ...first.result, turn: 3, currentPlayer: 1 } };
+  gs.deliver({ t: 'msg', from: 1, d: third });
+  assert.equal(guest.g.turnSeq, 1, 'with a second behind it, the first skips straight to its result');
+  assert.equal(guest.g.activeShot.shot.turn, 1, 'and the next one starts');
+  assert.equal(guest.g.online.inbox.length, 1, 'with the latest still waiting');
+});
+
+test('between shots the helicopter is where the clock says, whatever the frame rate', () => {
+  const [a, b] = [loadFlat(), loadFlat()];
+  for (const h of [a, b]) {
+    h.g.state = 'AIMING';
+    h.g.heli = h.g.heliIn({ id: 3, t: h.g.netNow(), x: 300, y: 120, dir: 1, speed: 60,
+                            vy: 0, falling: false, spin: 0, legs: 0, seen: [0, 1] });
+  }
+  a.advance(3000, 16);
+  b.advance(3000, 33);
+  assert.ok(Math.abs(a.g.heli.x - b.g.heli.x) <= 60 * a.g.SIM_DT + 1e-9,
+    `within a step of each other: ${a.g.heli.x} vs ${b.g.heli.x}`);
+  assert.ok(Math.abs(a.g.heli.x - (300 + 60 * 3)) <= 2, 'and where three seconds of flight puts it');
+});
+
+test('the match clock is the relay’s, less half the round trip', () => {
+  const h = load();
+  h.g.netClockSample({ t: 'time', c: h.now - 80, s: 1_700_000_000_000 });
+  assert.ok(Math.abs(h.g.netNow() - 1_700_000_000.04) < 1e-6, 'relay time plus the 40ms the answer spent coming back');
+
+  h.g.netClockSample({ t: 'time', c: h.now - 300, s: 5 });
+  assert.ok(Math.abs(h.g.netNow() - 1_700_000_000.04) < 1e-6, 'a slower sample is more skewed, and ignored');
+
+  h.g.netClockSample({ t: 'time', c: h.now - 20, s: 1_700_000_000_500 });
+  assert.ok(Math.abs(h.g.netNow() - 1_700_000_000.51) < 1e-6, 'a faster one is trusted over it');
+});
+
+/** Host and guest on the same flat board, seat 1's turn, with seat 1 held by the CPU. */
+function standInMatch() {
+  const host = loadFlat();
+  const hs = hostAMatch(host);
+  const guest = loadFlat();
+  const gs = joinAMatch(guest);
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
+  for (const c of [host, guest]) {
+    c.flatTerrain(400);
+    c.placeTanksAt([200, 700]);
+    c.g.wind = 0;
+    c.g.currentPlayer = 1;
+    c.g.state = 'AIMING';
+    c.g.online.aiSeats.push(1);   // the guest let two turns lapse
+  }
+  return { host, hs, guest, gs };
+}
+
+test('the CPU stands in on the client covering the seat, never on the seat’s own', () => {
+  const { host, hs, guest, gs } = standInMatch();
+  host.g.netPlayAiTurn();
+  guest.g.netPlayAiTurn();
+  host.advance(5000);
+  guest.advance(5000);
+
+  const hostShots = hs.payloads('turn');
+  assert.equal(hostShots.length, 1, 'the host covers seat 1 and plays it');
+  assert.equal(hostShots[0].ai, true, 'marked as the CPU');
+  assert.deepEqual(gs.payloads('turn'), [], 'the guest does not fire a second shot for its own seat');
+});
+
+test('a player who fires as their stand-in does wins the turn, on every screen', () => {
+  const { host, hs, guest, gs } = standInMatch();
+
+  // The host's CPU fires for seat 1 ...
+  Object.assign(host.g.tanks[1], { angle: 120, power: 70 });
+  host.g.fire({ byAi: true });
+  // ... in the same moment the guest comes back and fires it themselves.
+  Object.assign(guest.g.tanks[1], { angle: 150, power: 40 });
+  guest.g.fire();
+
+  const standIn = hs.payloads('turn').slice(-1)[0];
+  const player = gs.payloads('turn').slice(-1)[0];
+  assert.equal(standIn.ai, true);
+  assert.equal(player.ai, false, 'a click is the player, even on a seat the CPU holds');
+  assert.notDeepEqual(standIn.result.terrain, player.result.terrain, 'two different shots for one turn');
+
+  hs.deliver({ t: 'msg', from: 2, d: player });
+  gs.deliver({ t: 'msg', from: 1, d: standIn });
+  host.advanceUntil(() => host.g.state === 'AIMING' && !host.g.activeShot);
+  guest.advanceUntil(() => guest.g.state === 'AIMING' && !guest.g.activeShot);
+
+  assert.deepEqual(Array.from(host.g.terrain), player.result.terrain, 'the host lands on the player’s shot, not its stand-in’s');
+  assert.deepEqual(Array.from(guest.g.terrain), player.result.terrain, 'and so does the player');
+  assert.equal(host.g.turnSeq, guest.g.turnSeq);
+  assert.ok(!Array.from(host.g.online.aiSeats).includes(1), 'and the seat is handed back');
+});
+
+test('a player’s shot that arrives after the stand-in’s has landed still wins', () => {
+  const { host, hs, guest, gs } = standInMatch();
+  Object.assign(host.g.tanks[1], { angle: 120, power: 70 });
+  host.g.fire({ byAi: true });
+  host.advanceUntil(() => host.g.state === 'AIMING' && !host.g.activeShot);
+  assert.equal(host.g.turnSeq, 1, 'the stand-in’s shot has played out here');
+
+  Object.assign(guest.g.tanks[1], { angle: 150, power: 40 });
+  guest.g.fire();
+  const player = gs.payloads('turn').slice(-1)[0];
+  hs.deliver({ t: 'msg', from: 2, d: player });
+
+  assert.deepEqual(Array.from(host.g.terrain), player.result.terrain, 'the board is replaced with the player’s');
+  assert.ok(!Array.from(host.g.online.aiSeats).includes(1));
 });
 
 test('the wind on screen is the wind, not a number this client made up', () => {
