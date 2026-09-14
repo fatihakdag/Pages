@@ -129,6 +129,29 @@ test('the seat we do not drive is locked, exactly like a CPU seat', () => {
   assert.equal(h.g.el.weaponSelect.disabled, true, 'nor change what they are about to fire');
 });
 
+test('the keyboard is locked on their turn too, not just the buttons', () => {
+  const h = loadFlat();
+  const sock = hostAMatch(h);
+  h.g.currentPlayer = 1; // theirs
+  h.g.state = 'AIMING';
+  h.g.tanks[1].angle = 100;
+  h.g.tanks[1].power = 50;
+
+  h.key('ArrowLeft');
+  h.key('ArrowUp');
+  h.key(' ', { code: 'Space' });
+
+  assert.equal(h.g.tanks[1].angle, 100, 'the arrows must not aim their tank');
+  assert.equal(h.g.tanks[1].power, 50);
+  assert.equal(h.g.state, 'AIMING', 'SPACE must not fire their tank');
+  assert.equal(sock.payloads('turn').length, 0, 'and no shot goes out for them');
+
+  h.g.currentPlayer = 0; // ours: the keys still work
+  h.g.tanks[0].angle = 90;
+  h.key('ArrowLeft');
+  assert.notEqual(h.g.tanks[0].angle, 90);
+});
+
 test('firing sends the inputs and the board they end on, in one message', () => {
   const h = loadFlat();
   const sock = hostAMatch(h);

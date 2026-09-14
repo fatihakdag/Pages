@@ -2758,7 +2758,9 @@ if ('serviceWorker' in navigator) {
     // While the dialog is up, the keyboard belongs to it: SPACE would
     // otherwise fire the gun from behind an open settings panel.
     if (settingsIsOpen()) return;
-    if (state !== 'AIMING' || isAi(currentPlayer)) return;
+    // The same lock as the on-screen controls (syncControlsFromTank): a seat
+    // somebody else drives in a match is no more ours to aim than a CPU's.
+    if (state !== 'AIMING' || isAi(currentPlayer) || netRemoteSeat(currentPlayer)) return;
     const t = tanks[currentPlayer];
     if (e.key === 'ArrowLeft') { t.angle = Math.min(180, t.angle + 1); syncControlsFromTank(); e.preventDefault(); }
     else if (e.key === 'ArrowRight') { t.angle = Math.max(0, t.angle - 1); syncControlsFromTank(); e.preventDefault(); }
