@@ -297,3 +297,78 @@ test('the keys do nothing on a CPU seat or between turns', () => {
   h.key('ArrowLeft');
   assert.equal(g.tanks[0].angle, 45, 'nor while a shell is in the air');
 });
+
+// Pull from (ax, ay) to (x, y) on the canvas with one pointer.
+function pull(g, id, ax, ay, x, y) {
+  g.canvas.dispatch('pointerdown', { pointerId: id, button: 0, clientX: ax, clientY: ay });
+  g.canvas.dispatch('pointermove', { pointerId: id, clientX: x, clientY: y });
+}
+
+test('pulling back on the field aims opposite the pull and sets power by length', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  const t = g.tanks[0];
+  const reach = g.pullReach();
+  const DEAD = 14;
+
+  // Pull straight down: aim straight up. Dead zone plus half the reach = 50.
+  pull(g, 1, 300, 200, 300, 200 + DEAD + reach / 2);
+  assert.equal(t.angle, 90);
+  assert.equal(t.power, 50);
+  assert.equal(Number(g.el.angleSlider.value), 90, 'the angle slider follows');
+  assert.equal(Number(g.el.powerSlider.value), 50, 'the power slider follows');
+
+  // Pull down and to the left: aim up and to the right, capped at full power.
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: 300 - reach, clientY: 200 + reach });
+  assert.equal(t.angle, 45);
+  assert.equal(t.power, 100);
+  assert.equal(g.el.angleVal.textContent, '45°');
+  assert.equal(g.state, 'AIMING', 'nothing fires until the pull is released');
+
+  g.canvas.dispatch('pointerup', { pointerId: 1 });
+  assert.notEqual(g.state, 'AIMING', 'releasing the pull fires');
+  assert.equal(g.aimDrag, null);
+});
+
+test('releasing inside the dead zone cancels and restores the aim', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  const t = g.tanks[0];
+  t.angle = 60; t.power = 40;
+
+  pull(g, 1, 300, 200, 250, 300);
+  assert.notEqual(t.angle, 60, 'the pull moved the aim');
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: 305, clientY: 203 });
+  assert.deepEqual([t.angle, t.power], [60, 40], 'back in the dead zone shows the old aim');
+  g.canvas.dispatch('pointerup', { pointerId: 1 });
+  assert.equal(g.state, 'AIMING', 'a release in the dead zone does not fire');
+
+  // A cancelled pointer never fires either, however far it was pulled.
+  pull(g, 2, 300, 200, 200, 300);
+  g.canvas.dispatch('pointercancel', { pointerId: 2 });
+  assert.equal(g.state, 'AIMING');
+  assert.deepEqual([t.angle, t.power], [60, 40]);
+});
+
+test('pulling does nothing on a CPU turn or mid-flight', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.cpuMode = true;
+  g.currentPlayer = 1;
+  const cpu = g.tanks[1];
+  const before = [cpu.angle, cpu.power];
+  pull(g, 1, 300, 200, 200, 300);
+  g.canvas.dispatch('pointerup', { pointerId: 1 });
+  assert.deepEqual([cpu.angle, cpu.power], before);
+  assert.equal(g.aimDrag, null);
+
+  g.cpuMode = false;
+  g.currentPlayer = 0;
+  g.state = 'FIRING';
+  const t = g.tanks[0];
+  t.angle = 60; t.power = 40;
+  pull(g, 2, 300, 200, 200, 300);
+  assert.deepEqual([t.angle, t.power], [60, 40]);
+});
