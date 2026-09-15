@@ -297,3 +297,60 @@ test('the keys do nothing on a CPU seat or between turns', () => {
   h.key('ArrowLeft');
   assert.equal(g.tanks[0].angle, 45, 'nor while a shell is in the air');
 });
+
+test('dragging on the field aims the barrel at the finger and sets power by distance', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  const t = g.tanks[0];
+  const p = g.turretPos(t);
+  const reach = g.aimReach();
+
+  // Straight up, half the reach away: 90° at half power.
+  g.canvas.dispatch('pointerdown', { pointerId: 1, button: 0, clientX: p.x, clientY: p.y - reach / 2 });
+  assert.equal(t.angle, 90);
+  assert.equal(t.power, 50);
+  assert.equal(Number(g.el.angleSlider.value), 90, 'the angle slider follows');
+  assert.equal(Number(g.el.powerSlider.value), 50, 'the power slider follows');
+
+  // Drag up and to the right at 45°, past full reach: power caps at 100.
+  const d = reach;
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: p.x + d, clientY: p.y - d });
+  assert.equal(t.angle, 45);
+  assert.equal(t.power, 100);
+  assert.equal(g.el.angleVal.textContent, '45°');
+
+  // Below the turret on the left pins the barrel flat that way.
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: p.x - 100, clientY: p.y + 30 });
+  assert.equal(t.angle, 180);
+
+  // After release, moving the pointer changes nothing.
+  g.canvas.dispatch('pointerup', { pointerId: 1 });
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: p.x + 50, clientY: p.y - 50 });
+  assert.equal(t.angle, 180);
+});
+
+test('dragging on the field does nothing on a CPU turn or mid-flight', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  const t = g.tanks[0];
+  const p = g.turretPos(t);
+  t.angle = 60; t.power = 40;
+
+  g.cpuMode = true;
+  g.currentPlayer = 1;
+  const cpu = g.tanks[1];
+  if (g.isAi(1)) {
+    const before = [cpu.angle, cpu.power];
+    const q = g.turretPos(cpu);
+    g.canvas.dispatch('pointerdown', { pointerId: 2, button: 0, clientX: q.x, clientY: q.y - 100 });
+    assert.deepEqual([cpu.angle, cpu.power], before);
+  }
+
+  g.cpuMode = false;
+  g.currentPlayer = 0;
+  g.state = 'FIRING';
+  g.canvas.dispatch('pointerdown', { pointerId: 3, button: 0, clientX: p.x, clientY: p.y - 100 });
+  assert.deepEqual([t.angle, t.power], [60, 40]);
+});

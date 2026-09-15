@@ -247,6 +247,7 @@
     display: block;
     width: 100%;
     height: 100%;
+    touch-action: none; /* dragging on the field aims, it doesn't scroll */
   }
 
   #controls {
@@ -791,7 +792,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v49';
+  const BUILD = 'v50';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2431,6 +2432,72 @@
     else if (e.code === 'Space') { fire(); e.preventDefault(); }
   });
 
+  // Touch / mouse aiming: press on the battlefield and drag. The barrel points
+  // at the finger and the distance from the turret sets the power, so the
+  // sliders just follow along — they stay the precise control, this is the
+  // quick one. A finger below the turret pins the barrel flat on that side.
+  let aimDrag = null; // { id, x, y } in canvas pixels while a drag is live
+
+  function turretPos(t) {
+    return { x: t.x, y: groundHeightAt(t.x) - TANK_H };
+  }
+  function aimReach() {
+    return Math.max(60, Math.min(W, H) * 0.6); // drag distance for full power
+  }
+  function aimAtPoint(x, y) {
+    if (state !== 'AIMING' || isAi(currentPlayer)) return false;
+    const t = tanks[currentPlayer];
+    if (!t || !t.alive) return false;
+    const p = turretPos(t);
+    const dx = x - p.x, dy = p.y - y;
+    const dist = Math.hypot(dx, dy);
+    // Right on top of the turret the direction is noise; leave it be.
+    if (dist < 8) return false;
+    let angle = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
+    if (angle < 0) angle = dx >= 0 ? 0 : 180;
+    t.angle = Math.max(0, Math.min(180, angle));
+    t.power = Math.max(0, Math.min(100, Math.round(dist / aimReach() * 100)));
+    syncControlsFromTank();
+    return true;
+  }
+  function canvasPoint(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  function endAimDrag(e) {
+    if (!aimDrag || (e && e.pointerId !== aimDrag.id)) return;
+    aimDrag = null;
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (aimDrag || state !== 'AIMING' || isAi(currentPlayer)) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    const pt = canvasPoint(e);
+    // Leave the wind gauge to its double-click.
+    if (!hudWindVisible) {
+      const box = windGaugeRect();
+      if (pt.x >= box.x && pt.x <= box.x + box.w && pt.y >= box.y && pt.y <= box.y + box.h) return;
+    }
+    e.preventDefault();
+    aimDrag = { id: e.pointerId, x: pt.x, y: pt.y };
+    if (canvas.setPointerCapture) {
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* already released */ }
+    }
+    aimAtPoint(pt.x, pt.y);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!aimDrag || e.pointerId !== aimDrag.id) return;
+    if (state !== 'AIMING' || isAi(currentPlayer)) { aimDrag = null; return; }
+    const pt = canvasPoint(e);
+    aimDrag.x = pt.x;
+    aimDrag.y = pt.y;
+    aimAtPoint(pt.x, pt.y);
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    canvas.addEventListener(ev, endAimDrag);
+  }
+  window.addEventListener('blur', () => { aimDrag = null; });
+
   fireBtn.addEventListener('click', fire);
   restartBtn.addEventListener('click', resetGame);
 
@@ -3641,6 +3708,32 @@
     ctx.restore();
   }
 
+  // While dragging to aim: a faint guide from the turret to the finger and a
+  // ring under it, so it is clear the drag is what moved the barrel.
+  function drawAimDrag() {
+    if (!aimDrag) return;
+    if (state !== 'AIMING' || isAi(currentPlayer)) { aimDrag = null; return; }
+    const t = tanks[currentPlayer];
+    if (!t || !t.alive) return;
+    const p = turretPos(t);
+    ctx.save();
+    ctx.strokeStyle = t.color;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([2, 5]);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(aimDrag.x, aimDrag.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(aimDrag.x, aimDrag.y, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function render() {
     ctx.clearRect(0, 0, W, H);
 
@@ -3676,6 +3769,7 @@
 
     drawHeli();
     drawAimPreview();
+    drawAimDrag();
 
     // trails and shells, one set per warhead in the air
     for (const p of projectiles) {
@@ -3799,7 +3893,7 @@
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
     endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
-    syncControlsFromTank, updateHUD, nudge,
+    syncControlsFromTank, updateHUD, nudge, aimAtPoint, aimReach, turretPos, canvas,
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     SOUND, Sound, setSoundOn, stopAllSound, updateSoundLoops, soundAvailable,
     setSfxLevel, sliderToLevel, levelToSlider, RELOADS, gunPanner, zonePanner, panOf, audioCtx, secondsToImpact, FLIGHT, flightOf,
