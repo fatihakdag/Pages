@@ -127,11 +127,22 @@ two players zoomed differently still hold the same battlefield and the same
 shot lands in the same place, and there is a test for exactly that. Everything
 it touches lives in `worldTransform()` and `eventToWorld()`.
 
-- One finger drags, two fingers pinch, the wheel zooms about the cursor, and
-  three buttons over the playfield do the same for anyone not on a touch
-  screen. Pointer events cover all three input kinds in one path, and the
+- One finger drags, two fingers pinch and drag, the wheel zooms about the
+  cursor, and three buttons over the playfield do the same for anyone not on a
+  touch screen. Pointer events cover all three input kinds in one path, and the
   canvas carries `touch-action: none` so the browser does not scroll the page
   out from under a gesture.
+- The canvas is shared with slingshot aiming, which is the root build's and
+  works the same here: press the battlefield, pull back, let go to fire. On a
+  seat you are playing the first finger is therefore a pull, not a drag, so
+  panning there is two fingers (or the zoom buttons, or the wheel). On a seat
+  you are not — a CPU's, another player's, or any moment that is not `AIMING` —
+  one finger drags the view as before. A second finger landing mid-pull hands
+  the gesture to the camera and puts the aim back.
+- The pull itself is measured in **CSS pixels**, like the on-canvas wind gauge
+  and unlike everything else on the battlefield: it is a gesture on a screen,
+  so the same finger travel is the same shot at any zoom. `drawAimDrag()` is
+  drawn under `screenTransform()` for the same reason.
 - `camFollow()` runs each frame: zoomed in, it eases onto the shell while one
   is in the air and onto whoever is aiming between turns — without it, zoom is
   useless, because firing loses the shell immediately.

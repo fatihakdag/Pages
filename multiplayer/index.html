@@ -1395,7 +1395,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v55';
+  const BUILD = 'v56';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2769,6 +2769,112 @@ if ('serviceWorker' in navigator) {
     else if (e.code === 'Space') { fire(); e.preventDefault(); }
   });
 
+  // Slingshot aiming, Angry Birds style: press anywhere on the battlefield,
+  // pull back, let go to fire. The shot goes opposite the pull and the pull's
+  // length sets the power, so the sliders follow along while you pull. Pulling
+  // back into the dead zone around where you pressed and releasing there
+  // cancels, and puts the aim back how it was — a stray tap never fires.
+  //
+  // The pull is measured in CSS pixels, not world units: it is a gesture on a
+  // screen, so a full pull is the same length of finger travel whether the
+  // camera is fitted to the whole world or zoomed all the way in.
+  //
+  // It shares the canvas with the camera (see "Zoom and pan input"), and wins:
+  // on your own turn one finger aims, so panning there is two fingers or the
+  // zoom buttons. Everywhere else — another seat's turn, a shell in the air —
+  // one finger still drags the view.
+  let aimDrag = null; // { id, ax, ay, x, y, angle, power } in CSS pixels
+  const PULL_DEAD = 14; // px of pull before it counts as aiming
+
+  function pullReach() {
+    // Pull length for full power. Kept short so a full pull fits even on a
+    // landscape phone, where the field is the whole (short) screen height.
+    return Math.max(60, Math.min(viewW, viewH) * 0.3);
+  }
+  function canPull() {
+    const t = tanks[currentPlayer];
+    // The same lock as the keys and the on-screen controls: a seat the CPU or
+    // another player drives is not ours to aim.
+    return state === 'AIMING' && !isAi(currentPlayer) && !netRemoteSeat(currentPlayer) && !!t && t.alive;
+  }
+  // Aim from a pull vector (anchor minus finger). Returns false inside the
+  // dead zone, where the direction is noise.
+  function aimFromPull(dx, dy) {
+    if (!canPull()) return false;
+    const dist = Math.hypot(dx, dy);
+    if (dist < PULL_DEAD) return false;
+    const t = tanks[currentPlayer];
+    let angle = Math.round(Math.atan2(-dy, dx) * 180 / Math.PI);
+    if (angle < 0) angle = dx >= 0 ? 0 : 180; // pulled upward: barrel flat
+    t.angle = Math.max(0, Math.min(180, angle));
+    t.power = Math.max(0, Math.min(100, Math.round((dist - PULL_DEAD) / pullReach() * 100)));
+    syncControlsFromTank();
+    return true;
+  }
+  function canvasPoint(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  function pullLength() {
+    return aimDrag ? Math.hypot(aimDrag.ax - aimDrag.x, aimDrag.ay - aimDrag.y) : 0;
+  }
+  function cancelPull() {
+    if (!aimDrag) return;
+    const d = aimDrag;
+    aimDrag = null;
+    const t = tanks[currentPlayer];
+    if (t && state === 'AIMING' && !isAi(currentPlayer) && !netRemoteSeat(currentPlayer)) {
+      t.angle = d.angle;
+      t.power = d.power;
+      syncControlsFromTank();
+    }
+  }
+  function releasePull(e) {
+    if (!aimDrag || (e && e.pointerId !== aimDrag.id)) return;
+    if (pullLength() < PULL_DEAD || !canPull()) { cancelPull(); return; }
+    aimDrag = null;
+    fire();
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (aimDrag || !canPull()) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    // A finger is already down: that gesture belongs to the camera, and a
+    // second one joining it is a pinch, not a pull.
+    if (camPointers.size) return;
+    const pt = canvasPoint(e);
+    // Leave the wind gauge to its double-click.
+    if (!hudWindVisible) {
+      const box = windGaugeRect();
+      if (pt.x >= box.x && pt.x <= box.x + box.w && pt.y >= box.y && pt.y <= box.y + box.h) return;
+    }
+    e.preventDefault();
+    const t = tanks[currentPlayer];
+    aimDrag = { id: e.pointerId, ax: pt.x, ay: pt.y, x: pt.x, y: pt.y, angle: t.angle, power: t.power };
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!aimDrag || e.pointerId !== aimDrag.id) return;
+    if (!canPull()) { aimDrag = null; return; }
+    const pt = canvasPoint(e);
+    aimDrag.x = pt.x;
+    aimDrag.y = pt.y;
+    if (!aimFromPull(aimDrag.ax - pt.x, aimDrag.ay - pt.y)) {
+      // Back in the dead zone: show the aim you started from.
+      const t = tanks[currentPlayer];
+      if (t.angle !== aimDrag.angle || t.power !== aimDrag.power) {
+        t.angle = aimDrag.angle;
+        t.power = aimDrag.power;
+        syncControlsFromTank();
+      }
+    }
+  });
+  canvas.addEventListener('pointerup', releasePull);
+  canvas.addEventListener('pointercancel', (e) => { if (aimDrag && e.pointerId === aimDrag.id) cancelPull(); });
+  // pointerup has already cleared aimDrag by the time capture is lost normally;
+  // losing it any other way (a system gesture) is a cancel, not a shot.
+  canvas.addEventListener('lostpointercapture', (e) => { if (aimDrag && e.pointerId === aimDrag.id) cancelPull(); });
+  window.addEventListener('blur', cancelPull);
+
   fireBtn.addEventListener('click', fire);
   restartBtn.addEventListener('click', onRestartClicked);
 
@@ -4007,9 +4113,13 @@ if ('serviceWorker' in navigator) {
   });
 
   // ---------- Zoom and pan input ----------
-  // One finger drags the view, two pinch it. Pointer events cover mouse, pen
-  // and touch with one code path; `touch-action: none` on the canvas stops the
-  // browser scrolling the page out from under the gesture.
+  // One finger drags the view, two pinch and drag it. Pointer events cover
+  // mouse, pen and touch with one code path; `touch-action: none` on the canvas
+  // stops the browser scrolling the page out from under the gesture.
+  //
+  // On your own turn the first finger is aiming instead (see the slingshot
+  // above), so two fingers are what pan there — hence the pinch also carrying
+  // the view along with its midpoint, rather than only scaling it.
   const camPointers = new Map();
   let pinchStart = null; // {dist, zoom, fx, fy}
 
@@ -4022,6 +4132,9 @@ if ('serviceWorker' in navigator) {
   canvas.addEventListener('pointerdown', (e) => {
     camPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (camPointers.size === 2) {
+      // A second finger means the camera, not the gun: whatever was pulled
+      // back goes back where it was rather than flying off mid-pinch.
+      cancelPull();
       const [a, b] = [...camPointers.values()];
       const mid = { clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 };
       const f = pointerFrac(mid);
@@ -4041,9 +4154,14 @@ if ('serviceWorker' in navigator) {
       const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
       camPanned = true;
       camZoomTo(pinchStart.zoom * (dist / pinchStart.dist), pinchStart.fx, pinchStart.fy);
+      // Two fingers travelling together drag the view. Only this pointer moved
+      // this far, so the midpoint between them moved half of it.
+      camPanByPixels(dx / 2, dy / 2);
       return;
     }
-    if (camPointers.size === 1 && camZoom > CAM_MIN) {
+    // A pull owns the single finger it started with, so the drag aims rather
+    // than panning. camFollow() still eases onto the seat that is aiming.
+    if (camPointers.size === 1 && camZoom > CAM_MIN && !aimDrag) {
       camPanned = true;
       camPanByPixels(dx, dy);
       e.preventDefault();
@@ -4538,6 +4656,38 @@ if ('serviceWorker' in navigator) {
     ctx.restore();
   }
 
+  // The slingshot while pulling: a ring where you pressed, a band out to the
+  // finger, and a knob on the end. Inside the dead zone it dims, to read as
+  // "let go here and nothing happens". Drawn in CSS pixels, like the wind
+  // gauge — it belongs to the finger, not to the battlefield under it.
+  function drawAimDrag() {
+    if (!aimDrag) return;
+    if (!canPull()) { aimDrag = null; return; }
+    const t = tanks[currentPlayer];
+    const armed = pullLength() >= PULL_DEAD;
+    ctx.save();
+    ctx.strokeStyle = t.color;
+    ctx.fillStyle = t.color;
+    ctx.globalAlpha = armed ? 0.8 : 0.35;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(aimDrag.ax, aimDrag.ay, PULL_DEAD, 0, Math.PI * 2);
+    ctx.stroke();
+    if (armed) {
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(aimDrag.ax, aimDrag.ay);
+      ctx.lineTo(aimDrag.x, aimDrag.y);
+      ctx.stroke();
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(aimDrag.x, aimDrag.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function render() {
     // Every frame, because the camera can have moved since the last one. This
     // used to be set only by resize() and by the on-canvas wind gauge, so on a
@@ -4664,15 +4814,14 @@ if ('serviceWorker' in navigator) {
       ctx.globalAlpha = 1;
     });
 
-    // Only one wind readout at a time: the bar's pill where it fits, this otherwise.
-    // The gauge is UI sitting on top of the battlefield, not part of it: drawn
-    // in CSS pixels so its text stays the same readable size whether the world
-    // is 1400px wide or 390px wide.
-    if (!hudWindVisible) {
-      screenTransform();
-      drawWindGauge();
-      worldTransform();
-    }
+    // On-canvas UI, drawn in CSS pixels rather than world units so it stays
+    // the same readable size whether the world is 1400px wide or 390px wide.
+    // Only one wind readout at a time: the bar's pill where it fits, this
+    // otherwise; the slingshot is wherever the finger has it.
+    screenTransform();
+    if (!hudWindVisible) drawWindGauge();
+    drawAimDrag();
+    worldTransform();
   }
 
   // ---------- Online ----------
@@ -5678,6 +5827,7 @@ if ('serviceWorker' in navigator) {
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus,
            netPill, netStatusEl, netRejoinBtn, netInviteBtn },
     syncControlsFromTank, updateHUD, nudge,
+    aimFromPull, pullReach, canvas, get aimDrag() { return aimDrag; },
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     heliOut, heliIn, moveHeli, heliFollowClock, netAnnounceHeli, heliAuthority, heliSignature,
     heliDrawPos, heliRouteAt, heliLegAt, heliFlyTo, HELI_MIN_LEGS, HELI_MAX_LEGS,

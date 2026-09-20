@@ -323,3 +323,159 @@ test('the wind is read from the bar or from the canvas, never from both', () => 
   g.resize();
   assert.equal(g.hudWindVisible, true, 'pill on screen, so the sky stays clear');
 });
+
+// Pull from (ax, ay) to (x, y) on the canvas with one pointer.
+function pull(g, id, ax, ay, x, y) {
+  g.canvas.dispatch('pointerdown', { pointerId: id, button: 0, clientX: ax, clientY: ay });
+  g.canvas.dispatch('pointermove', { pointerId: id, clientX: x, clientY: y });
+}
+
+function release(g, id, x, y) {
+  g.canvas.dispatch('pointerup', { pointerId: id, clientX: x, clientY: y });
+}
+
+test('pulling back on the field aims opposite the pull and sets power by length', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  const t = g.tanks[0];
+  const reach = g.pullReach();
+  const DEAD = 14;
+
+  // Pull straight down: aim straight up. Dead zone plus half the reach = 50.
+  pull(g, 1, 300, 200, 300, 200 + DEAD + reach / 2);
+  assert.equal(t.angle, 90);
+  assert.equal(t.power, 50);
+  assert.equal(Number(g.el.angleSlider.value), 90, 'the angle slider follows');
+  assert.equal(Number(g.el.powerSlider.value), 50, 'the power slider follows');
+
+  // Pull down and to the left: aim up and to the right, capped at full power.
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: 300 - reach, clientY: 200 + reach });
+  assert.equal(t.angle, 45);
+  assert.equal(t.power, 100);
+  assert.equal(g.el.angleVal.textContent, '45°');
+  assert.equal(g.state, 'AIMING', 'nothing fires until the pull is released');
+
+  release(g, 1, 300 - reach, 200 + reach);
+  assert.notEqual(g.state, 'AIMING', 'releasing the pull fires');
+  assert.equal(g.aimDrag, null);
+});
+
+test('the pull is measured on screen, so zoom is not a handicap', () => {
+  const powerAt = (zoom) => {
+    const h = loadFlat();
+    const { g } = h;
+    g.currentPlayer = 0;
+    g.camZoomTo(zoom);
+    pull(g, 1, 300, 200, 300, 200 + 14 + g.pullReach() / 2);
+    return g.tanks[0].power;
+  };
+  assert.equal(powerAt(1), 50);
+  assert.equal(powerAt(4), 50, 'the same finger travel is the same shot, zoomed in');
+});
+
+test('releasing inside the dead zone cancels and restores the aim', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  const t = g.tanks[0];
+  t.angle = 60; t.power = 40;
+
+  pull(g, 1, 300, 200, 250, 300);
+  assert.notEqual(t.angle, 60, 'the pull moved the aim');
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: 305, clientY: 203 });
+  assert.deepEqual([t.angle, t.power], [60, 40], 'back in the dead zone shows the old aim');
+  release(g, 1, 305, 203);
+  assert.equal(g.state, 'AIMING', 'a release in the dead zone does not fire');
+
+  // A cancelled pointer never fires either, however far it was pulled.
+  pull(g, 2, 300, 200, 200, 300);
+  g.canvas.dispatch('pointercancel', { pointerId: 2 });
+  assert.equal(g.state, 'AIMING');
+  assert.deepEqual([t.angle, t.power], [60, 40]);
+});
+
+test('pulling does nothing on a CPU turn or mid-flight', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.cpuMode = true;
+  g.currentPlayer = 1;
+  const cpu = g.tanks[1];
+  const before = [cpu.angle, cpu.power];
+  pull(g, 1, 300, 200, 200, 300);
+  release(g, 1, 200, 300);
+  assert.deepEqual([cpu.angle, cpu.power], before);
+  assert.equal(g.aimDrag, null);
+
+  g.cpuMode = false;
+  g.currentPlayer = 0;
+  g.state = 'FIRING';
+  const t = g.tanks[0];
+  t.angle = 60; t.power = 40;
+  pull(g, 2, 300, 200, 200, 300);
+  assert.deepEqual([t.angle, t.power], [60, 40]);
+});
+
+test('a seat someone else is playing cannot be aimed by pulling', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.online.status = 'playing';
+  g.online.seat = 0;
+  g.currentPlayer = 1;              // the other player's turn
+  const t = g.tanks[1];
+  t.angle = 60; t.power = 40;
+
+  pull(g, 1, 300, 200, 200, 300);
+  release(g, 1, 200, 300);
+  assert.deepEqual([t.angle, t.power], [60, 40], 'their tank is no more ours than a CPU\'s');
+  assert.equal(g.state, 'AIMING', 'and nothing fires');
+});
+
+test('one finger aims on your own turn and drags the view on anyone else\'s', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.camZoomTo(3);
+  g.camCenterOn(g.W / 2, g.H / 2);
+
+  // Your turn: the pull owns the finger, so the drag does not pan. (camFollow
+  // still eases onto the seat that is aiming; that is the frame loop's, and it
+  // is not ticked here.)
+  g.currentPlayer = 0;
+  const at = g.camX;
+  pull(g, 1, 300, 200, 200, 260);
+  assert.equal(g.camX, at, 'the drag aimed instead of dragging the view');
+  assert.notEqual(g.aimDrag, null);
+  g.canvas.dispatch('pointercancel', { pointerId: 1 });
+  g.canvas.dispatch('pointerup', { pointerId: 1 });
+
+  // Someone else's turn: the same drag is a pan again.
+  g.online.status = 'playing';
+  g.online.seat = 0;
+  g.currentPlayer = 1;
+  pull(g, 2, 300, 200, 200, 260);
+  assert.equal(g.aimDrag, null, 'no pull starts on their seat');
+  assert.notEqual(g.camX, at, 'so the finger drags the view instead');
+  g.canvas.dispatch('pointerup', { pointerId: 2 });
+});
+
+test('a second finger takes the gesture back for the camera', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  const t = g.tanks[0];
+  t.angle = 60; t.power = 40;
+
+  pull(g, 1, 300, 200, 220, 280);
+  assert.notEqual(g.aimDrag, null);
+
+  // Pinching to look closer must not leave a loaded slingshot behind.
+  g.canvas.dispatch('pointerdown', { pointerId: 2, button: 0, clientX: 400, clientY: 300 });
+  assert.equal(g.aimDrag, null, 'the pull is dropped');
+  assert.deepEqual([t.angle, t.power], [60, 40], 'and the aim is put back');
+
+  g.canvas.dispatch('pointermove', { pointerId: 2, clientX: 500, clientY: 400 });
+  assert.equal(g.state, 'AIMING', 'pinching never fires');
+  release(g, 1, 220, 280);
+  release(g, 2, 500, 400);
+  assert.equal(g.state, 'AIMING', 'nor does letting the pinch go');
+});
