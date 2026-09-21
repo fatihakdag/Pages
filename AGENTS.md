@@ -99,7 +99,8 @@ a document never is.
 
 - Keep it one file with no dependencies. Nothing may be added that needs a build
   step or a network fetch.
-- Adding a weapon means: an entry in `WEAPONS`, an `<option>` in `#weapon-select`,
+- Adding a weapon means: an entry in `WEAPONS`, an `<option>` in `#weapon-select`
+  (hidden; the picker buttons are built from it), an icon in `WEAPON_ICONS`,
   a `w_<key>` string in both languages, and any special-case branch in
   `stepProjectile()`. The test harness picks up the new `<option>` automatically.
 - Every user-facing string goes through `txt()` and needs an **en and a tr**

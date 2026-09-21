@@ -372,3 +372,72 @@ test('pulling does nothing on a CPU turn or mid-flight', () => {
   pull(g, 2, 300, 200, 200, 300);
   assert.deepEqual([t.angle, t.power], [60, 40]);
 });
+
+test('there is one weapon icon per weapon in the dropdown, in its order', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const keys = Array.from(g.weaponBtns, b => b.key);
+  assert.deepEqual(keys, Array.from(g.el.weaponSelect.options, o => o.value));
+  assert.ok(keys.includes('standard'));
+});
+
+test('clicking a weapon icon arms that weapon and marks it', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  g.state = 'AIMING';
+  g.syncControlsFromTank();
+  const big = Array.from(g.weaponBtns).find(b => b.key === 'big');
+
+  big.el.click();
+
+  assert.equal(g.tanks[0].weapon, 'big');
+  assert.equal(g.el.weaponSelect.value, 'big', 'the select follows the icons');
+  assert.equal(big.el.classList.contains('on'), true);
+  assert.equal(big.el.getAttribute('aria-pressed'), 'true');
+  assert.equal(big.ammo.textContent, String(g.tanks[0].ammo.big));
+  const std = Array.from(g.weaponBtns).find(b => b.key === 'standard');
+  assert.equal(std.el.classList.contains('on'), false);
+  assert.equal(std.ammo.textContent, '∞');
+});
+
+test('an empty weapon\'s icon is greyed out and cannot be picked', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  g.state = 'AIMING';
+  g.tanks[0].ammo.cluster = 0;
+  g.syncControlsFromTank();
+  const cluster = Array.from(g.weaponBtns).find(b => b.key === 'cluster');
+
+  assert.equal(cluster.el.disabled, true);
+  g.pickWeapon('cluster');
+  assert.equal(g.tanks[0].weapon, 'standard');
+});
+
+test('number keys pick weapons in icon order', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  g.state = 'AIMING';
+  g.syncControlsFromTank();
+
+  h.key('2');
+  assert.equal(g.tanks[0].weapon, g.weaponBtns[1].key);
+  h.key('1');
+  assert.equal(g.tanks[0].weapon, g.weaponBtns[0].key);
+});
+
+test('the weapon icons lock on a CPU turn', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.cpuMode = true;
+  g.currentPlayer = 1;
+  g.state = 'AIMING';
+  g.tanks[1].weapon = 'standard';
+  g.syncControlsFromTank();
+
+  assert.ok(Array.from(g.weaponBtns).every(b => b.el.disabled));
+  g.pickWeapon('big');
+  assert.equal(g.tanks[1].weapon, 'standard', 'a player cannot reach into the CPU\'s pick');
+});
