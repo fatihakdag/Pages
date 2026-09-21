@@ -792,7 +792,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v50';
+  const BUILD = 'v51';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1160,10 +1160,15 @@
   }
 
   let streakRGB = '255,255,255';
+  // The aim preview sits low in the frame, over the bottom of the sky gradient
+  // and the ground below it, so it takes its contrast from skyBot rather than
+  // the skyTop the wind streaks up high are judged against.
+  let aimHaloRGB = '20,16,14';
 
   function applyTheme(t) {
     theme = t;
     streakRGB = hexLum(t.skyTop) > 0.5 ? '40,34,30' : '255,255,255';
+    aimHaloRGB = hexLum(t.skyBot) > 0.5 ? '20,16,14' : '255,255,255';
     const root = document.documentElement;
     if (root && root.style) {
       root.style.setProperty('--sky-top', t.skyTop);
@@ -3703,37 +3708,104 @@
       if (pts.length < 2) return;
     }
 
+    // Every player colour is bright and saturated, which leaves some of them
+    // with nothing to sit against on a pale theme — yellow over Salt Flats,
+    // green over Verdant Hills. So each mark is drawn twice: the theme's halo
+    // colour first, a little wider, then the player colour on top. The mark
+    // carries its own contrast and stays readable on any sky or ground.
+    const halo = 'rgb(' + aimHaloRGB + ')';
     ctx.save();
     if (full) {
-      ctx.strokeStyle = t.color;
-      ctx.lineWidth = 1.6;
-      ctx.globalAlpha = 0.5;
+      // Butt caps, as before: round ones would stretch every dash by the width
+      // of the backing stroke and turn the arc into a line of fat lozenges.
       ctx.setLineDash([4, 6]);
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = halo;
+      ctx.lineWidth = 3.4;
+      ctx.stroke();
+      ctx.globalAlpha = 0.8;
+      ctx.strokeStyle = t.color;
+      ctx.lineWidth = 1.7;
       ctx.stroke();
       ctx.setLineDash([]);
 
       if (!guided) {
         const end = pts[pts.length - 1];
-        ctx.globalAlpha = 0.85;
-        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(end[0], end[1], 5, 0, Math.PI * 2);
+        ctx.globalAlpha = 0.45;
+        ctx.strokeStyle = halo;
+        ctx.lineWidth = 4.5;
+        ctx.stroke();
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = t.color;
+        ctx.lineWidth = 2;
         ctx.stroke();
       }
     } else {
-      // Roughly the first half second of flight, fading out: enough to read
-      // departure angle and which way the wind is bending it, not enough to
-      // hand over the landing spot.
-      const SHORT = 34;
-      const n = Math.min(SHORT, pts.length);
-      ctx.fillStyle = t.color;
-      for (let i = 2; i < n; i += 3) {
-        ctx.globalAlpha = 0.5 * (1 - i / SHORT);
+      // Two rules, and they pull in different directions on purpose.
+      //
+      // The dots are stamped at a fixed interval of flight *time* (traceShot
+      // walks 1/60s a point, so EVERY of them is a 20th of a second), which
+      // makes the space between them the shell's speed. That is the reading
+      // the hint exists to give: raise the power and the dots visibly spread.
+      //
+      // But the line is cut off by *length*, not by a count of stamps, so it
+      // never reaches far enough to point at the impact. A hard shot therefore
+      // shows few, widely spaced dots and a soft one shows many tight ones,
+      // both ending in the same place. Power is read from the spacing, which
+      // is honest, rather than from how far the dots reach, which would be a
+      // free ranging shot.
+      const EVERY = 3;
+      const MAX_DOTS = 11;
+      const HINT_LEN = 160 * physScale;
+      // Scaled with the field like everything else, but never smaller than
+      // what still reads on a phone-sized canvas. Small: the halo is what
+      // makes these visible, so the dot itself does not need the bulk.
+      const r = Math.max(1.1, 1.2 * physScale);
+      const rim = Math.max(0.8, 0.85 * physScale);
+      // Under this the dots touch and the spacing stops being readable, so the
+      // very weakest shots give up the speed reading to stay legible.
+      const minGap = 2.6 * (r + rim);
+
+      let total = 0;
+      for (let i = 1; i < pts.length; i++) {
+        total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      }
+      // A weak lob is shorter end to end than HINT_LEN, and drawing all of it
+      // would hand over its landing spot just as plainly.
+      const limit = Math.min(HINT_LEN, total * 0.45);
+
+      const marks = [];
+      let walked = 0, since = minGap;
+      for (let i = 1; i < pts.length && walked <= limit && marks.length < MAX_DOTS; i++) {
+        const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+        walked += d;
+        since += d;
+        if (i % EVERY === 0 && since >= minGap && walked <= limit) {
+          marks.push(pts[i]);
+          since = 0;
+        }
+      }
+
+      // The tail thins out rather than disappearing: the old fade reached
+      // near-zero alpha halfway along, which is most of what made these hard
+      // to see before the halo.
+      const last = Math.max(1, marks.length - 1);
+      for (let i = 0; i < marks.length; i++) {
+        const a = 0.45 + 0.5 * (1 - i / last);
+        ctx.globalAlpha = a * 0.55;
+        ctx.fillStyle = halo;
         ctx.beginPath();
-        ctx.arc(pts[i][0], pts[i][1], 1.8, 0, Math.PI * 2);
+        ctx.arc(marks[i][0], marks[i][1], r + rim, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = t.color;
+        ctx.beginPath();
+        ctx.arc(marks[i][0], marks[i][1], r, 0, Math.PI * 2);
         ctx.fill();
       }
     }
