@@ -164,3 +164,64 @@ test('a guided missile chases a helicopter that is up when the motor lights', (t
   for (let i = 0; i < 10; i++) g.stepProjectile(p, 0.03);
   assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y));
 });
+
+test('a guided missile locks onto an enemy tank close to its aim point', (t) => {
+  const h = loadFlat();
+  const { g } = h;
+  if (!g.weaponEnabled('missile')) return t.skip('guided missile is switched off');
+  h.flatTerrain(400);
+  h.placeTanksAt([150, 600]);
+  const r = g.MISSILE.lockRadius * g.physScale;
+
+  const near = shell({ x: 300, y: 150, vx: 120, vy: -1, weapon: 'missile', age: 1,
+                       aimX: g.tanks[1].x - r * 0.8 });
+  g.projectiles = [near];
+  g.state = 'FIRING';
+  g.stepProjectile(near, 0.05);
+  assert.equal(near.armed, true);
+  assert.equal(near.aimX, g.tanks[1].x, 'a near miss is pulled onto the tank');
+
+  const far = shell({ x: 300, y: 150, vx: 120, vy: -1, weapon: 'missile', age: 1,
+                      aimX: g.tanks[1].x - r * 1.5 });
+  g.projectiles = [far];
+  g.stepProjectile(far, 0.05);
+  assert.equal(far.aimX, g.tanks[1].x - r * 1.5, 'a wide miss keeps its own aim point');
+});
+
+test('a guided missile never locks onto its own tank or a dead one', (t) => {
+  const h = loadFlat();
+  const { g } = h;
+  if (!g.weaponEnabled('missile')) return t.skip('guided missile is switched off');
+  h.flatTerrain(400);
+  h.placeTanksAt([300, 700]);
+  const aimX = g.tanks[0].x + 5;
+  assert.equal(g.lockOnTank(shell({ firedBy: 0, aimX })), null, 'not the shooter');
+  g.tanks[1].x = aimX;
+  g.tanks[1].alive = false;
+  assert.equal(g.lockOnTank(shell({ firedBy: 0, aimX })), null, 'not a wreck');
+  g.tanks[1].alive = true;
+  assert.equal(g.lockOnTank(shell({ firedBy: 0, aimX })), g.tanks[1]);
+});
+
+test('a missile that locks on comes down on the tank', (t) => {
+  const h = loadFlat();
+  const { g } = h;
+  if (!g.weaponEnabled('missile')) return t.skip('guided missile is switched off');
+  h.flatTerrain(400);
+  h.placeTanksAt([150, 850]);
+  g.currentPlayer = 0;
+  const shooter = g.tanks[0];
+  shooter.weapon = 'missile';
+  shooter.angle = 55;
+  shooter.power = 70;
+  g.state = 'AIMING';
+  g.fire();
+  // Put the target just inside lock range of wherever this shot was going.
+  const target = g.tanks[1];
+  target.x = g.projectiles[0].aimX + g.MISSILE.lockRadius * g.physScale * 0.8;
+  const hp = target.hp;
+
+  h.advanceUntil(() => g.state === 'AIMING' || g.state === 'GAMEOVER');
+  assert.ok(target.hp < hp - g.WEAPONS.missile.damageMax * 0.5,
+    `hp ${hp} -> ${target.hp}`);
+});

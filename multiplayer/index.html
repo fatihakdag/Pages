@@ -1421,6 +1421,10 @@ if ('serviceWorker' in navigator) {
                         // that is behind it without flying into the ground
     diveAngle: 78,      // deg below horizontal it pitches to with nothing to chase
     heliLead: 0.15,     // s of lead when chasing the helicopter
+    lockRadius: 50,     // px either side of the aim point an enemy tank has to
+                        // be in for the missile to take it as its target when
+                        // the motor lights. About twice the blast radius: it
+                        // saves a near miss, it doesn't aim for you
     fuze: 0.7           // proximity fuze radius, as a fraction of the airframe.
                         // heliHitBy's box is only ~13px tall, and a tail chase
                         // closes on a target asymptotically, so a missile that
@@ -3547,10 +3551,28 @@ if ('serviceWorker' in navigator) {
     // Locked once, here: a helicopter that shows up later isn't chased, and one
     // that is shot down or leaves mid-burn drops the missile back into its dive.
     p.chase = !!(heli && !heli.falling);
+    // Also locked once: an enemy tank close to the aim point becomes the aim
+    // point. The helicopter still comes first, since the chase overrides aimX;
+    // if it leaves mid-burn the dive goes to the tank instead.
+    const locked = lockOnTank(p);
+    if (locked) p.aimX = locked.x;
     // At apex a steep shot has almost no speed left, so the motor sets a floor
     // rather than preserving what little is there.
     p.burnSpeed = Math.max(Math.hypot(p.vx, p.vy), MISSILE.boostSpeed * physScale);
     spawnDust(p.x, p.y, WEAPONS.missile.color);
+  }
+
+  // The nearest living tank, other than the shooter's own, within lockRadius
+  // of the aim point, or null. Ties go to the first seat, so every client
+  // picks the same one.
+  function lockOnTank(p) {
+    let best = null, bestD = MISSILE.lockRadius * physScale;
+    tanks.forEach((t, i) => {
+      if (!t.alive || i === p.firedBy) return;
+      const d = Math.abs(t.x - p.aimX);
+      if (d <= bestD && (!best || d < bestD)) { best = t; bestD = d; }
+    });
+    return best;
   }
 
   // How much ground the dive still to come will cover: the geometry of the drop
@@ -5881,7 +5903,7 @@ if ('serviceWorker' in navigator) {
     groundHeightAt, craterAt, bedrockY, newTerrain, buildTerrainFromShape,
     placeTanks, levelTankPads, groundGradientAt, buildTanks,
     get hudWindVisible() { return hudWindVisible; },
-    freshAmmo, weaponEnabled, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
+    freshAmmo, weaponEnabled, lockOnTank, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
     pickWeapon, weaponButtons, WEAPON_ICONS,
     fire, applyDamageAndCrater, hullDistance, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
