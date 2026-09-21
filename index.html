@@ -792,7 +792,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v50';
+  const BUILD = 'v51';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1160,10 +1160,15 @@
   }
 
   let streakRGB = '255,255,255';
+  // The aim preview sits low in the frame, over the bottom of the sky gradient
+  // and the ground below it, so it takes its contrast from skyBot rather than
+  // the skyTop the wind streaks up high are judged against.
+  let aimHaloRGB = '20,16,14';
 
   function applyTheme(t) {
     theme = t;
     streakRGB = hexLum(t.skyTop) > 0.5 ? '40,34,30' : '255,255,255';
+    aimHaloRGB = hexLum(t.skyBot) > 0.5 ? '20,16,14' : '255,255,255';
     const root = document.documentElement;
     if (root && root.style) {
       root.style.setProperty('--sky-top', t.skyTop);
@@ -3703,38 +3708,86 @@
       if (pts.length < 2) return;
     }
 
+    // Every player colour is bright and saturated, which leaves some of them
+    // with nothing to sit against on a pale theme — yellow over Salt Flats,
+    // green over Verdant Hills. So each mark is drawn twice: the theme's halo
+    // colour first, a little wider, then the player colour on top. The mark
+    // carries its own contrast and stays readable on any sky or ground.
+    const halo = 'rgb(' + aimHaloRGB + ')';
     ctx.save();
     if (full) {
-      ctx.strokeStyle = t.color;
-      ctx.lineWidth = 1.6;
-      ctx.globalAlpha = 0.5;
+      // Butt caps, as before: round ones would stretch every dash by the width
+      // of the backing stroke and turn the arc into a line of fat lozenges.
       ctx.setLineDash([4, 6]);
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = halo;
+      ctx.lineWidth = 3.4;
+      ctx.stroke();
+      ctx.globalAlpha = 0.8;
+      ctx.strokeStyle = t.color;
+      ctx.lineWidth = 1.7;
       ctx.stroke();
       ctx.setLineDash([]);
 
       if (!guided) {
         const end = pts[pts.length - 1];
-        ctx.globalAlpha = 0.85;
-        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(end[0], end[1], 5, 0, Math.PI * 2);
+        ctx.globalAlpha = 0.45;
+        ctx.strokeStyle = halo;
+        ctx.lineWidth = 4.5;
+        ctx.stroke();
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = t.color;
+        ctx.lineWidth = 2;
         ctx.stroke();
       }
     } else {
-      // Roughly the first half second of flight, fading out: enough to read
-      // departure angle and which way the wind is bending it, not enough to
-      // hand over the landing spot.
-      const SHORT = 34;
-      const n = Math.min(SHORT, pts.length);
-      ctx.fillStyle = t.color;
-      for (let i = 2; i < n; i += 3) {
-        ctx.globalAlpha = 0.5 * (1 - i / SHORT);
-        ctx.beginPath();
-        ctx.arc(pts[i][0], pts[i][1], 1.8, 0, Math.PI * 2);
-        ctx.fill();
+      // Enough of the path to read departure angle and which way the wind is
+      // bending it, and no more. Measured in distance along the arc, not in
+      // integration steps: a step is a fixed slice of *time*, so a fixed count
+      // of them stretches across the field as power goes up and ends by
+      // pointing at the impact. A length instead looks the same at any power.
+      let total = 0;
+      for (let i = 1; i < pts.length; i++) {
+        total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      }
+      // The share of the whole flight is the other half of it: a weak lob is
+      // shorter than HINT_LEN end to end, and drawing all of that would hand
+      // over its landing spot just as plainly.
+      const HINT_LEN = 150 * physScale;
+      const limit = Math.min(HINT_LEN, total * 0.45);
+      // Scaled with the field like everything else, but never smaller than
+      // what still reads on a phone-sized canvas.
+      const r = Math.max(1.5, 1.6 * physScale);
+      const rim = Math.max(1, 1 * physScale);
+      // The dots divide whatever length the hint got, so a weak lob still
+      // draws a readable dotted stub instead of the one lone dot a fixed
+      // spacing left it with — but never so close together that they merge.
+      const gap = Math.max(3.2 * (r + rim), limit / 10);
+      let walked = 0, mark = gap;
+      for (let i = 1; i < pts.length && mark <= limit; i++) {
+        walked += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+        while (walked >= mark && mark <= limit) {
+          // The tail thins out rather than disappearing: the old fade reached
+          // near-zero alpha halfway along, which is most of what made these
+          // hard to see before the halo.
+          const a = 0.35 + 0.6 * (1 - mark / limit);
+          ctx.globalAlpha = a * 0.55;
+          ctx.fillStyle = halo;
+          ctx.beginPath();
+          ctx.arc(pts[i][0], pts[i][1], r + rim, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = a;
+          ctx.fillStyle = t.color;
+          ctx.beginPath();
+          ctx.arc(pts[i][0], pts[i][1], r, 0, Math.PI * 2);
+          ctx.fill();
+          mark += gap;
+        }
       }
     }
     ctx.restore();
