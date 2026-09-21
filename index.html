@@ -3746,48 +3746,67 @@
         ctx.stroke();
       }
     } else {
-      // Enough of the path to read departure angle and which way the wind is
-      // bending it, and no more. Measured in distance along the arc, not in
-      // integration steps: a step is a fixed slice of *time*, so a fixed count
-      // of them stretches across the field as power goes up and ends by
-      // pointing at the impact. A length instead looks the same at any power.
+      // Two rules, and they pull in different directions on purpose.
+      //
+      // The dots are stamped at a fixed interval of flight *time* (traceShot
+      // walks 1/60s a point, so EVERY of them is a 20th of a second), which
+      // makes the space between them the shell's speed. That is the reading
+      // the hint exists to give: raise the power and the dots visibly spread.
+      //
+      // But the line is cut off by *length*, not by a count of stamps, so it
+      // never reaches far enough to point at the impact. A hard shot therefore
+      // shows few, widely spaced dots and a soft one shows many tight ones,
+      // both ending in the same place. Power is read from the spacing, which
+      // is honest, rather than from how far the dots reach, which would be a
+      // free ranging shot.
+      const EVERY = 3;
+      const MAX_DOTS = 11;
+      const HINT_LEN = 160 * physScale;
+      // Scaled with the field like everything else, but never smaller than
+      // what still reads on a phone-sized canvas. Small: the halo is what
+      // makes these visible, so the dot itself does not need the bulk.
+      const r = Math.max(1.1, 1.2 * physScale);
+      const rim = Math.max(0.8, 0.85 * physScale);
+      // Under this the dots touch and the spacing stops being readable, so the
+      // very weakest shots give up the speed reading to stay legible.
+      const minGap = 2.6 * (r + rim);
+
       let total = 0;
       for (let i = 1; i < pts.length; i++) {
         total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
       }
-      // The share of the whole flight is the other half of it: a weak lob is
-      // shorter than HINT_LEN end to end, and drawing all of that would hand
-      // over its landing spot just as plainly.
-      const HINT_LEN = 150 * physScale;
+      // A weak lob is shorter end to end than HINT_LEN, and drawing all of it
+      // would hand over its landing spot just as plainly.
       const limit = Math.min(HINT_LEN, total * 0.45);
-      // Scaled with the field like everything else, but never smaller than
-      // what still reads on a phone-sized canvas.
-      const r = Math.max(1.5, 1.6 * physScale);
-      const rim = Math.max(1, 1 * physScale);
-      // The dots divide whatever length the hint got, so a weak lob still
-      // draws a readable dotted stub instead of the one lone dot a fixed
-      // spacing left it with — but never so close together that they merge.
-      const gap = Math.max(3.2 * (r + rim), limit / 10);
-      let walked = 0, mark = gap;
-      for (let i = 1; i < pts.length && mark <= limit; i++) {
-        walked += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-        while (walked >= mark && mark <= limit) {
-          // The tail thins out rather than disappearing: the old fade reached
-          // near-zero alpha halfway along, which is most of what made these
-          // hard to see before the halo.
-          const a = 0.35 + 0.6 * (1 - mark / limit);
-          ctx.globalAlpha = a * 0.55;
-          ctx.fillStyle = halo;
-          ctx.beginPath();
-          ctx.arc(pts[i][0], pts[i][1], r + rim, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = a;
-          ctx.fillStyle = t.color;
-          ctx.beginPath();
-          ctx.arc(pts[i][0], pts[i][1], r, 0, Math.PI * 2);
-          ctx.fill();
-          mark += gap;
+
+      const marks = [];
+      let walked = 0, since = minGap;
+      for (let i = 1; i < pts.length && walked <= limit && marks.length < MAX_DOTS; i++) {
+        const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+        walked += d;
+        since += d;
+        if (i % EVERY === 0 && since >= minGap && walked <= limit) {
+          marks.push(pts[i]);
+          since = 0;
         }
+      }
+
+      // The tail thins out rather than disappearing: the old fade reached
+      // near-zero alpha halfway along, which is most of what made these hard
+      // to see before the halo.
+      const last = Math.max(1, marks.length - 1);
+      for (let i = 0; i < marks.length; i++) {
+        const a = 0.45 + 0.5 * (1 - i / last);
+        ctx.globalAlpha = a * 0.55;
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(marks[i][0], marks[i][1], r + rim, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = t.color;
+        ctx.beginPath();
+        ctx.arc(marks[i][0], marks[i][1], r, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
     ctx.restore();
