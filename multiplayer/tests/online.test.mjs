@@ -112,6 +112,48 @@ test('a guest adopts the seat and the world it is given', () => {
   assert.equal(guest.g.wind, host.g.wind);
 });
 
+test('the names players chose travel with the deal and label their cards', () => {
+  const host = load();
+  host.g.el2.onlineNameInput.value = 'Ada';
+  const hostSock = connect(host);
+  hostSock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+  hostSock.deliver({ t: 'peer', id: 2, name: '' });
+
+  const guest = load({ width: 390, height: 844 });
+  // Over the cap, with padding and a control character: trimmed, not trusted.
+  guest.g.el2.onlineNameInput.value = '  Grace\u0007 Hopper-Longname ';
+  const guestSock = joinAMatch(guest);
+  const [ready] = guestSock.payloads('ready');
+  assert.equal(ready.name, 'Grace Hopp', 'capped at MAX_NAME_LEN');
+
+  hostSock.deliver({ t: 'msg', from: 2, d: ready });
+  const [start] = hostSock.payloads('start');
+  assert.deepEqual(start.names, ['Ada', 'Grace Hopp']);
+  guestSock.deliver({ t: 'msg', from: 1, d: start });
+
+  for (const h of [host, guest]) {
+    assert.equal(h.g.el.cards[0].querySelector('.pn-full').textContent, 'Ada');
+    assert.equal(h.g.el.cards[1].querySelector('.pn-full').textContent, 'Grace Hopp');
+    assert.equal(h.g.playerName(1), 'Grace Hopp', 'the banner and win line use it too');
+  }
+  assert.equal(host.g.el2.onlineNameInput.disabled, true, 'locked for the match');
+});
+
+test('a player with no name keeps PLAYER n, and names end with the match', () => {
+  const h = load();
+  const sock = hostAMatch(h);
+  const [start] = sock.payloads('start');
+  assert.deepEqual(start.names, ['', '']);
+  assert.equal(h.g.el.cards[1].querySelector('.pn-full').textContent, 'PLAYER 2');
+
+  h.g.online.seatNames[1] = 'Zed';
+  h.g.updateHUD();
+  assert.equal(h.g.el.cards[1].querySelector('.pn-full').textContent, 'Zed');
+  h.g.netLeave();
+  h.g.updateHUD();
+  assert.equal(h.g.el.cards[1].querySelector('.pn-full').textContent, 'PLAYER 2');
+});
+
 test('the seat we do not drive is locked, exactly like a CPU seat', () => {
   const h = load();
   hostAMatch(h);

@@ -109,7 +109,9 @@ function makeElement(id, opts = {}) {
     appendChild(c) { el.children.push(c); return c; },
     setAttribute(name, value) { el.attributes[name] = String(value); },
     getAttribute(name) { return name in el.attributes ? el.attributes[name] : null; },
-    querySelector: () => makeElement(id + '-child'),
+    // The same child for the same selector, so what the game writes into one
+    // (a card's name line) can be read back.
+    querySelector(sel) { return (el._q ||= {})[sel] ||= makeElement(id + ' ' + sel); },
     querySelectorAll: () => [],
     getBoundingClientRect: () => ({ ...opts.rect }),
     focus() {}, blur() {}, click() { el.dispatch('click', { detail: 1 }); }
