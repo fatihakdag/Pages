@@ -588,13 +588,22 @@
   #settings-grid #online-group { grid-column: 1 / -1; }
 
   /* One tap instead of two, and what you are holding is visible without
-     opening anything. The dropdown stays: it carries the ammo counts, and it
-     is what a keyboard reaches for. */
+     opening anything. Each button carries its own ammo count, so the dropdown
+     has nothing left to say and is hidden; it stays in the DOM as the value
+     the rest of the game reads. */
+  #weapon-select { display: none; }
+  #weapon-group > .ctrl-label { gap: 6px; }
+  #weapon-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   #weapon-picker {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
-    margin-top: 5px;
+    margin-top: 2px;
     /* Room for the full set, whether or not it is all in stock. Spending the
        last big bomb takes its button out of the row, and without this the
        group would narrow and slide FIRE along the bar — out from under a thumb
@@ -603,6 +612,7 @@
     min-width: calc(var(--weapon-count, 6) * 34px + (var(--weapon-count, 6) - 1) * 4px);
   }
   .weapon-pick {
+    position: relative; /* for the ammo count in its corner */
     flex: 0 0 auto;
     width: 34px; height: 34px;
     display: inline-flex;
@@ -627,6 +637,16 @@
     box-shadow: inset 0 0 0 1px var(--weapon-color);
   }
   .weapon-pick:disabled { opacity: 0.4; cursor: not-allowed; }
+  .weapon-pick.is-selected:disabled { opacity: 0.6; }
+  .weapon-ammo {
+    position: absolute;
+    right: 2px; bottom: 0;
+    font-size: 9px;
+    line-height: 1.1;
+    color: var(--text-main);
+    text-shadow: 0 0 2px #000, 0 0 2px #000;
+    pointer-events: none;
+  }
 
   #net-group {
     /* Labelless like FIRE, and sitting next to it: same offset, same line.
@@ -1218,9 +1238,10 @@
       </div>
     </div>
     <div class="ctrl-group" id="weapon-group">
-      <div class="ctrl-label" data-i18n="weapon">WEAPON</div>
+      <div class="ctrl-label"><span data-i18n="weapon">WEAPON</span> <span class="val" id="weapon-name"></span></div>
       <!-- The buttons under this are built from the options below, so the two
-           can never disagree about what exists. -->
+           can never disagree about what exists. The select itself is hidden:
+           the rest of the game still reads the choice from it. -->
       <select id="weapon-select">
         <option value="standard">Standard Shell</option>
         <option value="big">Big Bomb</option>
@@ -1395,7 +1416,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v57';
+  const BUILD = 'v58';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2220,42 +2241,28 @@ if ('serviceWorker' in navigator) {
   let particles = [];
 
   // Each weapon as its own silhouette, drawn in the colour its shell is drawn
-  // in: a shell, a bomb, one round breaking into five, a mine on the ground, a
-  // warhead splitting into three, and a rocket under power. They have to read
-  // at 20px on a phone, so they are shapes rather than pictures.
+  // in: a shell, a bomb with its fuse lit, a round and the five it breaks
+  // into, a spiked mine on the ground, a warhead splitting three ways, and a
+  // rocket under power. The same shapes as the single-player picker.
   const WEAPON_ICONS = {
     standard:
       '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-      '<path d="M12 2c2.1 2.7 3.2 5.4 3.2 8.2V15H8.8v-4.8C8.8 7.4 9.9 4.7 12 2Z"/>' +
-      '<rect x="8.8" y="16" width="6.4" height="5" rx="1.2"/></svg>',
+      '<g transform="rotate(45 12 12)"><path d="M9 18V10Q9 5 12 2.5Q15 5 15 10V18Z"/><rect x="8" y="18.5" width="8" height="3" rx="1"/></g></svg>',
     big:
       '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-      '<circle cx="10.5" cy="14.5" r="6.5"/>' +
-      '<path d="M15.1 8.6l3.1-3.1 1.6 1.6-3.1 3.1z"/>' +
-      '<circle cx="20.4" cy="4.1" r="1.9"/></svg>',
+      '<circle cx="10.5" cy="14" r="7.5"/><path d="M15.5 8.5L18 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="19.5" cy="4.5" r="2" opacity="0.8"/></svg>',
     cluster:
       '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-      '<circle cx="12" cy="4.6" r="3.2"/>' +
-      '<path d="M11.2 8h1.6v3h-1.6z"/>' +
-      '<circle cx="4.8" cy="17.6" r="2.6"/><circle cx="12" cy="19.8" r="2.6"/>' +
-      '<circle cx="19.2" cy="17.6" r="2.6"/></svg>',
+      '<circle cx="12" cy="16" r="3.8"/><circle cx="4.5" cy="12" r="2.2"/><circle cx="7.5" cy="6" r="2.2"/><circle cx="12" cy="3.5" r="2.2"/><circle cx="16.5" cy="6" r="2.2"/><circle cx="19.5" cy="12" r="2.2"/></svg>',
     roller:
       '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-      '<path d="M11 3.4h2v3.2h-2zM11 15.4h2v3.2h-2zM3.4 9.9h3.2v2H3.4zM15.4 9.9h3.2v2h-3.2z"/>' +
-      '<path d="M5.6 4.2l2.3 2.3-1.4 1.4-2.3-2.3zM16.1 14.7l2.3 2.3-1.4 1.4-2.3-2.3z"/>' +
-      '<circle cx="12" cy="10.9" r="5"/>' +
-      '<rect x="1.5" y="20.4" width="21" height="2" rx="1"/></svg>',
+      '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 2.5v3M11 15.5v3M2.5 10.5h3M16.5 10.5h3M5 4.5l2 2M15 14.5l2 2M5 16.5l2-2M15 6.5l2-2"/><path d="M2 21.5h20" opacity="0.5"/></g><circle cx="11" cy="10.5" r="5"/></svg>',
     mirv:
       '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-      '<path d="M4.2 5.2l2.6 4.4-1.8 1-2.6-4.4zM19.8 5.2l1.8 1-2.6 4.4-1.8-1z"/>' +
-      '<path d="M12 2.6l2.4 4.8h-4.8z"/><path d="M4 11.4l2.4 4.8H1.6z"/>' +
-      '<path d="M20 11.4l2.4 4.8h-4.8z"/>' +
-      '<path d="M11.2 8h1.6v5.2h-1.6z"/></svg>',
+      '<path d="M12 21.5V12M12 12L5.5 5M12 12V4.5M12 12l6.5-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.6"/><circle cx="4.5" cy="4" r="2.2"/><circle cx="12" cy="3" r="2.2"/><circle cx="19.5" cy="4" r="2.2"/></svg>',
     missile:
       '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-      '<path d="M12 1.6c2.2 2.9 3.4 6 3.4 9.4v4.4H8.6V11c0-3.4 1.2-6.5 3.4-9.4Z"/>' +
-      '<path d="M8.6 11.6L5.9 17h2.7zM15.4 11.6L18.1 17h-2.7z"/>' +
-      '<path d="M10.3 17h3.4l-1.7 5.4z"/></svg>'
+      '<g transform="rotate(45 12 12)"><path d="M10 16V7.5Q10 4 12 1.5Q14 4 14 7.5V16Z"/><path d="M10 11.5L6.5 16.5H10ZM14 11.5L17.5 16.5H14Z"/><path d="M10.8 17L12 22.5L13.2 17Z" opacity="0.65"/></g></svg>'
   };
 
   const WEAPONS = {
@@ -2505,7 +2512,9 @@ if ('serviceWorker' in navigator) {
   }
 
   const weaponPicker = document.getElementById('weapon-picker');
+  const weaponName = document.getElementById('weapon-name');
   const weaponButtons = new Map();
+  const weaponCounts = new Map(); // the ammo number in each button's corner
 
   /**
    * One button per weapon, built from the select's own options — which
@@ -2521,6 +2530,10 @@ if ('serviceWorker' in navigator) {
       b.dataset.weapon = key;
       b.style.setProperty('--weapon-color', WEAPONS[key].color);
       b.innerHTML = WEAPON_ICONS[key] || '';
+      const count = document.createElement('span');
+      count.className = 'weapon-ammo';
+      b.appendChild(count);
+      weaponCounts.set(key, count);
       b.addEventListener('click', () => pickWeapon(key));
       weaponPicker.appendChild(b);
       weaponButtons.set(key, b);
@@ -2558,9 +2571,11 @@ if ('serviceWorker' in navigator) {
 
     // The buttons follow the same answer, after the fallback above rather than
     // before it, so they never ring a weapon this tank no longer holds.
+    weaponName.textContent = txt('w_' + t.weapon);
     for (const [key, b] of weaponButtons) {
       const remaining = t.ammo[key];
       const label = txt('w_' + key);
+      weaponCounts.get(key).textContent = remaining === Infinity ? '∞' : String(remaining);
       // Spent weapons leave the row rather than sitting there greyed out:
       // the row is what you have, and a phone has no width to waste.
       b.hidden = !(remaining > 0);
@@ -5904,7 +5919,7 @@ if ('serviceWorker' in navigator) {
     placeTanks, levelTankPads, groundGradientAt, buildTanks,
     get hudWindVisible() { return hudWindVisible; },
     freshAmmo, weaponEnabled, lockOnTank, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
-    pickWeapon, weaponButtons, WEAPON_ICONS,
+    pickWeapon, weaponButtons, weaponCounts, WEAPON_ICONS,
     fire, applyDamageAndCrater, hullDistance, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
     simStep, inShot, SIM_DT, resolveShot, beginShot, finishShot, advanceTurn,
