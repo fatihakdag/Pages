@@ -1197,9 +1197,10 @@
     #info-row { margin-top: 0; flex-direction: row; flex-wrap: nowrap; align-self: stretch; }
     #info-row > * { flex: 1 1 0; }
     #turn-banner { font-size: 12px; }
-    /* There is room for the wind in the panel, so the pill is back and the
-       canvas stops drawing its own gauge over the sky (resize() asks). */
-    #wind-hud { display: flex; align-self: stretch; justify-content: center; }
+    /* The wind stays off the panel, as the rails have it: the canvas draws its
+       gauge centred over the sky (resize() asks whether the pill is showing),
+       where it is read in the same glance as the shot, rather than off to the
+       side of the screen. */
 
     /* A tall panel has to put its slack somewhere. Rather than a hole in the
        middle with the aiming controls stranded at the top and FIRE alone at
