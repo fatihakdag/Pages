@@ -198,3 +198,18 @@ test('the buttons are labelled with the weapon and what is left of it', () => {
   assert.equal(g.weaponButtons.get('standard').getAttribute('aria-label'),
     g.txt('w_standard'), 'the unlimited one carries no count');
 });
+
+test('each button shows its ammo in the corner, and the label names the pick', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const t = g.tanks[g.currentPlayer];
+  t.ammo.big = 3;
+  g.syncWeaponOptions(t);
+
+  assert.equal(g.weaponCounts.get('big').textContent, '3');
+  assert.equal(g.weaponCounts.get('standard').textContent, '∞');
+  assert.equal(h.el('weapon-name').textContent, g.txt('w_standard'));
+
+  g.weaponButtons.get('big').dispatch('click');
+  assert.equal(h.el('weapon-name').textContent, g.txt('w_big'));
+});
