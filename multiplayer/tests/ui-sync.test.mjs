@@ -173,7 +173,7 @@ test('hp readouts follow the tanks', () => {
 
   g.updateHUD();
 
-  assert.equal(g.el.hpText[0].textContent, `42 / ${g.MAX_HP}`);
+  assert.equal(g.el.hpText[0].textContent, '42');
   assert.ok(g.el.cards[0].classList.contains('active') || g.currentPlayer !== 0);
   assert.equal(g.el.cards[g.tanks.length].hidden, true, 'unused player cards stay hidden');
 });

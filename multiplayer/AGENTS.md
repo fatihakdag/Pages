@@ -310,6 +310,15 @@ Other things worth knowing:
   else's damage, ammo and position. A player who never comes back has their seat
   played by the CPU after two missed turns, which is the existing turn-clock
   path; their chair is simply never reassigned.
+- **Names ride with tokens.** The NAME field in the lobby (`barrage.name` in
+  localStorage) goes out in `ready`; the host keeps them in `netNamesById`
+  and deals `names` beside `tokens` in every `start`, so they survive a
+  resume. `online.seatNames` is read by `playerName()` and the cards only
+  while a match is on. Names come from other clients, so `cleanName()` runs
+  on arrival too: control and bidi characters stripped, capped at
+  `MAX_NAME_LEN` (10), and only ever written with `textContent`. The relay's
+  own `join.name` is unused — it is per-connection, and names must follow
+  the seat.
 - **Seating happens on `ready`, not on `peer`**, because `ready` is what carries
   the token. A `ready` with no matching seat gets a `denied`, which also stops
   that client's reconnect attempts — it is not a match it can join.

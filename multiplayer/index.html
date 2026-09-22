@@ -121,13 +121,10 @@
     outline-offset: 4px;
   }
   .player-card.dead { opacity: 0.38; }
-  /* Bar and HP share the second line. Pairing the HP with the *name* instead
-     would need the sum of name + badge + HP on one line, which overflows once
-     the badge reads BİLGİSAYAR; this way the row only needs the wider of the
-     two, and the bar simply takes what is left. */
-  .player-bar-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .player-bar-row .health-bar-track { flex: 1 1 auto; }
-  .player-bar-row .health-text { flex: 0 0 auto; }
+  /* The HP is written inside its own bar rather than beside it as "100 / 100":
+     the maximum is the same for everyone, and a readout next to the bar cost
+     either a slice of its width or, on a phone, a whole extra line. */
+  .player-bar-row { min-width: 0; }
   .player-name {
     font-size: 12px;
     letter-spacing: 0.5px;
@@ -135,6 +132,21 @@
     white-space: nowrap;
   }
   .pn-abbr { display: none; }
+  /* A chosen name replaces PLAYER n. It is capped at MAX_NAME_LEN, but six
+     cards across a phone are narrower than even that, so it trims to an
+     ellipsis rather than pushing the CPU badge off the card. */
+  /* A name has no short form, so it takes the full slot at every size; the
+     !important outranks the per-breakpoint PLAYER n / Pn swaps below, which
+     are ID-qualified. */
+  .player-card.named .pn-abbr { display: none !important; }
+  .player-card.named .pn-full {
+    display: inline-block !important;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+  }
+  .player-name { overflow: hidden; text-overflow: ellipsis; }
   .cb-abbr { display: none; }
   #players-row:is([data-count="4"], [data-count="5"], [data-count="6"]) .cb-full { display: none; }
   #players-row:is([data-count="4"], [data-count="5"], [data-count="6"]) .cb-abbr { display: inline; }
@@ -152,7 +164,7 @@
   .health-bar-track {
     width: 100%;
     max-width: 150px;
-    height: 10px;
+    height: 14px;
     background: #000;
     border: 1px solid var(--panel-line);
     position: relative;
@@ -161,7 +173,22 @@
     height: 100%;
     transition: width 0.3s ease;
   }
-  .health-text { font-size: 11px; color: var(--text-dim); }
+  /* Centred over the fill, so it sits on the tank's colour when healthy and
+     on the black track when not; the outline keeps it legible on either. */
+  .health-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: bold;
+    line-height: 1;
+    color: #fff;
+    text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 1px #000;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
 
   #center-info {
     display: flex;
@@ -331,6 +358,16 @@
     font-weight: bold;
     color: var(--text-main);
     overflow-wrap: anywhere;
+  }
+  #online-name {
+    width: 110px;
+    background: var(--input-bg, #0d0d12);
+    color: var(--text);
+    border: 1px solid var(--panel-line);
+    border-radius: 6px;
+    padding: 7px 8px;
+    font: inherit;
+    font-size: 12px;
   }
   #online-code {
     width: 68px;
@@ -799,13 +836,11 @@
     .player-name { font-size: 10px; }
     .pn-full { display: none; }
     .pn-abbr { display: inline; }
-    .player-bar-row { display: block; } /* ~46px cards: no room to pair */
     #info-row { gap: 3px 6px; }
     .cb-full { display: none; }
     .cb-abbr { display: inline; }
-    .health-bar-track { max-width: 110px; height: 8px; }
-    /* six cards on a phone leave ~50px each — keep "100 / 100" on one line */
-    .health-text { font-size: 8px; white-space: nowrap; }
+    .health-bar-track { max-width: 110px; height: 12px; }
+    .health-text { font-size: 9px; }
     /* The bar used to be one row holding every player card, the turn banner,
        the clock and the settings button, all competing for ~390px. Two rows
        instead: the tanks keep the top to themselves, and whose turn it is, the
@@ -1189,7 +1224,7 @@
     #hud { width: auto; flex: 1 0 112px; max-width: 200px; gap: 6px; padding: 6px; }
     #controls { width: auto; flex: 1 0 138px; max-width: 240px; gap: 6px; padding: 6px; }
     .player-name { font-size: 9px; }
-    .health-text { font-size: 8px; }
+    .health-text { font-size: 9px; }
     #turn-banner { font-size: 9px; }
     #fire-btn { padding: 11px 8px; font-size: 13px; }
   }
@@ -1202,43 +1237,37 @@
       <div class="player-card p1" id="card-p1">
         <div class="player-name"><span class="pn-full">PLAYER 1</span><span class="pn-abbr">P1</span> <span class="ai-badge" id="ai-badge-1"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
         <div class="player-bar-row">
-          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div></div>
-          <div class="health-text" id="hp-text-1">100 / 100</div>
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-1" style="background:var(--accent-p1); width:100%;"></div><span class="health-text" id="hp-text-1">100</span></div>
         </div>
       </div>
       <div class="player-card p2" id="card-p2">
         <div class="player-name"><span class="pn-full">PLAYER 2</span><span class="pn-abbr">P2</span> <span class="ai-badge" id="ai-badge-2"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
         <div class="player-bar-row">
-          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%;"></div></div>
-          <div class="health-text" id="hp-text-2">100 / 100</div>
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-2" style="background:var(--accent-p2); width:100%;"></div><span class="health-text" id="hp-text-2">100</span></div>
         </div>
       </div>
       <div class="player-card p3" id="card-p3" hidden>
         <div class="player-name"><span class="pn-full">PLAYER 3</span><span class="pn-abbr">P3</span> <span class="ai-badge" id="ai-badge-3"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
         <div class="player-bar-row">
-          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-3" style="background:var(--accent-p3); width:100%;"></div></div>
-          <div class="health-text" id="hp-text-3">100 / 100</div>
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-3" style="background:var(--accent-p3); width:100%;"></div><span class="health-text" id="hp-text-3">100</span></div>
         </div>
       </div>
       <div class="player-card p4" id="card-p4" hidden>
         <div class="player-name"><span class="pn-full">PLAYER 4</span><span class="pn-abbr">P4</span> <span class="ai-badge" id="ai-badge-4"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
         <div class="player-bar-row">
-          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-4" style="background:var(--accent-p4); width:100%;"></div></div>
-          <div class="health-text" id="hp-text-4">100 / 100</div>
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-4" style="background:var(--accent-p4); width:100%;"></div><span class="health-text" id="hp-text-4">100</span></div>
         </div>
       </div>
       <div class="player-card p5" id="card-p5" hidden>
         <div class="player-name"><span class="pn-full">PLAYER 5</span><span class="pn-abbr">P5</span> <span class="ai-badge" id="ai-badge-5"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
         <div class="player-bar-row">
-          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-5" style="background:var(--accent-p5); width:100%;"></div></div>
-          <div class="health-text" id="hp-text-5">100 / 100</div>
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-5" style="background:var(--accent-p5); width:100%;"></div><span class="health-text" id="hp-text-5">100</span></div>
         </div>
       </div>
       <div class="player-card p6" id="card-p6" hidden>
         <div class="player-name"><span class="pn-full">PLAYER 6</span><span class="pn-abbr">P6</span> <span class="ai-badge" id="ai-badge-6"><span class="cb-full" data-i18n="cpuBadge">CPU</span><span class="cb-abbr" data-i18n="cpuBadgeShort">CPU</span></span></div>
         <div class="player-bar-row">
-          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-6" style="background:var(--accent-p6); width:100%;"></div></div>
-          <div class="health-text" id="hp-text-6">100 / 100</div>
+          <div class="health-bar-track"><div class="health-bar-fill" id="hp-fill-6" style="background:var(--accent-p6); width:100%;"></div><span class="health-text" id="hp-text-6">100</span></div>
         </div>
       </div>
     </div>
@@ -1380,6 +1409,10 @@
         <div class="ctrl-group" id="online-group">
           <div class="ctrl-label"><span data-i18n="online">ONLINE</span></div>
           <div class="online-row">
+            <!-- What the other players see on this tank's card. Short enough
+                 to fit a card with six across a phone (see MAX_NAME_LEN). -->
+            <input type="text" id="online-name" maxlength="10" autocomplete="nickname"
+                   spellcheck="false" placeholder="NAME" aria-label="Your name">
             <button type="button" id="online-host" data-i18n="hostGame">HOST</button>
             <input type="text" id="online-code" maxlength="4" autocomplete="off"
                    autocapitalize="characters" spellcheck="false"
@@ -1466,7 +1499,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v58';
+  const BUILD = 'v60';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1538,6 +1571,7 @@ if ('serviceWorker' in navigator) {
   const onlineHostBtn = document.getElementById('online-host');
   const onlineJoinBtn = document.getElementById('online-join');
   const onlineCodeInput = document.getElementById('online-code');
+  const onlineNameInput = document.getElementById('online-name');
 
   // ---------- Language ----------
   // Theme names are keyed by their English name so the THEMES table stays the
@@ -1571,6 +1605,7 @@ if ('serviceWorker' in navigator) {
       zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomFit: 'Fit the whole battlefield',
       online: 'ONLINE', onlineMode: 'Online', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
       roomCode: 'CODE', roomCodeLabel: 'Room code', rejoin: 'REJOIN',
+      yourName: 'NAME', yourNameLabel: 'Your name',
       playWithOthers: 'PLAY WITH OTHERS',
       netOffline: 'off', netConnecting: 'connecting…', netRejoining: 'reconnecting…', netWaiting: 'code {code} — {n}/{total}',
       netPlaying: 'room {code}', netEnded: '{name} left',
@@ -1610,6 +1645,7 @@ if ('serviceWorker' in navigator) {
       zoomIn: 'Yakınlaştır', zoomOut: 'Uzaklaştır', zoomFit: 'Tüm sahayı göster',
       online: 'ÇEVRİMİÇİ', onlineMode: 'Çevrimiçi', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
       roomCode: 'KOD', roomCodeLabel: 'Oda kodu', rejoin: 'YENİDEN BAĞLAN',
+      yourName: 'İSİM', yourNameLabel: 'Adın',
       playWithOthers: 'ÇEVRİMİÇİ OYNA',
       netOffline: 'bağlı değil', netConnecting: 'bağlanıyor…', netRejoining: 'yeniden bağlanıyor…', netWaiting: 'kod {code} — {n}/{total}',
       netPlaying: 'oda {code}', netEnded: '{name} ayrıldı',
@@ -1659,7 +1695,34 @@ if ('serviceWorker' in navigator) {
 
   // Player 1 is always the local human; every other seat is a CPU when enabled.
   function isAi(i) { return cpuMode && i > 0; }
-  function playerName(i) { return txt(isAi(i) ? 'cpuName' : 'playerName', { n: i + 1 }); }
+  function playerName(i) {
+    return seatName(i) || txt(isAi(i) ? 'cpuName' : 'playerName', { n: i + 1 });
+  }
+
+  // A name a player picked for themselves in an online match. It arrives from
+  // other clients, so it is cleaned here as well as at the input: shown only
+  // through textContent, capped, and stripped of anything invisible.
+  const MAX_NAME_LEN = 10;
+  function cleanName(raw) {
+    if (typeof raw !== 'string') return '';
+    return Array.from(raw.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '')
+      .replace(/\s+/g, ' ').trim()).slice(0, MAX_NAME_LEN).join('').trim();
+  }
+  /** The seat's chosen name during a match, or '' to fall back to PLAYER n. */
+  function seatName(i) {
+    return (netPlaying() && online.seatNames[i]) || '';
+  }
+
+  /** The card's name line: the chosen name if there is one, else PLAYER n / Pn. */
+  function refreshCardNames() {
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+      const name = seatName(i);
+      cards[i].classList.toggle('named', !!name);
+      cards[i].querySelector('.pn-full').textContent = name || txt('playerFull', { n: i + 1 });
+      cards[i].querySelector('.pn-abbr').textContent = name || txt('playerAbbr', { n: i + 1 });
+      cards[i].title = name;
+    }
+  }
 
   // Remembered so the win overlay can be re-rendered if the language changes
   // while it is on screen.
@@ -1681,10 +1744,7 @@ if ('serviceWorker' in navigator) {
     for (const el of document.querySelectorAll('[data-i18n]')) {
       el.innerHTML = txt(el.getAttribute('data-i18n'));
     }
-    for (let i = 0; i < MAX_PLAYERS; i++) {
-      cards[i].querySelector('.pn-full').textContent = txt('playerFull', { n: i + 1 });
-      cards[i].querySelector('.pn-abbr').textContent = txt('playerAbbr', { n: i + 1 });
-    }
+    refreshCardNames();
     const relabel = (sel, keys) => {
       for (let i = 0; i < sel.options.length; i++) sel.options[i].textContent = txt(keys[i]);
     };
@@ -1702,6 +1762,8 @@ if ('serviceWorker' in navigator) {
     // put them on the element.
     onlineCodeInput.placeholder = txt('roomCode');
     onlineCodeInput.setAttribute('aria-label', txt('roomCodeLabel'));
+    onlineNameInput.placeholder = txt('yourName');
+    onlineNameInput.setAttribute('aria-label', txt('yourNameLabel'));
     sfxSlider.setAttribute('aria-label', txt('sfxVolume'));
     lastTimerText = ''; // force the clock to redraw in the new language
     // the weapon <option> labels and ammo readout are rebuilt from here
@@ -2490,13 +2552,14 @@ if ('serviceWorker' in navigator) {
 
   function updateHUD() {
     playersRow.dataset.count = tanks.length;
+    refreshCardNames();
     for (let i = 0; i < MAX_PLAYERS; i++) {
       const t = tanks[i];
       cards[i].hidden = !t;
       if (!t) continue;
       const pct = Math.max(0, t.hp / MAX_HP * 100);
       hpFill[i].style.width = pct + '%';
-      hpText[i].textContent = `${Math.max(0, Math.round(t.hp))} / ${MAX_HP}`;
+      hpText[i].textContent = String(Math.max(0, Math.round(t.hp)));
       cards[i].classList.toggle('active', currentPlayer === i && state === 'AIMING');
       cards[i].classList.toggle('dead', !t.alive);
       aiBadges[i].style.display = isAi(i) ? 'inline-block' : 'none';
@@ -5032,6 +5095,7 @@ if ('serviceWorker' in navigator) {
     error: null,
     token: null,       // who we are, so a rejoin gets its own seat back
     seatTokens: [],    // the token that belongs in each seat, remembered when empty
+    seatNames: [],     // the name each seat's player chose, '' for none
     vacancies: [],     // seats whose player left, in the order they emptied
     rejoin: null,      // { code, tries } while we are trying to get back in
     missed: [],        // consecutive turns each seat has let run out
@@ -5279,7 +5343,8 @@ if ('serviceWorker' in navigator) {
    * person went, not who is playing the chair now.
    */
   function netWhoLeft() {
-    return online.vacancies.map(seat => txt('playerName', { n: seat + 1 })).join(', ');
+    return online.vacancies
+      .map(seat => online.seatNames[seat] || txt('playerName', { n: seat + 1 })).join(', ');
   }
 
   function netStatusText() {
@@ -5326,6 +5391,7 @@ if ('serviceWorker' in navigator) {
     onlineHostBtn.disabled = busy;
     onlineJoinBtn.disabled = busy;
     onlineCodeInput.disabled = busy;
+    onlineNameInput.disabled = busy;
 
     // The main screen shows exactly one of the two: what the connection is
     // doing, or — when there is no connection to report — the way to start one.
@@ -5418,7 +5484,7 @@ if ('serviceWorker' in navigator) {
       onlineCodeInput.value = m.room;
       // Announcing ourselves carries the token, which is what lets whoever
       // holds the board give us back the seat we had rather than any free one.
-      if (m.peers.length && !online.host) netSend('ready', { token: online.token });
+      if (m.peers.length && !online.host) netSend('ready', { token: online.token, name: netMyName() });
       refreshOnlineUi();
       return;
     }
@@ -5467,6 +5533,7 @@ if ('serviceWorker' in navigator) {
 
     if (d.k === 'ready' && online.host) {
       netTokensById[m.from] = d.token || null;
+      netNamesById[m.from] = cleanName(d.name);
       if (netPlaying() || online.vacancies.length) {
         // The seats belong to the players the match was dealt to. A vacant one
         // is held for its owner and nobody else: taking over a stranger's tank
@@ -5509,6 +5576,7 @@ if ('serviceWorker' in navigator) {
       online.vacancies = [];
       online.seats = d.seats;
       online.seatTokens = d.tokens || [];
+      online.seatNames = d.seats.map((_, i) => cleanName((d.names || [])[i]));
       online.seat = d.seats.indexOf(online.id);
       online.status = 'playing';
       cpuMode = false;
@@ -5630,12 +5698,14 @@ if ('serviceWorker' in navigator) {
     online.seats = netDealSeats([online.id, ...netOtherIds()]);
     online.seatTokens = online.seats.map(
       id => (id === online.id ? online.token : (netTokensById[id] || null)));
+    online.seatNames = online.seats.map(
+      id => (id === online.id ? netMyName() : (netNamesById[id] || '')));
     online.vacancies = [];
     online.seat = online.seats.indexOf(online.id);
     online.status = 'playing';
     refreshOpponentUi();
     resetGame();
-    netSend('start', { seats: online.seats, tokens: online.seatTokens, state: netSnapshot() });
+    netSend('start', { seats: online.seats, tokens: online.seatTokens, names: online.seatNames, state: netSnapshot() });
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
@@ -5647,7 +5717,7 @@ if ('serviceWorker' in navigator) {
     online.status = 'playing';
     refreshOpponentUi();
     resetGame();
-    netSend('start', { seats: online.seats, tokens: online.seatTokens, state: netSnapshot() });
+    netSend('start', { seats: online.seats, tokens: online.seatTokens, names: online.seatNames, state: netSnapshot() });
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
@@ -5665,13 +5735,14 @@ if ('serviceWorker' in navigator) {
     netSeatResponded(seat);
     online.seats[seat] = id;
     online.seatTokens[seat] = token || null;
+    online.seatNames[seat] = netNamesById[id] || online.seatNames[seat] || '';
     online.status = 'playing';
     refreshOpponentUi();
     // The same message a fresh match uses — the state it carries is simply the
     // game in progress rather than a new one. Mid-shot, that is the board the
     // shot ends on: they have nothing to replay it from.
     const board = activeShot && activeShot.result ? activeShot.result : netSnapshot();
-    netSend('start', { seats: online.seats, tokens: online.seatTokens, state: board });
+    netSend('start', { seats: online.seats, tokens: online.seatTokens, names: online.seatNames, state: board });
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
@@ -5693,6 +5764,18 @@ if ('serviceWorker' in navigator) {
   // Tokens by member id, collected from `ready`, so the host can write the
   // seat/token table into the `start` it deals.
   const netTokensById = {};
+  // Names by member id, from the same `ready`.
+  const netNamesById = {};
+
+  // This player's name, remembered across visits. Read when joining; the field
+  // is locked from then until the match ends, so it cannot drift mid-game.
+  const NAME_KEY = 'barrage.name';
+  function netMyName() { return cleanName(onlineNameInput.value); }
+  try { onlineNameInput.value = cleanName(localStorage.getItem(NAME_KEY) || ''); } catch { /* no storage */ }
+  onlineNameInput.addEventListener('change', () => {
+    onlineNameInput.value = netMyName();
+    try { localStorage.setItem(NAME_KEY, onlineNameInput.value); } catch { /* not fatal */ }
+  });
 
   /**
    * How many seats this match is for. The host's TANKS selector decides it, so
@@ -5983,7 +6066,7 @@ if ('serviceWorker' in navigator) {
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,
     setSocketFactory(fn) { socketFactory = fn; },
-    el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineStatus,
+    el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineNameInput, onlineStatus,
            netPill, netStatusEl, netRejoinBtn, netInviteBtn },
     syncControlsFromTank, updateHUD, nudge,
     aimFromPull, pullReach, canvas, get aimDrag() { return aimDrag; },
