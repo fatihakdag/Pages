@@ -928,11 +928,11 @@
      the surplus as black down both sides; rails spend it on the panels and hand
      the bar's height back to the world.
 
-     7/4 is where that trade pays *and* leaves the right rail wide enough to
-     hold the weapon picker on one line (see the block after this one). The
-     crossover is near 1.7, so 16:9 switches and 16:10 keeps the bottom bar —
-     at 16:10 rails would make the playfield smaller, not larger. */
-  @media (orientation: landscape) and (max-height: 620px), (min-aspect-ratio: 7/4) {
+     On a phone that means a rail down each side, under each thumb. On a
+     desktop-sized screen (16:10 and wider, see the block after this one) the
+     two rails merge into one panel on the right: one panel's width is all the
+     playfield gives up, where two rails cost it twice that. */
+  @media (orientation: landscape) and (max-height: 620px), (min-aspect-ratio: 8/5) {
     /* On a screen wide enough that even the capped rails cannot use it all,
        what is left over is split evenly at the outer edges rather than piling
        up on one side. */
@@ -1103,24 +1103,74 @@
     #keys-hint { display: none; }
   }
 
-  /* A rail on a big screen is not a phone's rail. It has the width to hold the
-     weapon picker on one line — 224px of icons, the rail's own 16px of padding
-     and the 2px border down each of its sides, so 244px; a narrower rail wraps
-     them onto two rows, which is right on a phone and merely wasteful here. And it has the height for the
-     keyboard hint, which the phone-sized rails drop. */
-  @media (min-aspect-ratio: 7/4) and (min-height: 621px) {
-    #controls { flex-basis: 244px; }
-    /* Matched to the right rail. The narrower left rail is a phone measure —
-       there every pixel it gives up goes to the playfield — but on a screen
-       this size the asymmetry buys nothing and reads as a mistake. Both grow
-       to the same cap, so they stay equal at any width. */
-    #hud { flex-basis: 244px; max-width: 260px; }
+  /* Desktop: one panel on the right. The HUD and the controls stack in a
+     single column — the tanks and whose turn it is at the top, then online,
+     then angle, power, weapon and FIRE — and the playfield takes everything to
+     its left. A grid rather than the rails' flex row, because the HUD and the
+     controls are siblings of the playfield in the markup and have to share one
+     column without a wrapper.
 
-    /* A tall rail has to put its slack somewhere. Rather than a hole in the
+     The panel's width is the weapon picker on one line: 224px of icons, 16px
+     of padding and the 2px border either side, rounded up. The playfield
+     column is capped at the width the full height would give the world, so on
+     a very wide screen the panel stays beside the playfield and the surplus is
+     split to the outer edges; on a narrower one the world is width-bound and
+     sits centred between mat above and below. */
+  @media (min-aspect-ratio: 8/5) and (min-height: 621px) {
+    #app {
+      --panel-w: 256px;
+      display: grid;
+      grid-template-columns:
+        minmax(0, calc(var(--app-h, 100dvh) * 1000 / 620))
+        var(--panel-w);
+      grid-template-rows: auto minmax(0, 1fr);
+      justify-content: center;
+    }
+    #game-wrap {
+      grid-column: 1;
+      grid-row: 1 / -1;
+      align-self: center;
+      width: 100%;
+      height: auto;
+      max-height: 100%;
+      max-width: none;
+    }
+    #hud, #controls {
+      grid-column: 2;
+      width: auto;
+      max-width: none;
+      border-left: 2px solid var(--panel-line);
+      border-right: 2px solid var(--panel-line);
+    }
+    #hud {
+      grid-row: 1;
+      height: auto;
+      overflow: visible;
+      border-bottom: 2px solid var(--panel-line);
+      padding: 12px;
+    }
+    .player-card.active { outline-offset: 3px; }
+    #controls {
+      grid-row: 2;
+      height: auto;
+      min-height: 0;
+      padding: 10px;
+    }
+    /* The HUD is only as tall as what it holds now, so nothing is left for
+       these to push to its foot. */
+    #center-info { flex: 0 0 auto; }
+    #info-row { margin-top: 0; flex-direction: row; flex-wrap: nowrap; align-self: stretch; }
+    #info-row > * { flex: 1 1 0; }
+    #turn-banner { font-size: 12px; }
+    /* There is room for the wind in the panel, so the pill is back and the
+       canvas stops drawing its own gauge over the sky (resize() asks). */
+    #wind-hud { display: flex; align-self: stretch; justify-content: center; }
+
+    /* A tall panel has to put its slack somewhere. Rather than a hole in the
        middle with the aiming controls stranded at the top and FIRE alone at
-       the bottom, the online slot takes the top as a header and its auto
-       margin pushes everything else down — so angle, power, weapon and FIRE
-       end up as one block, in the order you use them. */
+       the bottom, the online slot takes the top and its auto margin pushes
+       everything else down — so angle, power, weapon and FIRE end up as one
+       block at the bottom, in the order you use them. */
     #net-group {
       order: -1;
       margin-top: 0;
