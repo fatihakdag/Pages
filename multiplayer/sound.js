@@ -562,6 +562,56 @@
       panLoop(l, x01);
     },
 
+    // The same craft with no air to beat against: on an airless theme the
+    // helicopter is a spaceship, so instead of chop there is a steady ion
+    // exhaust over a low drive hum. A wreck loses the hum and the exhaust
+    // goes dull and dark, the way the rotor's chop slows.
+    thruster(on, falling, x01) {
+      if (!on) { stopLoop('thruster'); return; }
+      const l = startLoop('thruster', (ctx, dest) => {
+        const t = ctx.currentTime;
+        const out = ctx.createGain();
+        out.gain.setValueAtTime(0.0001, t);
+        out.gain.exponentialRampToValueAtTime(1, t + 0.25);
+        out.connect(dest);
+
+        // the exhaust: a band of noise, unswung — nothing is chopping it
+        const bed = loopBed(ctx, { freq: 900, q: 0.7, type: 'bandpass', rate: 1.35, gain: 0.07, dest: out });
+
+        // the drive under it: two saws a fifth apart, rolled off so they read
+        // as a hum you feel rather than a tone you can name
+        const tone = ctx.createBiquadFilter();
+        tone.type = 'lowpass';
+        tone.frequency.value = 320;
+        tone.Q.value = 0.7;
+        const hum = ctx.createGain();
+        hum.gain.value = 0.05;
+        tone.connect(hum); hum.connect(out);
+        const oscs = [66, 99].map(f => {
+          const o = ctx.createOscillator();
+          o.type = 'sawtooth';
+          o.frequency.value = f;
+          o.base = f;
+          o.connect(tone);
+          o.start();
+          return o;
+        });
+
+        const stop = bed.src.stop.bind(bed.src);
+        bed.src.stop = () => {
+          for (const o of oscs) { try { o.stop(); } catch (e) { /* already stopped */ } }
+          stop();
+        };
+        return { src: bed.src, gain: out, out, filt: bed.filt, hum, oscs };
+      });
+      if (l) {
+        l.filt.frequency.value = falling ? 300 : 900;
+        l.hum.gain.value = falling ? 0.02 : 0.05;
+        for (const o of l.oscs) o.frequency.value = o.base * (falling ? 0.55 : 1);
+      }
+      panLoop(l, x01);
+    },
+
     // Rocket motor, for as long as the burn lasts.
     motor(on, x01) {
       if (!on) { stopLoop('motor'); return; }

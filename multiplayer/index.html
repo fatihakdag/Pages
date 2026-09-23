@@ -1500,7 +1500,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v60';
+  const BUILD = 'v61';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2049,6 +2049,9 @@ if ('serviceWorker' in navigator) {
       ground1: '#c2c2c6', ground2: '#505057',
       rim: 'rgba(255,255,255,0.50)',
       decor: 'stars', decorColor: 'rgba(255,255,255,0.80)', planet: true,
+      // craft: 'ship' — no air to fly in, so the target overhead is a lander
+      // under thrust rather than a helicopter, and it sounds like one
+      craft: 'ship',
       // shape: 'craters' presses impact craters into gentle midpoint plains
       shape: 'craters', roughness: 0.20, falloff: 0.55, points: 240, baseLo: 0.44, baseHi: 0.72
     },
@@ -2826,7 +2829,12 @@ if ('serviceWorker' in navigator) {
   function updateSoundLoops() {
     if (!soundAvailable() || !SND.isOn()) return;
     // Each sustained sound also carries where its source is, so it pans with it.
-    Sound.rotor(!!heli, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
+    // Both are called every frame, with the theme picking which one is on:
+    // switching themes mid-round then stops the other by the same rule that
+    // stops either when the craft is gone, rather than at a call site.
+    const ship = isShipTheme();
+    Sound.rotor(!!heli && !ship, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
+    Sound.thruster(!!heli && ship, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
     let burning = false, burnX = 0.5, rolling = 0, rollX = 0.5;
     let flying = false, fall = 0, flyX = 0.5, impactIn = Infinity, speed = 0, flight = null;
     for (const p of projectiles) {
@@ -4526,6 +4534,10 @@ if ('serviceWorker' in navigator) {
     return { x: heli.x + heli.dir * heli.speed * 0.35 * ahead, y: heli.y + heli.vy * ahead, dir: heli.dir };
   }
 
+  /** Airless themes fly a spaceship instead. Drawing and sound only — it is
+   *  the same craft to the simulation, same size, same hit box, same routes. */
+  function isShipTheme() { return theme.craft === 'ship'; }
+
   function drawHeli() {
     if (!heli) return;
     const w = heliSize(), h = w * 0.34;
@@ -4534,6 +4546,7 @@ if ('serviceWorker' in navigator) {
     ctx.translate(at.x, at.y);
     if (heli.falling) ctx.rotate(heli.spin);
     ctx.scale(at.dir, 1);
+    if (isShipTheme()) { drawShipBody(w, h); ctx.restore(); return; }
 
     ctx.fillStyle = heli.falling ? '#6b4a34' : '#46525f';
     ctx.beginPath();
@@ -4566,6 +4579,105 @@ if ('serviceWorker' in navigator) {
     ctx.moveTo(-w * 0.58, -h * 0.30 - tail); ctx.lineTo(-w * 0.58, -h * 0.30 + tail);
     ctx.stroke();
     ctx.restore();
+  }
+
+  /**
+   * The lunar lander: a hull with a swept fin, a cockpit blister and a main
+   * engine burning behind it. Drawn nose-first in the same box the helicopter
+   * uses (w across, h tall, already flipped to the direction of travel), so it
+   * reads at the same size and heliHitBy still bounds it.
+   * rotorAngle is the shared animation clock, so the flame flickers and the
+   * beacon blinks without a second one.
+   */
+  function drawShipBody(w, h) {
+    const dead = heli.falling;
+
+    // Engine burn, behind everything: a bright core in a wider cone, guttering
+    // on a falling wreck the way the rotor's chop slows on one.
+    const flick = 0.72 + 0.28 * Math.sin(rotorAngle * 2.7);
+    const len = w * (dead ? 0.16 : 0.42) * flick;
+    if (len > 1) {
+      const cone = ctx.createLinearGradient(-w * 0.34, 0, -w * 0.34 - len, 0);
+      cone.addColorStop(0, dead ? 'rgba(255,150,70,0.85)' : 'rgba(190,235,255,0.95)');
+      cone.addColorStop(0.45, dead ? 'rgba(220,90,40,0.35)' : 'rgba(120,190,255,0.45)');
+      cone.addColorStop(1, 'rgba(90,140,255,0)');
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.34, -h * 0.30);
+      ctx.lineTo(-w * 0.34 - len, 0);
+      ctx.lineTo(-w * 0.34, h * 0.30);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Hull: a tapered wedge, nose to the right, with a flat belly.
+    ctx.fillStyle = dead ? '#6b4a34' : '#b9c2cd';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.46, 0);              // nose
+    ctx.quadraticCurveTo(w * 0.18, -h * 0.72, -w * 0.20, -h * 0.60);
+    ctx.lineTo(-w * 0.34, -h * 0.34);
+    ctx.lineTo(-w * 0.34, h * 0.34);
+    ctx.lineTo(-w * 0.16, h * 0.58);
+    ctx.quadraticCurveTo(w * 0.18, h * 0.62, w * 0.46, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // Shadowed underside, so the hull is lit from above like the terrain.
+    ctx.fillStyle = dead ? 'rgba(0,0,0,0.30)' : 'rgba(40,52,68,0.45)';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.40, h * 0.06);
+    ctx.quadraticCurveTo(w * 0.10, h * 0.58, -w * 0.16, h * 0.58);
+    ctx.lineTo(-w * 0.34, h * 0.34);
+    ctx.lineTo(-w * 0.34, h * 0.10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Dorsal fin, swept back off the tail.
+    ctx.fillStyle = dead ? '#523726' : '#7d8a99';
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.04, -h * 0.62);
+    ctx.lineTo(-w * 0.26, -h * 1.30);
+    ctx.lineTo(-w * 0.36, -h * 1.26);
+    ctx.lineTo(-w * 0.30, -h * 0.50);
+    ctx.closePath();
+    ctx.fill();
+
+    // Landing skids, folded under the belly.
+    ctx.strokeStyle = dead ? '#4a3323' : '#59636f';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.20, h * 0.56); ctx.lineTo(-w * 0.26, h * 0.86);
+    ctx.moveTo(w * 0.12, h * 0.50);  ctx.lineTo(w * 0.16, h * 0.84);
+    ctx.moveTo(-w * 0.32, h * 0.86); ctx.lineTo(w * 0.22, h * 0.84);
+    ctx.stroke();
+
+    // Cockpit blister, up near the nose.
+    ctx.fillStyle = 'rgba(150,210,255,0.85)';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.20, -h * 0.20, w * 0.11, h * 0.26, -0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Engine bell at the tail.
+    ctx.fillStyle = dead ? '#3d2a1d' : '#495260';
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.30, -h * 0.30);
+    ctx.lineTo(-w * 0.40, -h * 0.42);
+    ctx.lineTo(-w * 0.40, h * 0.42);
+    ctx.lineTo(-w * 0.30, h * 0.30);
+    ctx.closePath();
+    ctx.fill();
+
+    // Beacon on the fin: on while it flies, out once it is falling.
+    if (!dead) {
+      const pulse = 0.35 + 0.65 * Math.max(0, Math.sin(rotorAngle * 0.9));
+      ctx.fillStyle = `rgba(255,90,80,${pulse.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(-w * 0.27, -h * 1.26, Math.max(1.2, w * 0.035), 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // Drawn detail only — TANK_W and TANK_H still define the collision box, so
@@ -6074,6 +6186,7 @@ if ('serviceWorker' in navigator) {
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
     heliOut, heliIn, moveHeli, heliFollowClock, netAnnounceHeli, heliAuthority, heliSignature,
     heliDrawPos, heliRouteAt, heliLegAt, heliFlyTo, HELI_MIN_LEGS, HELI_MAX_LEGS,
+    isShipTheme, drawHeli,
     SHOT_SKIP_S, SHOT_SKIP_TO_S, SHOT_CATCHUP_FULL_S, CLOCK_RESYNC_MS, netRebaseClock,
     get simClock() { return simClock; },
     SOUND, Sound, FLIGHT, flightOf, panOf, setSoundOn, setSfxLevel, sliderToLevel, levelToSlider,

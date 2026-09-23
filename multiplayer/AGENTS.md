@@ -79,7 +79,15 @@ an entry in `THEMES`, an `<option>` in the same position, and a Turkish name in
 `generateDuneShape()` — smooth crests with one-sided slip faces — or
 `shape: 'craters'` (Lunar Base) for `generateCraterShape()`, rimmed bowls
 pressed into midpoint plains; anything else is plain midpoint displacement.
-`planet: true` draws Earth in a starry sky (`drawEarth()`). Theme looks never
+`planet: true` draws Earth in a starry sky (`drawEarth()`). `craft: 'ship'`
+(Lunar Base) makes the target overhead a spaceship instead of a helicopter:
+`drawShipBody()` in place of the rotored body, and `Sound.thruster` — an ion
+exhaust over a drive hum — in place of `Sound.rotor`'s chop, since there is no
+air to beat against. It is drawing and sound only, checked by `isShipTheme()`;
+the craft is the same `heli` to the simulation, same size, same hit box, same
+routes, so nothing about it travels in a message. `updateSoundLoops()` calls
+both voices every frame with the theme deciding which one is on, so switching
+themes stops the other one by the rule that stops either. Theme looks never
 touch physics — the moon has the same gravity as everywhere else, since a
 per-theme gravity would have to travel in the snapshot. In a match the theme travels in the snapshot, so it is the
 preference of whoever deals the round (the host) that everyone sees; picking
