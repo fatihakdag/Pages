@@ -839,7 +839,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v52';
+  const BUILD = 'v53';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1055,6 +1055,7 @@
 
   modeSelect.addEventListener('change', () => {
     cpuMode = modeSelect.value === 'cpu';
+    saveSetup('barrage.mode', modeSelect.value);
     turnToken++; // seats changed hands; drop anything the AI had queued
     refreshOpponentUi();
     updateHUD();
@@ -1066,12 +1067,37 @@
   // Changing the roster mid-round has no sane continuation — start a fresh round.
   countSelect.addEventListener('change', () => {
     playerCount = parseInt(countSelect.value, 10);
+    saveSetup('barrage.count', countSelect.value);
     resetGame();
   });
 
   difficultySelect.addEventListener('change', () => {
     aiDifficulty = difficultySelect.value;
+    saveSetup('barrage.difficulty', aiDifficulty);
   });
+
+  // The table setup is remembered like the language, so a reload does not put
+  // a four-way game against a hard CPU back to two players on Medium. Only the
+  // change events save.
+  function saveSetup(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* private mode */ }
+  }
+
+  function initSetup() {
+    const restore = (sel, key) => {
+      let stored = null;
+      try { stored = localStorage.getItem(key); } catch (e) { /* private mode */ }
+      // A value the select no longer offers keeps the markup's default.
+      if ([...sel.options].some(o => o.value === stored)) sel.value = stored;
+    };
+    restore(countSelect, 'barrage.count');
+    restore(modeSelect, 'barrage.mode');
+    restore(difficultySelect, 'barrage.difficulty');
+    cpuMode = modeSelect.value === 'cpu';
+    playerCount = parseInt(countSelect.value, 10);
+    aiDifficulty = difficultySelect.value;
+  }
+
   weaponSelect.addEventListener('change', () => {
     const t = tanks[currentPlayer];
     if (!t) return;
@@ -4107,6 +4133,7 @@
   buildWeaponIcons();
   initSound();
   initLanguage();
+  initSetup();
   refreshOpponentUi();
   resetGame();
   requestAnimationFrame(step);
@@ -4127,7 +4154,7 @@
     freshAmmo, weaponEnabled, lockOnTank, pickWeapon, weaponBtns, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
     fire, applyDamageAndCrater, hullDistance, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
-    endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
+    initSetup, endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
     syncControlsFromTank, updateHUD, nudge, aimFromPull, pullReach, turretPos, canvas, get aimDrag() { return aimDrag; },
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,

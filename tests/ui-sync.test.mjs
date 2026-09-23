@@ -1,5 +1,5 @@
 // The controls and readouts: per-seat weapon state, aim nudging, the HUD
-// banner, and the language switch.
+// banner, the language switch and the remembered table setup.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadFlat } from './harness.mjs';
@@ -199,6 +199,44 @@ test('the language choice is remembered', () => {
   g.el.langCheckbox.dispatch('change');
 
   assert.equal(h.ctx.window.localStorage.getItem('barrage.lang'), 'tr');
+});
+
+test('the table setup is remembered: tanks, opponents and CPU level', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const store = h.ctx.window.localStorage;
+  g.el.countSelect.value = '4';
+  g.el.countSelect.dispatch('change');
+  g.el.modeSelect.value = 'human';
+  g.el.modeSelect.dispatch('change');
+  g.el.difficultySelect.value = 'brutal';
+  g.el.difficultySelect.dispatch('change');
+
+  assert.equal(store.getItem('barrage.count'), '4');
+  assert.equal(store.getItem('barrage.mode'), 'human');
+  assert.equal(store.getItem('barrage.difficulty'), 'brutal');
+});
+
+test('the stored setup is restored, and a value no longer offered keeps the default', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const store = h.ctx.window.localStorage;
+  store.setItem('barrage.count', '5');
+  store.setItem('barrage.mode', 'human');
+  store.setItem('barrage.difficulty', 'hard');
+  g.initSetup();
+  assert.equal(g.el.countSelect.value, '5');
+  assert.equal(g.playerCount, 5);
+  assert.equal(g.cpuMode, false);
+  assert.equal(g.aiDifficulty, 'hard');
+  g.resetGame();
+  assert.equal(g.tanks.length, 5, 'the next round is dealt with the restored roster');
+
+  store.setItem('barrage.count', '9');
+  store.setItem('barrage.difficulty', 'nightmare');
+  g.initSetup();
+  assert.equal(g.playerCount, 5, 'an unknown count leaves the select where it was');
+  assert.equal(g.aiDifficulty, 'hard');
 });
 
 // ---------------------------------------------------------------------------

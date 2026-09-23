@@ -1500,7 +1500,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v61';
+  const BUILD = 'v62';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1805,6 +1805,7 @@ if ('serviceWorker' in navigator) {
 
   modeSelect.addEventListener('change', () => {
     cpuMode = modeSelect.value === 'cpu';
+    if (modeSelect.value !== 'online') saveSetup('barrage.mode', modeSelect.value);
     turnToken++; // seats changed hands; drop anything the AI had queued
     refreshOpponentUi();
     updateHUD();
@@ -1816,12 +1817,38 @@ if ('serviceWorker' in navigator) {
   // Changing the roster mid-round has no sane continuation — start a fresh round.
   countSelect.addEventListener('change', () => {
     playerCount = parseInt(countSelect.value, 10);
+    saveSetup('barrage.count', countSelect.value);
     resetGame();
   });
 
   difficultySelect.addEventListener('change', () => {
     aiDifficulty = difficultySelect.value;
+    saveSetup('barrage.difficulty', aiDifficulty);
   });
+
+  // The table setup is remembered like the language, so a reload does not put
+  // a four-way game against a hard CPU back to two players on Medium. Only the
+  // change events save: a match sets the tank count itself, and that
+  // is the match's roster, not the player's preference.
+  function saveSetup(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* private mode */ }
+  }
+
+  function initSetup() {
+    const restore = (sel, key) => {
+      let stored = null;
+      try { stored = localStorage.getItem(key); } catch (e) { /* private mode */ }
+      // A value the select no longer offers keeps the markup's default.
+      if ([...sel.options].some(o => o.value === stored)) sel.value = stored;
+    };
+    restore(countSelect, 'barrage.count');
+    restore(modeSelect, 'barrage.mode');
+    restore(difficultySelect, 'barrage.difficulty');
+    cpuMode = modeSelect.value === 'cpu';
+    playerCount = parseInt(countSelect.value, 10);
+    aiDifficulty = difficultySelect.value;
+  }
+
   weaponSelect.addEventListener('change', () => {
     const t = tanks[currentPlayer];
     if (!t) return;
@@ -6146,6 +6173,7 @@ if ('serviceWorker' in navigator) {
   initLanguage();
   initSound();
   initTheme();
+  initSetup();
   refreshOpponentUi();
   resetGame();
   requestAnimationFrame(step);
@@ -6169,7 +6197,7 @@ if ('serviceWorker' in navigator) {
     fire, applyDamageAndCrater, hullDistance, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
     simStep, inShot, SIM_DT, resolveShot, beginShot, finishShot, advanceTurn,
-    endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
+    initSetup, endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, showWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
