@@ -1534,7 +1534,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v64';
+  const BUILD = 'v65';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2028,6 +2028,99 @@ if ('serviceWorker' in navigator) {
       x: r.width ? camX + (e.clientX - r.left) / r.width * camViewW() : camX,
       y: r.height ? camY + (e.clientY - r.top) / r.height * camViewH() : camY
     };
+  }
+
+  // The world is drawn at whatever scale fits, which on a portrait phone is
+  // ~0.39 CSS px per unit: a 26-unit tank comes out 10px wide and a shell under
+  // two. The single-player build never had this, because it draws a tank at a
+  // fixed 26px on any screen. So the things you have to find and follow —
+  // tanks, shells, the aim hint — are drawn at no less than SPRITE_MIN_PX CSS
+  // px per unit, by up to SPRITE_MAX_BOOST. Drawing only: TANK_W/TANK_H stay
+  // the collision box and every screen holds the same world. Zooming in lifts
+  // the real scale past the floor, and the boost falls away to 1.
+  const SPRITE_MIN_PX = 0.8, SPRITE_MAX_BOOST = 2.2;
+  function spriteBoost() {
+    const px = viewScale * camZoom;
+    return px > 0 ? Math.min(SPRITE_MAX_BOOST, Math.max(1, SPRITE_MIN_PX / px)) : 1;
+  }
+
+  // A tank drawn larger than it is holds its barrel higher and longer than the
+  // real one, and the real one is where shots leave from. Two fixes, both
+  // drawing only:
+  //
+  // - Across the barrel, the real muzzle sits below the drawn barrel's line,
+  //   by up to ~12 units at the largest boost, so a shot would appear beside
+  //   the barrel. The start of anything leaving a barrel is drawn moved across
+  //   onto that line, and the offset eases away over MUZZLE_BLEND units of
+  //   travel. Only sideways, and over a long run: any correction along the
+  //   path bends it visibly.
+  // - Along the barrel, the real muzzle is inside the drawn one — near the
+  //   turret on a steep shot — and a boosted shell is wider than the barrel,
+  //   so it would be seen leaving from inside the tank. Nothing leaving a
+  //   barrel is drawn until it clears the drawn muzzle (barrelCover).
+  const MUZZLE_BLEND = 300, BARREL_LEN = 20;
+  /** How far across the shot must move to leave tank t's barrel as drawn. */
+  function muzzleShift(t, boost) {
+    const a = t.angle * Math.PI / 180;
+    const dx = Math.cos(a), dy = -Math.sin(a);
+    // Growing the tank about its ground point lifts the turret pivot by this;
+    // everything else about the barrel is on the same line either way.
+    const lift = -(boost - 1) * (TANK_H - 1);
+    const along = lift * dy;
+    return { x: -along * dx, y: lift - along * dy };
+  }
+  /** How much of the shift still applies after `s` units of travel: 1 → 0, eased. */
+  function muzzleBlend(s) {
+    const u = Math.max(0, 1 - s / MUZZLE_BLEND);
+    return u * u * (3 - 2 * u);
+  }
+  /**
+   * The drawn barrel's reach: a circle about its pivot out to the drawn muzzle.
+   * A shot inside it has not left the barrel yet as far as the eye can tell.
+   * Null when the tank is drawn at its real size.
+   */
+  function barrelCover(t, boost) {
+    if (boost <= 1) return null;
+    const cy = groundHeightAt(t.x) - boost * (TANK_H - 1);
+    const r = boost * BARREL_LEN + 1;
+    return { inside: (x, y) => (x - t.x) * (x - t.x) + (y - cy) * (y - cy) < r * r, r };
+  }
+  /** Where the real shot leaves tank t's barrel. */
+  function muzzleAt(t) {
+    const a = t.angle * Math.PI / 180;
+    return { x: t.x + BARREL_LEN * Math.cos(a), y: groundHeightAt(t.x) - TANK_H - BARREL_LEN * Math.sin(a) };
+  }
+
+  // Per shell, drawing state only: which tank it left (null for a warhead that
+  // began mid-air, or anything first seen far from a barrel) and how far it has
+  // travelled since, which is what the ease is measured along.
+  const shellLaunch = new WeakMap();
+  function shellLaunchOf(p) {
+    let st = shellLaunch.get(p);
+    if (!st) {
+      const t = tanks[p.firedBy];
+      const first = p.trail[0] || p;
+      let from = null, travelled = 0;
+      if (t && t.alive && !p.rolling) {
+        const m = muzzleAt(t);
+        const d0 = Math.hypot(first.x - m.x, first.y - m.y);
+        if (d0 < 40) {
+          from = t;
+          travelled = d0;
+          for (let i = 1; i < p.trail.length; i++) {
+            travelled += Math.hypot(p.trail[i].x - p.trail[i - 1].x, p.trail[i].y - p.trail[i - 1].y);
+          }
+          const last = p.trail[p.trail.length - 1] || first;
+          travelled += Math.hypot(p.x - last.x, p.y - last.y);
+        }
+      }
+      st = { from, travelled, lx: p.x, ly: p.y };
+      shellLaunch.set(p, st);
+    } else {
+      st.travelled += Math.hypot(p.x - st.lx, p.y - st.ly);
+      st.lx = p.x; st.ly = p.y;
+    }
+    return st;
   }
 
   let hudWindVisible = false;
@@ -5011,6 +5104,23 @@ if ('serviceWorker' in navigator) {
       if (pts.length < 2) return;
     }
 
+    // The tank may be drawn larger than it is (spriteBoost), so the arc starts
+    // moved across onto the drawn barrel's line, eases back onto the true path
+    // (see muzzleShift), and is only drawn from `from`, where it clears the
+    // drawn muzzle. Spacing and length below are still measured on `pts`, the
+    // true path; only where the marks go uses `drawn`.
+    const boost = spriteBoost();
+    const shift = muzzleShift(t, boost);
+    const cover = barrelCover(t, boost);
+    const drawn = new Array(pts.length);
+    for (let i = 0, s = 0; i < pts.length; i++) {
+      if (i) s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      const b = muzzleBlend(s);
+      drawn[i] = [pts[i][0] + shift.x * b, pts[i][1] + shift.y * b];
+    }
+    let from = 0;
+    while (cover && from < drawn.length - 2 && cover.inside(drawn[from][0], drawn[from][1])) from++;
+
     // Every player colour is bright and saturated, which leaves some of them
     // with nothing to sit against on a pale theme — yellow over Salt Flats,
     // green over Verdant Hills. So each mark is drawn twice: the theme's halo
@@ -5021,31 +5131,31 @@ if ('serviceWorker' in navigator) {
     if (full) {
       // Butt caps, as before: round ones would stretch every dash by the width
       // of the backing stroke and turn the arc into a line of fat lozenges.
-      ctx.setLineDash([4, 6]);
+      ctx.setLineDash([4 * boost, 6 * boost]);
       ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.moveTo(drawn[from][0], drawn[from][1]);
+      for (let i = from + 1; i < drawn.length; i++) ctx.lineTo(drawn[i][0], drawn[i][1]);
       ctx.globalAlpha = 0.35;
       ctx.strokeStyle = halo;
-      ctx.lineWidth = 3.4;
+      ctx.lineWidth = 3.4 * boost;
       ctx.stroke();
       ctx.globalAlpha = 0.8;
       ctx.strokeStyle = t.color;
-      ctx.lineWidth = 1.7;
+      ctx.lineWidth = 1.7 * boost;
       ctx.stroke();
       ctx.setLineDash([]);
 
       if (!guided) {
         const end = pts[pts.length - 1];
         ctx.beginPath();
-        ctx.arc(end[0], end[1], 5, 0, Math.PI * 2);
+        ctx.arc(end[0], end[1], 5 * boost, 0, Math.PI * 2);
         ctx.globalAlpha = 0.45;
         ctx.strokeStyle = halo;
-        ctx.lineWidth = 4.5;
+        ctx.lineWidth = 4.5 * boost;
         ctx.stroke();
         ctx.globalAlpha = 0.95;
         ctx.strokeStyle = t.color;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2 * boost;
         ctx.stroke();
       }
     } else {
@@ -5068,8 +5178,8 @@ if ('serviceWorker' in navigator) {
       // Scaled with the field like everything else, but never smaller than
       // what still reads on a phone-sized canvas. Small: the halo is what
       // makes these visible, so the dot itself does not need the bulk.
-      const r = Math.max(1.1, 1.2 * physScale);
-      const rim = Math.max(0.8, 0.85 * physScale);
+      const r = Math.max(1.1, 1.2 * physScale) * boost;
+      const rim = Math.max(0.8, 0.85 * physScale) * boost;
       // Under this the dots touch and the spacing stops being readable, so the
       // very weakest shots give up the speed reading to stay legible.
       const minGap = 2.6 * (r + rim);
@@ -5088,8 +5198,8 @@ if ('serviceWorker' in navigator) {
         const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
         walked += d;
         since += d;
-        if (i % EVERY === 0 && since >= minGap && walked <= limit) {
-          marks.push(pts[i]);
+        if (i % EVERY === 0 && since >= minGap && walked <= limit && i >= from) {
+          marks.push(drawn[i]);
           since = 0;
         }
       }
@@ -5183,27 +5293,63 @@ if ('serviceWorker' in navigator) {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // tanks
-    tanks.forEach(t => { if (t.alive) drawTank(t); });
+    // tanks, grown about the point they stand on so they stay on the ground
+    // (the scaling lives here rather than in drawTank, which tools/icons.mjs
+    // lifts out and runs on its own)
+    const boost = spriteBoost();
+    tanks.forEach(t => {
+      if (!t.alive) return;
+      const gy = groundHeightAt(t.x);
+      ctx.save();
+      ctx.translate(t.x, gy);
+      ctx.scale(boost, boost);
+      ctx.translate(-t.x, -gy);
+      drawTank(t);
+      ctx.restore();
+    });
 
     drawHeli();
     drawAimPreview();
 
     // trails and shells, one set per warhead in the air
     for (const p of projectiles) {
+      // A fresh shell starts on the drawn barrel's line and eases onto its true
+      // path (see muzzleShift); the ease is measured along the flight, so a
+      // trail point keeps the displacement it had when the shell passed it.
+      // Until it clears the drawn muzzle, none of it is drawn (barrelCover) —
+      // measured by travel too, so a lob coming back down on its own tank is
+      // still seen arriving.
+      const launch = shellLaunchOf(p);
+      const fresh = launch.from && !p.rolling;
+      const shift = fresh ? muzzleShift(launch.from, boost) : { x: 0, y: 0 };
+      const cover = fresh ? barrelCover(launch.from, boost) : null;
+      const inBarrel = (x, y, s) => cover !== null && s < cover.r * 2 && cover.inside(x, y);
+      const hb = muzzleBlend(launch.travelled);
+      const hx = p.x + shift.x * hb, hy = p.y + shift.y * hb;
       if (p.trail.length > 1) {
         ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.5 * boost;
         ctx.beginPath();
-        p.trail.forEach((pt, idx) => idx === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
+        let back = 0, nx = p.x, ny = p.y;
+        for (let i = p.trail.length - 1; i >= 0; i--) {
+          const pt = p.trail[i];
+          back += Math.hypot(nx - pt.x, ny - pt.y);
+          nx = pt.x; ny = pt.y;
+          const s = launch.travelled - back;
+          const b = muzzleBlend(s);
+          const x = pt.x + shift.x * b, y = pt.y + shift.y * b;
+          if (inBarrel(x, y, s)) break; // older points are further inside
+          i === p.trail.length - 1 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
         ctx.stroke();
       }
+      if (inBarrel(hx, hy, launch.travelled)) continue;
       const pw = WEAPONS[p.weapon];
       ctx.fillStyle = pw.color;
       if (p.rolling) {
         // A rolling mine reads as a spiked drum sitting on the ground, and the
         // spin direction shows which way it is travelling.
-        const r = 6;
+        const r = 6 * boost;
         const cy = p.y - r;
         const spin = p.x / r;
         ctx.strokeStyle = pw.color;
@@ -5223,8 +5369,9 @@ if ('serviceWorker' in navigator) {
         // a flame out the back while the motor is lit.
         const a = Math.atan2(p.vy, p.vx);
         ctx.save();
-        ctx.translate(p.x, p.y);
+        ctx.translate(hx, hy);
         ctx.rotate(a);
+        ctx.scale(boost, boost);
         if (p.burnLeft > 0) {
           ctx.fillStyle = '#ffb03a';
           ctx.beginPath();
@@ -5246,7 +5393,7 @@ if ('serviceWorker' in navigator) {
         // An unsplit MIRV is drawn fatter than the warheads it carries, and a
         // cluster bomb's bomblets smaller than the casing they came out of.
         ctx.beginPath();
-        ctx.arc(p.x, p.y, pw.mirvCount && !p.split ? 6 : p.bomblet ? 3 : 4, 0, Math.PI * 2);
+        ctx.arc(hx, hy, (pw.mirvCount && !p.split ? 6 : p.bomblet ? 3 : 4) * boost, 0, Math.PI * 2);
         ctx.fill();
       }
     }
