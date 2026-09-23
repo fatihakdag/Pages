@@ -1604,6 +1604,7 @@ if ('serviceWorker' in navigator) {
   const countSelect = document.getElementById('count-select');
   const difficultyGroup = document.getElementById('difficulty-group');
   const sizeSelect = document.getElementById('size-select');
+  const sizeGroup = document.getElementById('size-group');
   const zoomInBtn = document.getElementById('zoom-in');
   const zoomOutBtn = document.getElementById('zoom-out');
   const zoomFitBtn = document.getElementById('zoom-fit');
@@ -1963,6 +1964,11 @@ if ('serviceWorker' in navigator) {
     worldTransform();
 
     hudWindVisible = windHud.offsetParent !== null;
+    // TANK SIZE only means anything where the world is drawn under the sprite
+    // floor. Zoom only ever draws it larger, so fitted is the smallest it gets:
+    // at or above the floor here, Large and Actual look the same, and the
+    // choice is hidden rather than offered to do nothing.
+    sizeGroup.style.display = viewScale < SPRITE_MIN_PX ? '' : 'none';
   }
 
   // ---------- Camera ----------
@@ -6536,7 +6542,7 @@ if ('serviceWorker' in navigator) {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
       settingsModal, settingsBtn, windHud, roundRestartBtn, restartNote,
-      nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider, themeSelect, sizeSelect
+      nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider, themeSelect, sizeSelect, sizeGroup
     },
     initTheme, nextTheme, generateTerrainShape,
     spriteBoost, initSizePref, SPRITE_MIN_PX, SPRITE_MAX_BOOST, render,

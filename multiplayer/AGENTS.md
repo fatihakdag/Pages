@@ -164,7 +164,10 @@ out ~10px on a portrait phone. So tanks, shells and the aim preview are drawn
 at no less than `SPRITE_MIN_PX` CSS px per world unit (`spriteBoost()`, up to
 `SPRITE_MAX_BOOST`), which fades to 1 on a desktop or once zoomed in. TANK SIZE
 in Settings (`#size-select`, stored as `barrage.tankSize`) picks `large` — this,
-the default — or `actual`, which turns it off. Like the camera it is drawing
+the default — or `actual`, which turns it off. `resize()` hides the option
+wherever the fitted world is already at or above the floor, since there the
+two look the same (zoom only draws larger, so fitted is the worst case); a
+desktop window narrowed to phone size gets it back. Like the camera it is drawing
 only: `TANK_W`/`TANK_H` stay the collision box and nothing travels in a match.
 
 A tank grown about its ground point holds its barrel higher and longer than the

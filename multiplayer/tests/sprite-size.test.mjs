@@ -47,6 +47,21 @@ test('the stored choice is restored, and an unknown one falls back to Large', ()
   assert.equal(g.el.sizeSelect.value, 'large');
 });
 
+test('the option is only offered where it changes anything, and follows a resize', () => {
+  const phone = load({ width: 390, height: 600 });
+  assert.equal(phone.g.el.sizeGroup.style.display, '', 'shown on a phone');
+
+  const h = load({ width: 1600, height: 1000 });
+  assert.equal(h.g.el.sizeGroup.style.display, 'none', 'hidden where the world is drawn full size');
+
+  // A desktop window narrowed to phone width draws the world small again.
+  h.el('game-wrap').getBoundingClientRect = () => ({ width: 390, height: 600 });
+  h.el('game').getBoundingClientRect = () => ({ width: 390, height: 600 });
+  h.g.resize();
+  assert.ok(h.g.viewScale < h.g.SPRITE_MIN_PX);
+  assert.equal(h.g.el.sizeGroup.style.display, '', 'offered again once it matters');
+});
+
 test('switching size does not touch the world', () => {
   const { g } = load({ width: 390, height: 600 });
   const before = { terrain: Array.from(g.terrain), tanks: g.tanks.map(t => [t.x, t.hp]), W: g.W, H: g.H };
