@@ -59,7 +59,7 @@ test('one missed turn is skipped, not punished', () => {
   assert.deepEqual(ms.payloads('timeout'), [], 'half a minute is not a timeout');
 
   me.advance(35000);
-  assert.deepEqual(ms.payloads('timeout'), [{ k: 'timeout', seat: 0, missed: 1, ai: false }]);
+  assert.deepEqual(ms.payloads('timeout'), [{ k: 'timeout', round: 1, seat: 0, missed: 1, ai: false }]);
   assert.equal(me.g.tanks[0].alive, true, 'nobody is knocked out for being slow');
   assert.equal(me.g.netSeatIsAi(0), false, 'and the CPU has not stepped in yet');
 
@@ -85,7 +85,7 @@ test('a second miss in a row hands the seat to the CPU, which shoots', () => {
 
   const events = ms.payloads('timeout');
   assert.equal(events.length, 2);
-  assert.deepEqual(events[1], { k: 'timeout', seat: 0, missed: 2, ai: true });
+  assert.deepEqual(events[1], { k: 'timeout', round: 1, seat: 0, missed: 2, ai: true });
   assert.equal(me.g.netSeatIsAi(0), true, 'the CPU has the seat');
   assert.equal(me.g.tanks[0].alive, true, 'the tank is still in the game');
 

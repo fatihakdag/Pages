@@ -623,6 +623,29 @@
 
   /* The online group needs HOST + CODE + JOIN across one line. */
   #settings-grid #online-group { grid-column: 1 / -1; }
+  #settings-grid #restart-group { grid-column: 1 / -1; }
+  .restart-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+  #round-restart {
+    background: var(--panel-line);
+    color: var(--text);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font: inherit;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #round-restart:disabled { opacity: 0.4; cursor: default; }
+  #round-restart .rr-sure { display: none; }
+  #round-restart.armed { border-color: var(--accent-p1); color: var(--text-main); }
+  #round-restart.armed .rr-idle { display: none; }
+  #round-restart.armed .rr-sure { display: inline; }
+  #restart-note { flex: 1 1 140px; font-size: 11px; color: var(--text-dim); }
 
   /* One tap instead of two, and what you are holding is visible without
      opening anything. Each button carries its own ammo count, so the dropdown
@@ -1426,6 +1449,15 @@
             <span id="online-status" role="status">off</span>
           </div>
         </div>
+        <div class="ctrl-group" id="restart-group">
+          <div class="ctrl-label" data-i18n="round">ROUND</div>
+          <div class="restart-row">
+            <!-- Two taps: the first arms it and swaps the label for the
+                 question. In a match only the host can use it. -->
+            <button type="button" id="round-restart"><span aria-hidden="true">↻</span><span class="rr-idle" data-i18n="restartRound">RESTART ROUND</span><span class="rr-sure" data-i18n="restartSure">TAP AGAIN TO RESTART</span></button>
+            <span id="restart-note"></span>
+          </div>
+        </div>
         <div class="ctrl-group" id="prefs-row">
           <div id="sfx-group">
             <div class="ctrl-label"><label for="sfx-volume" data-i18n="soundFx">SOUND FX</label></div>
@@ -1500,7 +1532,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v62';
+  const BUILD = 'v63';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1605,6 +1637,8 @@ if ('serviceWorker' in navigator) {
       powerDown: 'Power down one', powerUp: 'Power up one',
       zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomFit: 'Fit the whole battlefield',
       online: 'ONLINE', onlineMode: 'Online', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
+      round: 'ROUND', restartRound: 'RESTART ROUND', restartSure: 'TAP AGAIN TO RESTART',
+      restartHostOnly: 'Only the host can restart a match.',
       roomCode: 'CODE', roomCodeLabel: 'Room code', rejoin: 'REJOIN',
       yourName: 'NAME', yourNameLabel: 'Your name',
       playWithOthers: 'PLAY WITH OTHERS',
@@ -1645,6 +1679,8 @@ if ('serviceWorker' in navigator) {
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
       zoomIn: 'Yakınlaştır', zoomOut: 'Uzaklaştır', zoomFit: 'Tüm sahayı göster',
       online: 'ÇEVRİMİÇİ', onlineMode: 'Çevrimiçi', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
+      round: 'TUR', restartRound: 'TURU YENİDEN BAŞLAT', restartSure: 'BAŞLATMAK İÇİN TEKRAR DOKUN',
+      restartHostOnly: 'Maçı yalnızca ev sahibi yeniden başlatabilir.',
       roomCode: 'KOD', roomCodeLabel: 'Oda kodu', rejoin: 'YENİDEN BAĞLAN',
       yourName: 'İSİM', yourNameLabel: 'Adın',
       playWithOthers: 'ÇEVRİMİÇİ OYNA',
@@ -2914,6 +2950,47 @@ if ('serviceWorker' in navigator) {
   }
 
   settingsBtn.addEventListener('click', openSettings);
+
+  // Restarting the round from Settings. It throws away a round in progress, so
+  // it takes two taps: the first arms it and asks, the second — within
+  // RESTART_ARM_MS — restarts. Left armed, it quietly stands down again.
+  const roundRestartBtn = document.getElementById('round-restart');
+  const restartNote = document.getElementById('restart-note');
+  const RESTART_ARM_MS = 3000;
+  let restartArmTimer = null;
+
+  /**
+   * Offline, anyone. In a match, only the host: they deal the board everyone
+   * plays on, so a restart has to come from them or the screens would part
+   * ways. Not while a match is still being joined, when there is no round yet.
+   */
+  function canRestartRound() {
+    if (netPlaying()) return online.host;
+    return online.status === 'offline' || online.status === 'ended';
+  }
+  function disarmRoundRestart() {
+    clearTimeout(restartArmTimer);
+    restartArmTimer = null;
+    roundRestartBtn.classList.remove('armed');
+  }
+  function refreshRestartUi() {
+    const can = canRestartRound();
+    if (!can) disarmRoundRestart();
+    roundRestartBtn.disabled = !can;
+    restartNote.textContent = (netPlaying() && !online.host) ? txt('restartHostOnly') : '';
+  }
+  function onRoundRestartClicked() {
+    if (!canRestartRound()) { refreshRestartUi(); return; }
+    if (!restartArmTimer) {
+      restartArmTimer = setTimeout(disarmRoundRestart, RESTART_ARM_MS);
+      roundRestartBtn.classList.add('armed');
+      return;
+    }
+    disarmRoundRestart();
+    if (netPlaying()) netRestartMatch(); else resetGame();
+    closeSettings();   // the point was to see the new board
+  }
+  roundRestartBtn.addEventListener('click', onRoundRestartClicked);
   // The invitation is a shortcut to the same panel: hosting and joining live
   // there, and this saves hunting for them.
   netInviteBtn.addEventListener('click', openSettings);
@@ -5237,6 +5314,7 @@ if ('serviceWorker' in navigator) {
     seatTokens: [],    // the token that belongs in each seat, remembered when empty
     seatNames: [],     // the name each seat's player chose, '' for none
     vacancies: [],     // seats whose player left, in the order they emptied
+    round: 0,          // which deal of the board this is; bumped by every start and restart
     rejoin: null,      // { code, tries } while we are trying to get back in
     missed: [],        // consecutive turns each seat has let run out
     aiSeats: [],       // seats the CPU is playing until their player returns
@@ -5540,11 +5618,12 @@ if ('serviceWorker' in navigator) {
     netPill.hidden = !engaged;
     netInviteBtn.hidden = engaged;
     netRejoinBtn.hidden = !netCanRejoin();
+    refreshRestartUi();
   }
 
   function netSend(kind, extra) {
     if (!online.ws || online.ws.readyState !== 1) return;
-    online.ws.send(JSON.stringify({ t: 'msg', d: { k: kind, ...extra } }));
+    online.ws.send(JSON.stringify({ t: 'msg', d: { k: kind, round: online.round, ...extra } }));
   }
 
   function netFail(message) {
@@ -5696,10 +5775,6 @@ if ('serviceWorker' in navigator) {
       refreshOnlineUi();
       return;
     }
-    // Either player can ask for a rematch; the host is the one who deals it,
-    // so that both end up on the same new terrain.
-    if (d.k === 'rematch' && online.host) { netRestartMatch(); return; }
-
     if (d.k === 'start') {
       // A table that filled up without us: the relay lets four into a room, but
       // the match may have been dealt for fewer. Say so rather than sitting in
@@ -5712,8 +5787,13 @@ if ('serviceWorker' in navigator) {
       }
       online.peerAway = false;
       online.missed = [];
-      online.aiSeats = [];
-      online.vacancies = [];
+      // The host's word on which seats are empty and which the CPU is playing:
+      // a restart keeps a missing player's chair for them, and every screen
+      // has to agree on who covers it.
+      online.aiSeats = Array.isArray(d.ai) ? d.ai.slice() : [];
+      online.vacancies = Array.isArray(d.vacant) ? d.vacant.slice()
+        : d.seats.map((id, i) => (id === null ? i : -1)).filter(i => i >= 0);
+      if (typeof d.round === 'number') online.round = d.round;
       online.seats = d.seats;
       online.seatTokens = d.tokens || [];
       online.seatNames = d.seats.map((_, i) => cleanName((d.names || [])[i]));
@@ -5737,7 +5817,7 @@ if ('serviceWorker' in navigator) {
 
     // Everything that changes the board goes through the inbox, in the order it
     // was sent (netReceive).
-    if (d.k === 'turn' || d.k === 'heli' || d.k === 'timeout' || d.k === 'sync') {
+    if (d.k === 'turn' || d.k === 'heli' || d.k === 'timeout' || d.k === 'sync' || d.k === 'rematch') {
       netReceive(d);
       return;
     }
@@ -5763,6 +5843,10 @@ if ('serviceWorker' in navigator) {
    * keeping up matters more than the tail of an animation.
    */
   function netReceive(d) {
+    // Sent before the host dealt a new board, and arriving after it: a shot,
+    // a timeout or a sync from the old round would land on the new terrain.
+    // turnSeq cannot catch it — a restart puts that back to zero.
+    if (typeof d.round === 'number' && d.round !== online.round) return;
     if (d.k === 'turn' && !d.ai && d.result && netStandInLost(d)) return;
     if (activeShot && d.k === 'turn' && online.inbox.some(m => m.k === 'turn')) finishShot();
     if (activeShot) { online.inbox.push(d); return; }
@@ -5798,6 +5882,14 @@ if ('serviceWorker' in navigator) {
   }
 
   function netApplyMessage(d) {
+    // A guest's Play Again. It waits its turn in the inbox like anything else,
+    // because the shot that ended the round may still be landing here — and
+    // only a finished round is the guest's to restart; mid-round it is the
+    // host's call alone.
+    if (d.k === 'rematch') {
+      if (online.host && state === 'GAMEOVER') netRestartMatch();
+      return;
+    }
     if (d.k === 'turn') {
       // A turn the player took themselves means they are back: the clock
       // resets and the CPU hands the seat over. A CPU-played turn does not.
@@ -5841,23 +5933,45 @@ if ('serviceWorker' in navigator) {
     online.seatNames = online.seats.map(
       id => (id === online.id ? netMyName() : (netNamesById[id] || '')));
     online.vacancies = [];
+    online.aiSeats = [];
+    online.missed = [];
     online.seat = online.seats.indexOf(online.id);
     online.status = 'playing';
+    online.round++;
     refreshOpponentUi();
     resetGame();
-    netSend('start', { seats: online.seats, tokens: online.seatTokens, names: online.seatNames, state: netSnapshot() });
+    netSend('start', netStartPayload(netSnapshot()));
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
   }
 
-  /** Host only: same seats, a fresh battlefield, both sides told at once. */
+  /** What a `start` carries besides the board: who sits where, and who is missing. */
+  function netStartPayload(state) {
+    return {
+      seats: online.seats, tokens: online.seatTokens, names: online.seatNames,
+      vacant: online.vacancies, ai: online.aiSeats, state
+    };
+  }
+
+  /**
+   * Host only: same seats, a fresh battlefield, everyone told at once.
+   *
+   * An empty seat does not stop it. The chair stays held for its player — the
+   * token keeps it theirs, the CPU covers it on the usual clock — and a return
+   * resumes into the new board. Refusing used to mean one player whose phone
+   * went to sleep kept everyone else from ever restarting.
+   */
   function netRestartMatch() {
-    if (!online.host || online.vacancies.length) return;
+    if (!online.host) return;
     online.status = 'playing';
+    online.round++;
+    online.missed = [];
+    online.inbox = [];
     refreshOpponentUi();
     resetGame();
-    netSend('start', { seats: online.seats, tokens: online.seatTokens, names: online.seatNames, state: netSnapshot() });
+    netResetTurnClock();
+    netSend('start', netStartPayload(netSnapshot()));
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
@@ -5882,7 +5996,7 @@ if ('serviceWorker' in navigator) {
     // game in progress rather than a new one. Mid-shot, that is the board the
     // shot ends on: they have nothing to replay it from.
     const board = activeShot && activeShot.result ? activeShot.result : netSnapshot();
-    netSend('start', { seats: online.seats, tokens: online.seatTokens, names: online.seatNames, state: board });
+    netSend('start', netStartPayload(board));
     refreshOnlineUi();
     syncControlsFromTank();
     updateHUD();
@@ -6201,6 +6315,7 @@ if ('serviceWorker' in navigator) {
     setWind, showWind, windStrength, windForce, isAi, txt, upper, playerName,
     online, netSnapshot, netApplyState, netConnect, netHandle, netRemoteSeat,
     netRestartMatch, netResumeMatch, onRestartClicked, netReportVisibility,
+    canRestartRound, onRoundRestartClicked, RESTART_ARM_MS,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock, netPublishState,
     netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
@@ -6223,7 +6338,7 @@ if ('serviceWorker' in navigator) {
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
-      settingsModal, settingsBtn, windHud,
+      settingsModal, settingsBtn, windHud, roundRestartBtn, restartNote,
       nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider, themeSelect
     },
     initTheme, nextTheme, generateTerrainShape,

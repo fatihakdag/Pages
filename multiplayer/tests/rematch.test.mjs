@@ -58,21 +58,46 @@ test('the host restarting deals the same new board to both', () => {
   assert.equal(guest.g.online.status, 'playing');
 });
 
+/** End the round on the host's screen and hand the result to the guest. */
+function endRound({ host, gs, hs }) {
+  host.g.currentPlayer = 0;
+  host.g.tanks[1].alive = false;
+  host.g.tanks[1].hp = 0;
+  host.g.nextTurn();
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('sync').slice(-1)[0] });
+}
+
 test('a guest asking for a rematch goes through the host, not around it', () => {
-  const { host, guest, hs, gs } = liveMatch();
+  const m = liveMatch();
+  const { host, guest, hs, gs } = m;
+  endRound(m);
+  assert.equal(guest.g.state, 'GAMEOVER');
   const guestBoardBefore = terrainOf(guest);
 
   guest.g.el.restartBtn.dispatch('click');
 
   // The guest must not reroll its own terrain — that is the desync.
   assert.deepEqual(terrainOf(guest), guestBoardBefore, 'the guest board is untouched');
-  assert.deepEqual(gs.payloads('rematch'), [{ k: 'rematch' }], 'it asks instead');
+  const asks = gs.payloads('rematch');
+  assert.deepEqual(asks, [{ k: 'rematch', round: 1 }], 'it asks instead');
 
-  hs.deliver({ t: 'msg', from: 2, d: { k: 'rematch' } });
+  hs.deliver({ t: 'msg', from: 2, d: asks[0] });
   const starts = hs.payloads('start');
   assert.equal(starts.length, 2, 'the host deals it');
   gs.deliver({ t: 'msg', from: 1, d: starts[1] });
   assert.deepEqual(terrainOf(guest), terrainOf(host), 'and now they match');
+});
+
+test('mid-round, a guest cannot restart the match', () => {
+  const { host, hs } = liveMatch();
+  const before = terrainOf(host);
+  assert.equal(host.g.state, 'AIMING');
+
+  // Whatever the guest's screen offers, a request mid-round is not theirs to make.
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'rematch', round: 1 } });
+
+  assert.equal(hs.payloads('start').length, 1, 'nothing is dealt');
+  assert.deepEqual(terrainOf(host), before);
 });
 
 test('offline, Play Again still just restarts', () => {
@@ -140,22 +165,94 @@ test('the rejoining player lands on that board, in that seat', () => {
   assert.deepEqual(terrainOf(rejoiner), terrainOf(guest), 'on the same board');
 });
 
-test('a rematch is refused while a seat is still empty', () => {
-  const { guest, gs } = liveMatch();
-  gs.deliver({ t: 'gone', id: 1, host: 2 });
-  const before = gs.payloads('start').length;
+test('the host restarts with a seat empty, and holds it for its player', () => {
+  const { host, hs } = liveMatch();
+  const seat1 = host.g.online.seatTokens[1];
+  hs.deliver({ t: 'gone', id: 2, host: 1 });
+  assert.deepEqual(Array.from(host.g.online.vacancies), [1]);
+  host.g.online.aiSeats.push(1);   // the CPU had already taken the chair over
+  const before = terrainOf(host);
 
-  guest.g.el.restartBtn.dispatch('click');
+  host.g.el.restartBtn.dispatch('click');
 
-  assert.equal(gs.payloads('start').length, before,
-    'nothing is dealt to a board with nobody on the other side');
+  const starts = hs.payloads('start');
+  assert.equal(starts.length, 2, 'a new board is dealt anyway');
+  const deal = starts[1];
+  assert.notDeepEqual(terrainOf(host), before);
+  assert.deepEqual(deal.seats, [1, null], 'the empty chair stays empty');
+  assert.deepEqual(deal.tokens[1], seat1, 'and still belongs to its player');
+  assert.deepEqual(deal.vacant, [1]);
+  assert.deepEqual(deal.ai, [1], 'the CPU keeps covering it');
+  assert.equal(deal.round, 2);
+
+  // They come back, and land on the new board rather than the old one.
+  hs.deliver({ t: 'peer', id: 3, name: '' });
+  hs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: seat1 } });
+  const back = hs.payloads('start')[2];
+  assert.deepEqual(back.seats, [1, 3]);
+  assert.equal(back.round, 2, 'the same round, resumed');
+
+  const rejoiner = load();
+  const rs = connect(rejoiner, 'ABCD');
+  rs.deliver({ t: 'joined', room: 'ABCD', id: 3, host: 1, peers: [{ id: 1, name: '' }] });
+  rs.deliver({ t: 'msg', from: 1, d: back });
+  assert.equal(rejoiner.g.online.seat, 1, 'in their own seat');
+  assert.deepEqual(terrainOf(rejoiner), terrainOf(host), 'on the new board');
+  assert.equal(rejoiner.g.online.round, 2);
+  assert.deepEqual(Array.from(rejoiner.g.online.vacancies), []);
+});
+
+test('a guest learns which seats a restart left empty', () => {
+  const host = load(), a = load();
+  host.g.el.countSelect.value = '3';
+  const hs = connect(host);
+  hs.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+  hs.deliver({ t: 'peer', id: 2, name: '' });
+  hs.deliver({ t: 'msg', from: 2, d: { k: 'ready', token: 'tok2' } });
+  hs.deliver({ t: 'peer', id: 3, name: '' });
+  hs.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: 'tok3' } });
+  assert.equal(host.g.online.status, 'playing');
+  const as = connect(a, 'ABCD');
+  as.deliver({ t: 'joined', room: 'ABCD', id: 2, host: 1, peers: [{ id: 1, name: '' }] });
+  as.deliver({ t: 'msg', from: 1, d: hs.payloads('start')[0] });
+
+  // Seat 3 drops; the host restarts.
+  hs.deliver({ t: 'gone', id: 3, host: 1 });
+  as.deliver({ t: 'gone', id: 3, host: 1 });
+  host.g.online.aiSeats.push(2);   // and the CPU has taken the chair over
+  host.g.el.restartBtn.dispatch('click');
+  as.deliver({ t: 'msg', from: 1, d: hs.payloads('start').slice(-1)[0] });
+
+  assert.deepEqual(Array.from(a.g.online.vacancies), [2], 'the guest still knows who is missing');
+  assert.deepEqual(Array.from(a.g.online.aiSeats), [2], 'and that the CPU is covering for them');
+  assert.equal(a.g.online.status, 'playing');
+  assert.deepEqual(terrainOf(a), terrainOf(host));
+});
+
+test('messages from before a restart do not land on the new board', () => {
+  const { host, guest, hs } = liveMatch();
+
+  // The guest's board as it was, with a crater the new round must not inherit.
+  guest.g.craterAt(400, guest.g.groundHeightAt(400), 60);
+  const stale = { k: 'sync', round: 1, state: guest.g.netSnapshot() };
+
+  host.g.el.roundRestartBtn.dispatch('click');
+  host.g.el.roundRestartBtn.dispatch('click');
+  assert.equal(host.g.online.round, 2);
+  const fresh = terrainOf(host);
+
+  hs.deliver({ t: 'msg', from: 2, d: stale });
+  assert.deepEqual(terrainOf(host), fresh, 'the old round\'s sync is dropped');
+
+  hs.deliver({ t: 'msg', from: 2, d: { ...stale, round: 2 } });
+  assert.notDeepEqual(terrainOf(host), fresh, 'the same message from this round would have applied');
 });
 
 test('a tab going into the background says so before it freezes', () => {
   const { host, guest, hs, gs } = liveMatch();
 
   guest.setHidden(true);
-  assert.deepEqual(gs.payloads('away'), [{ k: 'away', hidden: true }],
+  assert.deepEqual(gs.payloads('away'), [{ k: 'away', round: 1, hidden: true }],
     'the message goes out while the page is still running normally');
 
   hs.deliver({ t: 'msg', from: 2, d: { k: 'away', hidden: true } });
@@ -285,4 +382,77 @@ test('the end of the round reaches every screen, not just the winner’s', () =>
   assert.ok(guest.g.el.overlay.classList.contains('show'),
     'the loser is shown the result rather than left staring at a dead game');
   assert.match(guest.g.el.overlay.textContent + guest.g.txt('wins', { name: 'x' }), /wins|kazan/i);
+});
+
+// ---------- The Settings restart ----------
+
+test('in a match, the Settings restart is the host\'s alone', () => {
+  const { host, guest, gs } = liveMatch();
+  assert.equal(host.g.el.roundRestartBtn.disabled, false);
+  assert.equal(guest.g.el.roundRestartBtn.disabled, true);
+  assert.equal(guest.g.el.restartNote.textContent, guest.g.txt('restartHostOnly'));
+
+  // Pressed anyway (a stale screen): nothing is sent and nothing changes.
+  const before = terrainOf(guest);
+  guest.g.onRoundRestartClicked();
+  guest.g.onRoundRestartClicked();
+  assert.deepEqual(gs.payloads('rematch'), []);
+  assert.deepEqual(terrainOf(guest), before);
+
+  // The host leaves; the role, and the button, pass on.
+  gs.deliver({ t: 'gone', id: 1, host: 2 });
+  assert.equal(guest.g.el.roundRestartBtn.disabled, false);
+  assert.equal(guest.g.el.restartNote.textContent, '');
+});
+
+test('the host restarting mid-round from Settings takes two taps and deals to everyone', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  const btn = host.g.el.roundRestartBtn;
+  host.g.el.settingsBtn.dispatch('click');
+  const before = terrainOf(host);
+
+  btn.dispatch('click');
+  assert.ok(btn.classList.contains('armed'));
+  assert.equal(hs.payloads('start').length, 1, 'one tap deals nothing');
+  assert.deepEqual(terrainOf(host), before);
+
+  btn.dispatch('click');
+  assert.ok(!btn.classList.contains('armed'));
+  assert.ok(!host.g.el.settingsModal.classList.contains('show'), 'Settings closes onto the new board');
+  const deal = hs.payloads('start')[1];
+  assert.ok(deal, 'a new start goes out');
+  gs.deliver({ t: 'msg', from: 1, d: deal });
+  assert.notDeepEqual(terrainOf(host), before);
+  assert.deepEqual(terrainOf(guest), terrainOf(host));
+  assert.equal(guest.g.online.round, host.g.online.round);
+  assert.equal(guest.g.state, 'AIMING');
+  assert.equal(guest.g.currentPlayer, 0);
+});
+
+test('an armed Settings restart stands down on its own', () => {
+  const h = load();
+  const btn = h.g.el.roundRestartBtn;
+  const before = terrainOf(h);
+  btn.dispatch('click');
+  h.advance(h.g.RESTART_ARM_MS + 50);
+  assert.ok(!btn.classList.contains('armed'));
+  btn.dispatch('click');
+  assert.deepEqual(terrainOf(h), before, 'that tap armed it again, nothing more');
+});
+
+test('offline, the Settings restart just restarts', () => {
+  const h = load();
+  const before = terrainOf(h);
+  h.g.el.roundRestartBtn.dispatch('click');
+  h.g.el.roundRestartBtn.dispatch('click');
+  assert.notDeepEqual(terrainOf(h), before);
+  assert.equal(h.g.online.status, 'offline');
+});
+
+test('the Settings restart is off while a match is still being joined', () => {
+  const h = load();
+  const s = connect(h);
+  s.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+  assert.equal(h.g.online.status, 'waiting');
+  assert.equal(h.g.el.roundRestartBtn.disabled, true);
 });
