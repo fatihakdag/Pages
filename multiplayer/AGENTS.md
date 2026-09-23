@@ -157,6 +157,24 @@ it touches lives in `worldTransform()` and `eventToWorld()`.
 - A deliberate pan sets `camPanned` and owns the camera until the turn changes,
   so following never yanks the view away from someone looking on purpose.
 
+### Tank size
+
+The root build draws a tank at a fixed 26px on any screen; here it would come
+out ~10px on a portrait phone. So tanks, shells and the aim preview are drawn
+at no less than `SPRITE_MIN_PX` CSS px per world unit (`spriteBoost()`, up to
+`SPRITE_MAX_BOOST`), which fades to 1 on a desktop or once zoomed in. TANK SIZE
+in Settings (`#size-select`, stored as `barrage.tankSize`) picks `large` — this,
+the default — or `actual`, which turns it off. Like the camera it is drawing
+only: `TANK_W`/`TANK_H` stay the collision box and nothing travels in a match.
+
+A tank grown about its ground point holds its barrel higher and longer than the
+real one, and shots still leave the real muzzle. `muzzleShift()` moves the start
+of a shot sideways onto the drawn barrel's line and eases it off over
+`MUZZLE_BLEND` units — sideways only, since any correction along the path bends
+it visibly — and `barrelCover()` keeps shells, trails and the preview hidden
+until they clear the drawn muzzle. The scaling is applied around `drawTank()`
+in `render()`, not inside it, because `tools/icons.mjs` lifts `drawTank` out.
+
 ## The relay
 
 `server/relay.mjs` is deliberately dumb: it knows about rooms and sockets and
