@@ -506,8 +506,10 @@
     .nudge { width: 34px; height: 34px; font-size: 13px; }
   }
   /* Was scoped to the weapon select by id, so the other three fell back to the
-     browser's default white control. */
-  #controls select {
+     browser's default white control. And again when setup moved into the
+     Settings dialog, which is outside #controls: those dropdowns went white
+     until the rules named the dialog too. */
+  #controls select, #settings-grid select {
     background: #12111a;
     color: var(--text-main);
     border: 1px solid var(--panel-line);
@@ -520,15 +522,15 @@
     /* also darkens the native dropdown list itself, not just the closed control */
     color-scheme: dark;
   }
-  #controls select:hover { border-color: #55526a; }
-  #controls select:focus-visible {
+  #controls select:hover, #settings-grid select:hover { border-color: #55526a; }
+  #controls select:focus-visible, #settings-grid select:focus-visible {
     outline: 2px solid rgba(236,231,225,0.45);
     outline-offset: 1px;
   }
-  #controls select:disabled { opacity: 0.45; cursor: not-allowed; }
+  #controls select:disabled, #settings-grid select:disabled { opacity: 0.45; cursor: not-allowed; }
   /* Firefox needs the options coloured explicitly */
-  #controls select option { background: #12111a; color: var(--text-main); }
-  #controls select option:disabled { color: var(--text-dim); }
+  #controls select option, #settings-grid select option { background: #12111a; color: var(--text-main); }
+  #controls select option:disabled, #settings-grid select option:disabled { color: var(--text-dim); }
   button {
     font-family: inherit;
     cursor: pointer;
