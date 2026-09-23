@@ -378,6 +378,22 @@ Other things worth knowing:
 - `socketFactory` is overridable through the seam (`setSocketFactory`), which
   is how `tests/online.test.mjs` drives the whole protocol without a socket.
 - The relay URL is the page's own origin, overridable with `?relay=ws://…`.
+- **Restarting is the host's call.** Settings has RESTART ROUND (two taps: the
+  first arms it for `RESTART_ARM_MS`). Offline it is `resetGame()`; in a match
+  it is enabled only for the host, who deals the new board with
+  `netRestartMatch()`, and guests see why it is greyed out. A guest's Play Again
+  sends `rematch`, which queues in the inbox behind any shot still landing and
+  is honoured only once the round is over. "Host" is whoever the relay says —
+  the room's creator until they leave, then the next to have joined.
+- **A restart holds empty seats.** It does not wait for a missing player: the
+  `start` it deals carries `vacant` and `ai`, so every screen agrees the chair
+  is empty and who the CPU is covering, and the player's token still resumes
+  them — into the new board.
+- **Every message carries `round`**, bumped by each deal (`netStartMatch`,
+  `netRestartMatch`) and adopted from `start`. `netReceive()` drops board
+  messages from any other round. A restart puts `turnSeq` back to zero, so
+  without this a shot or `sync` sent just before it looked newer than the fresh
+  board and landed on top of it.
 
 ## Known gaps
 

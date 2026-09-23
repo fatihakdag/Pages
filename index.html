@@ -380,6 +380,29 @@
     color-scheme: dark;
   }
   #controls select:hover { border-color: #55526a; }
+  /* Restart the round. Sized like the dropdowns it sits beside, and two taps:
+     the first arms it and swaps the label for the question, so a stray tap
+     never throws a round away. */
+  .round-restart {
+    background: #12111a;
+    color: var(--text-main);
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    padding: 6px 8px;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    touch-action: manipulation;
+  }
+  .round-restart:hover { border-color: #55526a; }
+  .round-restart .rr-sure { display: none; }
+  .round-restart.armed { border-color: var(--accent-p1); color: var(--accent-p1); }
+  .round-restart.armed .rr-idle { display: none; }
+  .round-restart.armed .rr-sure { display: inline; }
+  #round-restart-rail { display: none; }
   #controls select:focus-visible {
     outline: 2px solid rgba(236,231,225,0.45);
     outline-offset: 1px;
@@ -540,12 +563,13 @@
     .ctrl-label { font-size: 9px; }
     #weapon-group { grid-column: 1 / -1; }
     .wpn-btn { flex: 1 1 0; width: auto; }
-    #controls select {
+    #controls select, #round-restart {
       width: 100%;
       font-size: 11px;
       padding: 5px 6px;
     }
     #fire-btn {
+      order: 1;   /* after the setup, at the bottom, as before */
       grid-column: 1 / -1;
       width: 100%;
       padding: 14px;
@@ -608,6 +632,14 @@
     #info-row { justify-content: flex-start; }
     #wind-hud { display: none; }
     .hud-pill { justify-content: flex-start; }
+    #restart-group { display: none; }
+    #round-restart-rail {
+      display: flex;
+      width: 100%;
+      margin-top: 8px;
+      padding: 8px 6px;
+      font-size: 11px;
+    }
 
     #game-wrap { flex: 1 1 auto; height: 100%; min-height: 0; }
 
@@ -642,6 +674,7 @@
        second column rather than scrolling. */
     #controls { flex-wrap: nowrap; align-content: normal; }
     #fire-btn {
+      order: 1;   /* last in the rail, so margin-top: auto can pin it low */
       width: 100%;
       grid-column: auto;
       margin-top: auto;   /* sits at the bottom while there is room */
@@ -724,6 +757,9 @@
         <label id="sound-ctl"><span data-i18n="sfx">SFX</span><input type="range" id="sfx-volume" min="0" max="100" step="1" value="67" aria-label="Sound effects volume"></label>
         <label id="lang-toggle" title="Türkçe"><input type="checkbox" id="lang-tr"><span>TR</span></label>
       </div>
+      <!-- The landscape rails' copy of the restart button: the right rail is
+           full, the left one has room. Shown only there. -->
+      <button type="button" class="round-restart" id="round-restart-rail" aria-label="Restart round"><span aria-hidden="true">↻</span><span class="rr-idle" data-i18n="restartIdle">RESTART</span><span class="rr-sure" data-i18n="restartSure">TAP AGAIN</span></button>
     </div>
   </div>
 
@@ -766,6 +802,10 @@
       </select>
       <div class="ctrl-label wpn-readout"><span class="val" id="weapon-name"></span><span id="ammo-readout"></span></div>
     </div>
+    <!-- Straight after the weapon: on a wide screen the aim, the weapon and
+         the trigger stay on one line, and it is the table setup that wraps.
+         The phone layouts move it back to the end with order. -->
+    <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div class="ctrl-group">
       <div class="ctrl-label" data-i18n="tanks">TANKS</div>
       <select id="count-select">
@@ -792,7 +832,10 @@
         <option value="brutal">Brutal</option>
       </select>
     </div>
-    <button id="fire-btn" data-i18n="fire">FIRE</button>
+    <div class="ctrl-group" id="restart-group">
+      <div class="ctrl-label" data-i18n="round">ROUND</div>
+      <button type="button" class="round-restart" id="round-restart" aria-label="Restart round"><span aria-hidden="true">↻</span><span class="rr-idle" data-i18n="restartIdle">RESTART</span><span class="rr-sure" data-i18n="restartSure">TAP AGAIN</span></button>
+    </div>
     <div id="keys-hint">
       <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; 1–6 weapon &nbsp;|&nbsp; SPACE fire</span>
     </div>
@@ -839,7 +882,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v53';
+  const BUILD = 'v54';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -898,6 +941,9 @@
   const overlayTitle = document.getElementById('overlay-title');
   const overlaySub = document.getElementById('overlay-sub');
   const restartBtn = document.getElementById('restart-btn');
+  const roundRestartBtn = document.getElementById('round-restart');
+  const roundRestartRail = document.getElementById('round-restart-rail');
+  const roundRestartBtns = [roundRestartBtn, roundRestartRail];
   const difficultySelect = document.getElementById('difficulty-select');
   const modeSelect = document.getElementById('mode-select');
   const countSelect = document.getElementById('count-select');
@@ -922,6 +968,8 @@
       thinking: '{name} THINKING…', aimFire: '{name} — AIM & FIRE',
       wins: '{name} wins!', everybodyLoses: 'Everybody loses!',
       playAgainHint: 'Tap Play Again for a new terrain and rematch.',
+      round: 'ROUND', restartRound: 'Restart round', restartIdle: 'RESTART', restartSure: 'TAP AGAIN',
+      restartConfirm: 'Tap again to restart the round',
       w_standard: 'Standard Shell', w_big: 'Big Bomb', w_cluster: 'Cluster Bomb',
       w_roller: 'Roller Mine', w_mirv: 'MIRV', w_missile: 'Guided Missile',
       unlimited: 'unlimited', nLeft: '{n} left',
@@ -946,6 +994,8 @@
       thinking: '{name} DÜŞÜNÜYOR…', aimFire: '{name} — NİŞAN AL & ATEŞ',
       wins: '{name} kazandı!', everybodyLoses: 'Herkes kaybetti!',
       playAgainHint: 'Yeni arazi ve rövanş için Tekrar Oyna\'ya dokun.',
+      round: 'TUR', restartRound: 'Turu yeniden başlat', restartIdle: 'YENİDEN BAŞLAT', restartSure: 'TEKRAR DOKUN',
+      restartConfirm: 'Turu yeniden başlatmak için tekrar dokun',
       w_standard: 'Standart Mermi', w_big: 'Büyük Bomba', w_cluster: 'Misket Bombası',
       w_roller: 'Yuvarlanan Mayın', w_mirv: 'MIRV', w_missile: 'Güdümlü Füze',
       unlimited: 'sınırsız', nLeft: '{n} kaldı',
@@ -1025,6 +1075,7 @@
                    'power-dec': 'powerDown', 'power-inc': 'powerUp' };
     for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
     soundCtl.title = txt('sfxTitle');
+    labelRoundRestart();
     sfxSlider.title = txt('sfxVolume');
     sfxSlider.setAttribute('aria-label', txt('sfxVolume'));
     lastTimerText = ''; // force the clock to redraw in the new language
@@ -2672,6 +2723,39 @@
   fireBtn.addEventListener('click', fire);
   restartBtn.addEventListener('click', resetGame);
 
+  // The HUD's restart throws away a round in progress, so it takes two taps:
+  // the first arms it and asks, the second — within RESTART_ARM_MS — restarts.
+  // Left armed, it quietly stands down again.
+  const RESTART_ARM_MS = 3000;
+  let restartArmTimer = null;
+  // There are two copies of the button - the controls' and, on landscape
+  // phones, the left rail's - so the armed state is kept on both.
+  function labelRoundRestart() {
+    const key = restartArmTimer ? 'restartConfirm' : 'restartRound';
+    for (const b of roundRestartBtns) {
+      b.setAttribute('aria-label', txt(key));
+      b.title = txt(key);
+      b.classList.toggle('armed', !!restartArmTimer);
+    }
+  }
+  function disarmRoundRestart() {
+    clearTimeout(restartArmTimer);
+    restartArmTimer = null;
+    labelRoundRestart();
+  }
+  function onRoundRestartClicked(e) {
+    // Focus left on it would let the space bar - which fires - press it again.
+    if (e && e.currentTarget) e.currentTarget.blur();
+    if (!restartArmTimer) {
+      restartArmTimer = setTimeout(disarmRoundRestart, RESTART_ARM_MS);
+      labelRoundRestart();
+      return;
+    }
+    disarmRoundRestart();
+    resetGame();
+  }
+  for (const b of roundRestartBtns) b.addEventListener('click', onRoundRestartClicked);
+
   function fire() {
     if (state !== 'AIMING') return;
     const shooter = tanks[currentPlayer];
@@ -4154,7 +4238,7 @@
     freshAmmo, weaponEnabled, lockOnTank, pickWeapon, weaponBtns, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
     fire, applyDamageAndCrater, hullDistance, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
     armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
-    initSetup, endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
+    initSetup, endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs, RESTART_ARM_MS,
     setWind, windStrength, windForce, isAi, txt, upper, playerName,
     syncControlsFromTank, updateHUD, nudge, aimFromPull, pullReach, turretPos, canvas, get aimDrag() { return aimDrag; },
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
@@ -4162,7 +4246,7 @@
     setSfxLevel, sliderToLevel, levelToSlider, RELOADS, gunPanner, zonePanner, panOf, audioCtx, secondsToImpact, FLIGHT, flightOf,
     el: {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
-      powerSlider, angleVal, powerVal, fireBtn, overlay, turnBanner, ammoReadout,
+      powerSlider, angleVal, powerVal, fireBtn, restartBtn, roundRestartBtn, roundRestartRail, overlay, turnBanner, ammoReadout,
       nudgeBtns, cards, hpText, langCheckbox, soundCtl, sfxSlider
     },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },

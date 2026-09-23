@@ -228,7 +228,7 @@ test('a stranger with the code is refused, not given somebody else’s tank', ()
   arrive(s, 9, 'nobody-we-know');
 
   assert.equal(s.payloads('start').length, dealtBefore, 'nobody is seated');
-  assert.deepEqual(s.payloads('denied'), [{ k: 'denied', to: 9, reason: 'full' }],
+  assert.deepEqual(s.payloads('denied'), [{ k: 'denied', round: 1, to: 9, reason: 'full' }],
     'they are told the room is full');
   assert.deepEqual(Array.from(h.g.online.vacancies), [2, 1],
     'and both chairs stay with their owners');
