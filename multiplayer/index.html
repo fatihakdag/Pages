@@ -1432,6 +1432,15 @@
             <option value="Aurora Tundra">Aurora Tundra</option>
           </select>
         </div>
+        <div class="ctrl-group" id="size-group">
+          <div class="ctrl-label" data-i18n="tankSize">TANK SIZE</div>
+          <!-- Large draws tanks and shells bigger where the world is drawn
+               small (a phone); Actual keeps them to scale. See spriteBoost. -->
+          <select id="size-select">
+            <option value="large" selected>Large</option>
+            <option value="actual">Actual</option>
+          </select>
+        </div>
         <div class="ctrl-group" id="online-group">
           <div class="ctrl-label"><span data-i18n="online">ONLINE</span></div>
           <div class="online-row">
@@ -1594,6 +1603,8 @@ if ('serviceWorker' in navigator) {
   const modeSelect = document.getElementById('mode-select');
   const countSelect = document.getElementById('count-select');
   const difficultyGroup = document.getElementById('difficulty-group');
+  const sizeSelect = document.getElementById('size-select');
+  const sizeGroup = document.getElementById('size-group');
   const zoomInBtn = document.getElementById('zoom-in');
   const zoomOutBtn = document.getElementById('zoom-out');
   const zoomFitBtn = document.getElementById('zoom-fit');
@@ -1653,6 +1664,7 @@ if ('serviceWorker' in navigator) {
       netNoRoom: 'no such room', netFull: 'room is full',
       netVersion: 'update the page', netLost: 'connection lost',
       theme: 'THEME', randomTheme: 'Random',
+      tankSize: 'TANK SIZE', sizeLarge: 'Large', sizeActual: 'Actual',
     },
     tr: {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
@@ -1695,6 +1707,7 @@ if ('serviceWorker' in navigator) {
       netNoRoom: 'oda bulunamadı', netFull: 'oda dolu',
       netVersion: 'sayfayı yenileyin', netLost: 'bağlantı koptu',
       theme: 'TEMA', randomTheme: 'Rastgele',
+      tankSize: 'TANK BOYUTU', sizeLarge: 'Büyük', sizeActual: 'Gerçek',
       'Dusk Ridge': 'Alacakaranlık Sırtı', 'Salt Flats': 'Tuz Düzlükleri',
       'Ash Peaks': 'Kül Tepeleri', 'Glacier': 'Buzul', 'Verdant Hills': 'Yeşil Tepeler',
       'Night Crater': 'Gece Krateri', 'Rust Canyon': 'Pas Kanyonu',
@@ -1791,6 +1804,7 @@ if ('serviceWorker' in navigator) {
     relabel(modeSelect, ['vsCpu', 'allHuman', 'onlineMode']);
     relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
     relabel(themeSelect, ['randomTheme', ...THEMES.map(th => th.name)]);
+    relabel(sizeSelect, ['sizeLarge', 'sizeActual']);
     const aria = { 'zoom-in': 'zoomIn', 'zoom-out': 'zoomOut', 'zoom-fit': 'zoomFit',
                    'angle-left': 'aimLeft', 'angle-right': 'aimRight',
                    'power-dec': 'powerDown', 'power-inc': 'powerUp',
@@ -1950,6 +1964,11 @@ if ('serviceWorker' in navigator) {
     worldTransform();
 
     hudWindVisible = windHud.offsetParent !== null;
+    // TANK SIZE only means anything where the world is drawn under the sprite
+    // floor. Zoom only ever draws it larger, so fitted is the smallest it gets:
+    // at or above the floor here, Large and Actual look the same, and the
+    // choice is hidden rather than offered to do nothing.
+    sizeGroup.style.display = viewScale < SPRITE_MIN_PX ? '' : 'none';
   }
 
   // ---------- Camera ----------
@@ -2038,8 +2057,24 @@ if ('serviceWorker' in navigator) {
   // px per unit, by up to SPRITE_MAX_BOOST. Drawing only: TANK_W/TANK_H stay
   // the collision box and every screen holds the same world. Zooming in lifts
   // the real scale past the floor, and the boost falls away to 1.
+  //
+  // It is a preference (TANK SIZE in Settings, stored as barrage.tankSize):
+  // 'large' is this, 'actual' keeps everything to the world's scale. Nothing
+  // about it travels in a match — it only changes how this screen draws.
   const SPRITE_MIN_PX = 0.8, SPRITE_MAX_BOOST = 2.2;
+  let sizePref = 'large';
+  sizeSelect.addEventListener('change', () => {
+    sizePref = sizeSelect.value === 'actual' ? 'actual' : 'large';
+    try { localStorage.setItem('barrage.tankSize', sizePref); } catch (e) { /* private mode */ }
+  });
+  function initSizePref() {
+    let stored = null;
+    try { stored = localStorage.getItem('barrage.tankSize'); } catch (e) { /* private mode */ }
+    sizePref = stored === 'actual' ? 'actual' : 'large';
+    sizeSelect.value = sizePref;
+  }
   function spriteBoost() {
+    if (sizePref === 'actual') return 1;
     const px = viewScale * camZoom;
     return px > 0 ? Math.min(SPRITE_MAX_BOOST, Math.max(1, SPRITE_MIN_PX / px)) : 1;
   }
@@ -6454,6 +6489,7 @@ if ('serviceWorker' in navigator) {
   initLanguage();
   initSound();
   initTheme();
+  initSizePref();
   initSetup();
   refreshOpponentUi();
   resetGame();
@@ -6506,9 +6542,11 @@ if ('serviceWorker' in navigator) {
       weaponSelect, modeSelect, countSelect, difficultySelect, angleSlider,
       powerSlider, angleVal, powerVal, fireBtn, restartBtn, overlay, turnBanner,
       settingsModal, settingsBtn, windHud, roundRestartBtn, restartNote,
-      nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider, themeSelect
+      nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider, themeSelect, sizeSelect, sizeGroup
     },
     initTheme, nextTheme, generateTerrainShape,
+    spriteBoost, initSizePref, SPRITE_MIN_PX, SPRITE_MAX_BOOST, render,
+    get sizePref() { return sizePref; },
     get theme() { return theme; },
     get themePref() { return themePref; },
     get tanks() { return tanks; }, set tanks(v) { tanks = v; },
