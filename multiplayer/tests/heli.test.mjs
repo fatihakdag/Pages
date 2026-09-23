@@ -276,3 +276,49 @@ test('a wreck falling into a cliff face goes off on the face, not on top', () =>
   assert.ok(e.x <= 500, `burst at x ${e.x.toFixed(1)}, the face is at 500`);
   assert.ok(e.y > 280 && e.y < 320, `burst at y ${e.y.toFixed(1)}, not on the cliff top at 200`);
 });
+
+// On the moon it is a spaceship: a different body and a different sustained
+// sound, and nothing else. The simulation is not allowed to notice.
+test('an airless theme flies a spaceship, and only the drawing and the sound change', () => {
+  const h = loadFlat();
+  const { g } = h;
+
+  assert.equal(g.isShipTheme(), false, 'the default theme still flies a helicopter');
+  const heliBox = g.heliSize();
+
+  g.el.themeSelect.value = 'Lunar Base';
+  g.el.themeSelect.dispatch('change');
+  assert.equal(g.isShipTheme(), true);
+  assert.equal(g.heliSize(), heliBox, 'same size, so the hit box is unchanged');
+
+  g.spawnHeli();
+  g.heli.x = 500;
+  g.heli.y = 200;
+  assert.equal(g.heliHitBy(500, 200), true, 'still hit the same way');
+
+  // Both the flying ship and the wreck have to draw without throwing.
+  g.drawHeli();
+  g.heli.falling = true;
+  g.heli.spin = 0.4;
+  g.drawHeli();
+});
+
+test('the spaceship is a voice of its own, and the two never sound at once', () => {
+  const h = loadFlat();
+  const { g } = h;
+
+  // No Web Audio in the stub DOM, so what is checked here is that the frame
+  // loop drives both voices every frame without throwing and leaves nothing
+  // sustained behind — the leak the rotor was always one call site away from.
+  g.el.themeSelect.value = 'Lunar Base';
+  g.el.themeSelect.dispatch('change');
+  g.spawnHeli();
+  g.updateSoundLoops();
+  assert.equal(g.Sound.loops(), 0);
+
+  g.el.themeSelect.value = 'Sandstorm';
+  g.el.themeSelect.dispatch('change');
+  g.updateSoundLoops();
+  assert.equal(g.Sound.loops(), 0);
+  assert.deepEqual(Array.from(g.Sound.loopNames()), []);
+});

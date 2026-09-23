@@ -28,6 +28,8 @@ test('every voice is a no-op rather than a throw when audio is unavailable', () 
   g.Sound.destroyed(0.9);
   g.Sound.tick();
   g.Sound.rotor(true, false, 0.2);
+  g.Sound.thruster(true, false, 0.2);
+  g.Sound.thruster(true, true, 0.2);
   g.Sound.motor(true, 0.4);
   g.Sound.rumble(true, 0.5, 0.6);
   g.Sound.whistle(true, { pitch01: 0.8, speed01: 0.5, impactIn: 0.4, x01: 0.8 });
