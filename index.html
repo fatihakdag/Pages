@@ -882,7 +882,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v54';
+  const BUILD = 'v55';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2930,6 +2930,22 @@
     return x;
   }
 
+  // First ground along a step, sampled the way firstContact samples it. A trace
+  // step is 1/60s, which at speed is tens of pixels of ground, so testing only
+  // where the step lands walks straight over any ridge narrower than that. The
+  // shell itself is checked every pixel, so an endpoint test had the preview
+  // clearing hills the shot then hit, and promising a landing well past them.
+  function groundBetween(x0, y0, x1, y1) {
+    const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+    for (let i = 1; i <= n; i++) {
+      const x = x0 + (x1 - x0) * i / n;
+      const y = y0 + (y1 - y0) * i / n;
+      if (x < -20 || x > W + 20 || y > H + 60) return null; // off the map, not a hit
+      if (y >= groundHeightAt(x)) return [x, y];
+    }
+    return null;
+  }
+
   // Brutal is very hard to out-shoot, so at that level both sides get to see
   // the arc before it is fired. This traces with the same integrator step()
   // uses — sub-stepped at a 60fps dt rather than predictLandingX's coarser
@@ -2942,6 +2958,7 @@
     const pts = [[x, y]];
     const dt = 1 / 60, sub = 2;
     for (let i = 0; i < 900; i++) {
+      const fromX = x, fromY = y;
       for (let s = 0; s < sub; s++) {
         const sdt = dt / sub;
         vx += windAccel * physScale * sdt;
@@ -2949,9 +2966,10 @@
         x += vx * sdt;
         y += vy * sdt;
       }
+      const hit = groundBetween(fromX, fromY, x, y);
+      if (hit) { pts.push(hit); break; }
       pts.push([x, y]);
       if (x < -20 || x > W + 20 || y > H + 60) break;
-      if (y >= groundHeightAt(x)) break;
     }
     return pts;
   }
