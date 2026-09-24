@@ -119,6 +119,15 @@ the jet it fell from. A shot-down jet keeps most of its forward speed
 through `heliCrash()`, so it crushes a tank it comes down on. One jet at a time;
 the CPU never calls one in.
 
+It looks and sounds like an F-22. `drawJet()` draws the side profile in units of
+the jet's length (chined nose, gold-tinted canopy, caret intake, twin canted
+fins, flat nozzle with an afterburner), so it stays inside `jetHitBy()`'s box.
+`Sound.jet` in `sound.js` layers a brown-noise roar, a tearing rush, an
+afterburner crackle (slow noise through a dead-zone waveshaper) and a turbine
+whine. `updateSoundLoops()` passes it `approach` (heading into the middle of the
+view or away from it), which bends the pitch like a pass, and `near`, which
+swells it overhead to just above a shell's whistle.
+
 The jet and the helicopter share the sky. A bomb can hit the helicopter (it
 passes `craft: 'heli'`, so only its own jet is ignored), and the two aircraft
 can fly into each other. That needs no message either: both routes are fixed,

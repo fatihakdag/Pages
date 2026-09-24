@@ -1549,7 +1549,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v67';
+  const BUILD = 'v68';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2586,11 +2586,14 @@ if ('serviceWorker' in navigator) {
     missile:
       '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
       '<g transform="rotate(45 12 12)"><path d="M10 16V7.5Q10 4 12 1.5Q14 4 14 7.5V16Z"/><path d="M10 11.5L6.5 16.5H10ZM14 11.5L17.5 16.5H14Z"/><path d="M10.8 17L12 22.5L13.2 17Z" opacity="0.65"/></g></svg>',
-    // A swept-wing fighter seen from the side, with a bomb falling away under it.
+    // An F-22 from the side — chined nose, canopy, twin fins, tailplane — with a
+    // bomb falling away under it.
     jet:
       '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-      '<path d="M1.5 9.5L4 5H5.5L7.5 8.5H17Q22 8.5 23 10Q22 11.5 17 11.5H4Z"/><path d="M9 10L13.5 10L10 14H8Z" opacity="0.75"/>' +
-      '<ellipse cx="14" cy="19" rx="2.6" ry="1.7" transform="rotate(20 14 19)"/></svg>'
+      '<path d="M23.5 12.4Q21 11.3 18.5 11L16.5 10.3Q14.5 9.4 12.5 10L5 10.3L3.2 10.8V13.2L5 13.6L13 13.9L16 13.3Q20 12.9 23.5 12.4Z"/>' +
+      '<path d="M6.2 10.4L4 5.6H2.4L2.8 10.6Z"/><path d="M6.4 13.2L2.8 15.1H1.2L2.8 12.9Z"/>' +
+      '<path d="M14 13.6L9.5 16.3H8L7.6 13.8Z" opacity="0.7"/>' +
+      '<ellipse cx="14" cy="19.6" rx="2.6" ry="1.6" transform="rotate(20 14 19.6)"/></svg>'
   };
 
   const WEAPONS = {
@@ -3067,7 +3070,13 @@ if ('serviceWorker' in navigator) {
     const ship = isShipTheme();
     Sound.rotor(!!heli && !ship, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
     Sound.thruster(!!heli && ship, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
-    Sound.jet(!!jet, !!(jet && jet.falling), jet ? screenX01(jet.x) : 0.5);
+    // The jet's pass: whether it is closing on the middle of the view or
+    // leaving it bends its pitch, and how near overhead it is swells it.
+    const jetX = jet ? screenX01(jet.x) : 0.5;
+    Sound.jet(!!jet, !!(jet && jet.falling), jetX, {
+      approach: jet ? Math.tanh((0.5 - jetX) * jet.dir * 3) : 0,
+      near: jet ? Math.max(0, 1 - Math.abs(jetX - 0.5) * 1.4) : 0
+    });
     let burning = false, burnX = 0.5, rolling = 0, rollX = 0.5;
     let flying = false, fall = 0, flyX = 0.5, impactIn = Infinity, speed = 0, flight = null;
     for (const p of projectiles) {
@@ -4905,77 +4914,122 @@ if ('serviceWorker' in navigator) {
     return at ? Object.assign(out, at) : null;
   }
 
-  // A side-on fighter, nose to the right before the flip: swept wing, tail fin,
-  // canopy and an afterburner that flickers on the shared animation clock.
+  // An F-22 in side view, nose to the right before the flip: the long chined
+  // nose, the gold-tinted bubble canopy, the caret intake under it, the twin
+  // canted fins and big tailplanes (the far one of each peeking out behind the
+  // near one), the far wing seen from a little below, and the flat vectoring
+  // nozzle with an afterburner and its shock diamonds. Drawn in units of the
+  // jet's length, so the whole airframe sits inside jetHitBy's box.
   function drawJet() {
     if (!jet) return;
-    const w = jetSize(), h = w * 0.22;
+    const w = jetSize();
     const at = jetDrawPos();
     const dead = jet.falling;
+    const skin = dead ? '#6b4a34' : '#a4adb6';
+    const shade = dead ? '#553a29' : '#838e98';
+    const deep = dead ? '#3f2b1f' : '#646f79';
+    const poly = (pts) => {
+      ctx.beginPath();
+      ctx.moveTo(pts[0], pts[1]);
+      for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+      ctx.closePath();
+      ctx.fill();
+    };
     ctx.save();
     ctx.translate(at.x, at.y);
-    ctx.scale(at.dir, 1);
+    ctx.scale(at.dir * w, w);
     if (dead) ctx.rotate(Math.min(1.1, jet.spin * 0.35));
 
+    // Afterburner: a flickering cone with shock diamonds strung along it.
     if (!dead) {
-      const flick = 0.75 + 0.25 * Math.sin(rotorAngle * 3.1);
-      const len = w * 0.32 * flick;
-      const flame = ctx.createLinearGradient(-w * 0.48, 0, -w * 0.48 - len, 0);
-      flame.addColorStop(0, 'rgba(255,236,180,0.95)');
-      flame.addColorStop(0.4, 'rgba(255,150,60,0.6)');
+      const flick = 0.8 + 0.2 * Math.sin(rotorAngle * 3.1);
+      const len = 0.34 * flick;
+      const flame = ctx.createLinearGradient(-0.5, 0, -0.5 - len, 0);
+      flame.addColorStop(0, 'rgba(255,240,200,0.95)');
+      flame.addColorStop(0.35, 'rgba(255,170,70,0.75)');
       flame.addColorStop(1, 'rgba(255,90,40,0)');
       ctx.fillStyle = flame;
       ctx.beginPath();
-      ctx.moveTo(-w * 0.48, -h * 0.28);
-      ctx.lineTo(-w * 0.48 - len, 0);
-      ctx.lineTo(-w * 0.48, h * 0.28);
+      ctx.moveTo(-0.5, -0.032);
+      ctx.quadraticCurveTo(-0.5 - len * 0.6, -0.02, -0.5 - len, 0);
+      ctx.quadraticCurveTo(-0.5 - len * 0.6, 0.02, -0.5, 0.032);
       ctx.closePath();
       ctx.fill();
+      ctx.fillStyle = 'rgba(255,250,225,0.85)';
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.ellipse(-0.53 - i * 0.07 * flick, 0, 0.018 - i * 0.004, 0.012 - i * 0.003, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
-    // fuselage
-    ctx.fillStyle = dead ? '#6b4a34' : '#8e9aa8';
+    // The far side, darker, behind the fuselage: tailplane, fin and wing.
+    ctx.fillStyle = deep;
+    poly([-0.30, 0.035, -0.47, 0.075, -0.57, 0.075, -0.49, 0.03]);
+    poly([-0.18, -0.062, -0.30, -0.245, -0.37, -0.245, -0.40, -0.062]);
+    poly([0.10, 0.035, -0.19, 0.13, -0.28, 0.13, -0.33, 0.045]);
+
+    // Fuselage: the chined nose, the spine running back to the fins, the belly.
+    ctx.fillStyle = skin;
     ctx.beginPath();
-    ctx.moveTo(w * 0.52, 0);
-    ctx.quadraticCurveTo(w * 0.30, -h * 0.62, w * 0.02, -h * 0.55);
-    ctx.lineTo(-w * 0.48, -h * 0.40);
-    ctx.lineTo(-w * 0.48, h * 0.40);
-    ctx.lineTo(w * 0.02, h * 0.50);
-    ctx.quadraticCurveTo(w * 0.30, h * 0.50, w * 0.52, 0);
+    ctx.moveTo(0.52, 0.015);
+    ctx.quadraticCurveTo(0.42, -0.025, 0.33, -0.04);
+    ctx.lineTo(0.08, -0.06);
+    ctx.quadraticCurveTo(-0.05, -0.075, -0.20, -0.07);
+    ctx.lineTo(-0.44, -0.055);
+    ctx.lineTo(-0.48, -0.04);
+    ctx.lineTo(-0.48, 0.04);
+    ctx.lineTo(-0.40, 0.06);
+    ctx.lineTo(-0.05, 0.075);
+    ctx.lineTo(0.10, 0.07);
+    ctx.lineTo(0.30, 0.04);
+    ctx.quadraticCurveTo(0.42, 0.03, 0.52, 0.015);
     ctx.closePath();
     ctx.fill();
 
-    // tail fin
-    ctx.fillStyle = dead ? '#523726' : '#6d7988';
+    // The underside below the chine line, in the second grey of the scheme.
+    ctx.fillStyle = shade;
+    poly([0.44, 0.022, 0.30, 0.04, 0.10, 0.07, -0.05, 0.075, -0.40, 0.06, -0.42, 0.035, 0.28, 0.018]);
+
+    // Caret intake: its lip swept back from top to bottom.
+    ctx.fillStyle = dead ? '#2a1d15' : '#2f363d';
+    poly([0.17, -0.012, 0.07, -0.012, 0.03, 0.066, 0.12, 0.066]);
+
+    // Flat two-dimensional nozzle.
+    ctx.fillStyle = dead ? '#3a281c' : '#4a525a';
+    poly([-0.44, -0.045, -0.505, -0.038, -0.505, 0.038, -0.44, 0.045]);
+
+    // The near fin, canted, and the near tailplane.
+    ctx.fillStyle = shade;
+    poly([-0.24, -0.062, -0.37, -0.25, -0.44, -0.25, -0.465, -0.055]);
+    poly([-0.33, 0.03, -0.49, 0.08, -0.58, 0.08, -0.50, 0.025]);
+
+    // Bubble canopy, with the gold tint of its coating and a glint.
+    const glass = ctx.createLinearGradient(0, -0.115, 0, -0.04);
+    glass.addColorStop(0, dead ? '#4a3a2a' : '#f0d584');
+    glass.addColorStop(1, dead ? '#2a1d15' : '#8a6b2c');
+    ctx.fillStyle = glass;
     ctx.beginPath();
-    ctx.moveTo(-w * 0.26, -h * 0.40);
-    ctx.lineTo(-w * 0.40, -h * 2.0);
-    ctx.lineTo(-w * 0.50, -h * 2.0);
-    ctx.lineTo(-w * 0.48, -h * 0.40);
+    ctx.moveTo(0.36, -0.038);
+    ctx.quadraticCurveTo(0.28, -0.112, 0.18, -0.104);
+    ctx.quadraticCurveTo(0.07, -0.094, -0.01, -0.068);   // faired back into the spine
     ctx.closePath();
     ctx.fill();
+    if (!dead) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 0.012;
+      ctx.beginPath();
+      ctx.moveTo(0.28, -0.085);
+      ctx.quadraticCurveTo(0.22, -0.1, 0.16, -0.092);
+      ctx.stroke();
+    }
 
-    // swept wing, seen edge-on below the fuselage line
-    ctx.beginPath();
-    ctx.moveTo(w * 0.14, h * 0.10);
-    ctx.lineTo(-w * 0.22, h * 0.95);
-    ctx.lineTo(-w * 0.32, h * 0.95);
-    ctx.lineTo(-w * 0.14, h * 0.10);
-    ctx.closePath();
-    ctx.fill();
-
-    // canopy
-    ctx.fillStyle = dead ? 'rgba(60,40,30,0.8)' : 'rgba(150,215,255,0.9)';
-    ctx.beginPath();
-    ctx.ellipse(w * 0.22, -h * 0.45, w * 0.12, h * 0.34, -0.08, 0, Math.PI * 2);
-    ctx.fill();
-
-    // the stick still aboard, slung under the belly
+    // The stick still aboard, hanging under the bay.
     if (!dead && !jet.bombed) {
       ctx.fillStyle = WEAPONS.jet.color;
       for (let i = 0; i < JET.bombs; i++) {
         ctx.beginPath();
-        ctx.ellipse(w * (0.08 - i * 0.13), h * 0.72, w * 0.055, h * 0.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(0.0 - i * 0.11, 0.095, 0.04, 0.017, 0, 0, Math.PI * 2);
         ctx.fill();
       }
     }
