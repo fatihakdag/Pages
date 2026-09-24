@@ -1222,6 +1222,11 @@
     #info-row { margin-top: 0; flex-direction: row; flex-wrap: nowrap; align-self: stretch; }
     #info-row > * { flex: 1 1 0; }
     #turn-banner { font-size: 12px; }
+    /* The panel is a fixed 256px, which held six 34px buttons in a row but not
+       seven: the whole set shares the width instead of spilling one onto a row
+       of its own. Only the width gives; the icons are 20px and still fit. */
+    #weapon-picker { flex-wrap: nowrap; min-width: 0; }
+    .weapon-pick { flex: 1 1 0; width: auto; min-width: 0; max-width: 34px; }
     /* The wind stays off the panel, as the rails have it: the canvas draws its
        gauge centred over the sky (resize() asks whether the pill is showing),
        where it is read in the same glance as the shot, rather than off to the
@@ -1354,6 +1359,7 @@
         <option value="roller">Roller Mine</option>
         <option value="mirv">MIRV</option>
         <option value="missile">Guided Missile</option>
+        <option value="jet">Jet Strike</option>
       </select>
       <div id="weapon-picker" role="group"></div>
     </div>
@@ -1543,7 +1549,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v65';
+  const BUILD = 'v66';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1641,6 +1647,7 @@ if ('serviceWorker' in navigator) {
       playAgainHint: 'Tap Play Again for a new terrain and rematch.',
       w_standard: 'Standard Shell', w_big: 'Big Bomb', w_cluster: 'Cluster Bomb',
       w_roller: 'Roller Mine', w_mirv: 'MIRV', w_missile: 'Guided Missile',
+      w_jet: 'Jet Strike', jetDrop: '{name}: FIRE TO DROP',
       unlimited: 'unlimited', nLeft: '{n} left',
       tanks2: '2 Players', tanks3: '3 Players', tanks4: '4 Players',
       tanks5: '5 Players', tanks6: '6 Players',
@@ -1684,6 +1691,7 @@ if ('serviceWorker' in navigator) {
       playAgainHint: 'Yeni arazi ve rövanş için Tekrar Oyna\'ya dokun.',
       w_standard: 'Standart Mermi', w_big: 'Büyük Bomba', w_cluster: 'Misket Bombası',
       w_roller: 'Yuvarlanan Mayın', w_mirv: 'MIRV', w_missile: 'Güdümlü Füze',
+      w_jet: 'Jet Saldırısı', jetDrop: '{name}: BIRAKMAK İÇİN ATEŞ',
       unlimited: 'sınırsız', nLeft: '{n} kaldı',
       tanks2: '2 Oyuncu', tanks3: '3 Oyuncu', tanks4: '4 Oyuncu',
       tanks5: '5 Oyuncu', tanks6: '6 Oyuncu',
@@ -1904,6 +1912,12 @@ if ('serviceWorker' in navigator) {
   weaponSelect.addEventListener('change', () => {
     const t = tanks[currentPlayer];
     if (!t) return;
+    // Choosing the jet calls it in, and once it is coming the choice is made.
+    if (weaponSelect.value === 'jet' || jetArmed(currentPlayer)) {
+      if (!jetArmed(currentPlayer)) summonJet();
+      syncWeaponOptions(t);
+      return;
+    }
     t.weapon = weaponSelect.value; // the choice belongs to this tank, not the control
   });
 
@@ -2136,7 +2150,7 @@ if ('serviceWorker' in navigator) {
       const t = tanks[p.firedBy];
       const first = p.trail[0] || p;
       let from = null, travelled = 0;
-      if (t && t.alive && !p.rolling) {
+      if (t && t.alive && !p.rolling && !p.fromJet) {
         const m = muzzleAt(t);
         const d0 = Math.hypot(first.x - m.x, first.y - m.y);
         if (d0 < 40) {
@@ -2571,7 +2585,12 @@ if ('serviceWorker' in navigator) {
       '<path d="M12 21.5V12M12 12L5.5 5M12 12V4.5M12 12l6.5-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.6"/><circle cx="4.5" cy="4" r="2.2"/><circle cx="12" cy="3" r="2.2"/><circle cx="19.5" cy="4" r="2.2"/></svg>',
     missile:
       '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-      '<g transform="rotate(45 12 12)"><path d="M10 16V7.5Q10 4 12 1.5Q14 4 14 7.5V16Z"/><path d="M10 11.5L6.5 16.5H10ZM14 11.5L17.5 16.5H14Z"/><path d="M10.8 17L12 22.5L13.2 17Z" opacity="0.65"/></g></svg>'
+      '<g transform="rotate(45 12 12)"><path d="M10 16V7.5Q10 4 12 1.5Q14 4 14 7.5V16Z"/><path d="M10 11.5L6.5 16.5H10ZM14 11.5L17.5 16.5H14Z"/><path d="M10.8 17L12 22.5L13.2 17Z" opacity="0.65"/></g></svg>',
+    // A swept-wing fighter seen from the side, with a bomb falling away under it.
+    jet:
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+      '<path d="M1.5 9.5L4 5H5.5L7.5 8.5H17Q22 8.5 23 10Q22 11.5 17 11.5H4Z"/><path d="M9 10L13.5 10L10 14H8Z" opacity="0.75"/>' +
+      '<ellipse cx="14" cy="19" rx="2.6" ry="1.7" transform="rotate(20 14 19)"/></svg>'
   };
 
   const WEAPONS = {
@@ -2596,7 +2615,14 @@ if ('serviceWorker' in navigator) {
     // violent thing in the game, and this is the only reliable way to choose
     // when it falls.
     missile:  { radius: 24, damageMax: 28, color: '#ff4d5e', label: 'Guided Missile',
-                startAmmo: 2, guides: true, enabled: MISSILE.enabled }
+                startAmmo: 2, guides: true, enabled: MISSILE.enabled },
+    // Not fired from the tank at all. Choosing it calls a jet in from one edge
+    // (summonJet), and FIRE releases a stick of bombs from wherever the jet is
+    // at that moment. Each bomb leaves with the jet's own speed and falls under
+    // gravity and the wind like any shell, so the drop has to be led well ahead
+    // of the target. See "Jet".
+    jet:      { radius: 24, damageMax: 30, color: '#9fd0ff', label: 'Jet Strike',
+                startAmmo: 2, jet: true }
   };
 
   // Roll tuning. ROLL_ACCEL is read against GRAVITY of 340: a 45° slope
@@ -2737,6 +2763,7 @@ if ('serviceWorker' in navigator) {
     explosions = [];
     particles = [];
     heli = null;
+    jet = null;
     heliScheduleFirst(); // a round's first comes on its own clock, not what the last one left
     nextTheme();
     newTerrain();
@@ -2777,6 +2804,7 @@ if ('serviceWorker' in navigator) {
       // surprise — to the player thinking, or to the one waiting.
       else if (netSeatIsAi(currentPlayer)) turnBanner.textContent = txt('netAiTook', { name: who });
       else if (left !== null && left <= 20) turnBanner.textContent = txt('netTurnLeft', { name: who, s: left });
+      else if (jetArmed(currentPlayer)) turnBanner.textContent = txt('jetDrop', { name: who });
       else turnBanner.textContent = txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
     }
   }
@@ -2859,7 +2887,10 @@ if ('serviceWorker' in navigator) {
     // weaponSelect.disabled is the existing answer to "is this seat's choice
     // yours to make" — a CPU turn, or somebody else's in an online match.
     if (!t || weaponSelect.disabled) return;
+    // Once the jet is on its way the choice is made: its bombs are this turn.
+    if (jetArmed(currentPlayer)) return;
     if (!weaponAvailable(t, key)) return;
+    if (key === 'jet') { summonJet(); return; }   // choosing it is calling it in
     t.weapon = key;
     weaponSelect.value = key;
     syncWeaponOptions(t);
@@ -2877,7 +2908,12 @@ if ('serviceWorker' in navigator) {
     // whoever is aiming rather than left holding the last player's pick — the
     // same way the angle and power sliders are. A choice that has since run dry
     // (or been switched off) falls back to the standard shell.
-    if (!weaponAvailable(t, t.weapon)) t.weapon = 'standard';
+    // The jet is only ever "chosen" while it is up and carrying this seat's
+    // bombs: before it is called, and once it has dropped or gone, the tank
+    // is back on a weapon it can fire from the barrel.
+    const armed = jetArmed(tanks.indexOf(t));
+    if (armed) t.weapon = 'jet';
+    else if (t.weapon === 'jet' || !weaponAvailable(t, t.weapon)) t.weapon = 'standard';
     weaponSelect.value = t.weapon;
 
     // The buttons follow the same answer, after the fallback above rather than
@@ -2889,8 +2925,10 @@ if ('serviceWorker' in navigator) {
       weaponCounts.get(key).textContent = remaining === Infinity ? '∞' : String(remaining);
       // Spent weapons leave the row rather than sitting there greyed out:
       // the row is what you have, and a phone has no width to waste.
-      b.hidden = !(remaining > 0);
-      b.disabled = weaponSelect.disabled;
+      b.hidden = !(remaining > 0) && !(key === 'jet' && armed);
+      // Everything else locks while the jet is inbound, and the jet itself
+      // while someone else's is still in the sky: one at a time.
+      b.disabled = weaponSelect.disabled || (armed && key !== 'jet') || (key === 'jet' && !!jet && !armed);
       b.classList.toggle('is-selected', key === t.weapon);
       b.setAttribute('aria-pressed', key === t.weapon ? 'true' : 'false');
       const name = remaining === Infinity ? label : `${label} (${remaining})`;
@@ -3029,6 +3067,7 @@ if ('serviceWorker' in navigator) {
     const ship = isShipTheme();
     Sound.rotor(!!heli && !ship, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
     Sound.thruster(!!heli && ship, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
+    Sound.jet(!!jet, !!(jet && jet.falling), jet ? screenX01(jet.x) : 0.5);
     let burning = false, burnX = 0.5, rolling = 0, rollX = 0.5;
     let flying = false, fall = 0, flyX = 0.5, impactIn = Infinity, speed = 0, flight = null;
     for (const p of projectiles) {
@@ -3176,7 +3215,9 @@ if ('serviceWorker' in navigator) {
     const t = tanks[currentPlayer];
     // The same lock as the keys and the on-screen controls: a seat the CPU or
     // another player drives is not ours to aim.
-    return state === 'AIMING' && !isAi(currentPlayer) && !netRemoteSeat(currentPlayer) && !!t && t.alive;
+    // With the jet inbound there is nothing to aim: the drop is FIRE alone.
+    return state === 'AIMING' && !isAi(currentPlayer) && !netRemoteSeat(currentPlayer) && !!t && t.alive &&
+      !jetArmed(currentPlayer);
   }
   // Aim from a pull vector (anchor minus finger). Returns false inside the
   // dead zone, where the direction is noise.
@@ -3265,6 +3306,11 @@ if ('serviceWorker' in navigator) {
     if (state !== 'AIMING' || !tanks[currentPlayer]) return;
     const byAi = !!(opts && opts.byAi === true);
     const shooter = tanks[currentPlayer];
+    // With the jet chosen, FIRE is the drop, and only over the field.
+    if (shooter.weapon === 'jet' && !(jetArmed(currentPlayer) && jetOverField())) {
+      if (!jetArmed(currentPlayer)) syncControlsFromTank();   // it has gone: back to the shell
+      return;
+    }
     const shot = {
       seat: currentPlayer,
       angle: shooter.angle,
@@ -3275,7 +3321,8 @@ if ('serviceWorker' in navigator) {
       seed: Math.floor(Math.random() * 4294967296),   // for whatever chance decides in flight
       // The wind and the helicopter it was fired into, as this screen has them.
       wind,
-      heli: heliOut()
+      heli: heliOut(),
+      jet: jetOut()
     };
     let result = null;
     if (netWeDrive(currentPlayer)) {
@@ -3293,6 +3340,19 @@ if ('serviceWorker' in navigator) {
   /** Put the shell in the air, from the inputs beginShot() has just set. */
   function launchShot() {
     const shooter = tanks[currentPlayer];
+    if (shooter.weapon === 'jet') {
+      // The jet's stick, not a shell: the round was paid for when it was called
+      // in (summonJet), and the tank goes back to its standard shell.
+      shooter.weapon = 'standard';
+      projectiles = jetArmed(currentPlayer) ? launchJetBombs(currentPlayer) : [];
+      spawnQueue = [];
+      shotExploded = false;
+      explodeTimer = 0;
+      state = 'FIRING';
+      if (!resolving) Sound.tick();
+      updateHUD();
+      return;
+    }
     let weaponKey = shooter.weapon;
     if (!weaponAvailable(shooter, weaponKey)) weaponKey = 'standard'; // safety net; syncWeaponOptions gets there first
     shooter.ammo[weaponKey] -= 1;
@@ -3495,6 +3555,9 @@ if ('serviceWorker' in navigator) {
     if (fromElsewhere) {
       if (typeof shot.wind === 'number') wind = shot.wind;
       if ('heli' in shot) heli = heliIn(shot.heli);
+      // Placed at the moment it was fired, not now: a replay that starts late
+      // must still find the jet that was there to drop from.
+      if ('jet' in shot) jet = jetIn(shot.jet, Number.isFinite(shot.at) ? shot.at : netNow());
     }
     // The shot's own place on the match clock (see SHOT_CATCHUP_FULL_S).
     simClock = Number.isFinite(shot.at) ? shot.at : netNow();
@@ -3514,7 +3577,8 @@ if ('serviceWorker' in navigator) {
       simClock, shotBudget, shotLead,
       explosions: explosions.map(e => ({ ...e })),
       particles: particles.map(p => ({ ...p })),
-      heli: heli ? { ...heli, seen: new Set(heli.seen) } : null
+      heli: heli ? { ...heli, seen: new Set(heli.seen) } : null,
+      jet: jet ? { ...jet } : null, jetDownId
     };
   }
 
@@ -3525,6 +3589,7 @@ if ('serviceWorker' in navigator) {
     heliDue = s.heliDue; heliDownId = s.heliDownId; simRandom = s.simRandom;
     activeShot = s.activeShot; projectiles = s.projectiles; spawnQueue = s.spawnQueue;
     explosions = s.explosions; particles = s.particles; heli = s.heli;
+    jet = s.jet; jetDownId = s.jetDownId;
     simClock = s.simClock; shotBudget = s.shotBudget; shotLead = s.shotLead;
   }
 
@@ -3786,6 +3851,8 @@ if ('serviceWorker' in navigator) {
       // predictLandingX, which integrates a plain parabola, and a missile
       // stops travelling at apex — so the CPU would undershoot every one of
       // them. Teaching the predictor about the burn is what it would take.
+      // The jet is absent for a different reason: it is not aimed at all but
+      // timed, by pressing FIRE at the right moment of a pass.
       if (aiDifficulty === 'easy') {
         preferred = pick(r, [[0.80, 'standard'], [0.86, 'big'], [0.91, 'cluster'], [0.95, 'roller']], 'mirv');
       } else if (aiDifficulty === 'medium') {
@@ -4047,7 +4114,10 @@ if ('serviceWorker' in navigator) {
   // surface of that column — the top of the cliff. It also let a shell step over
   // a thin peak. `px, py` is the last point in open air, which is where anything
   // that goes off on contact should go off.
-  function firstContact(x0, y0, x1, y1) {
+  // `craft` says what in the air counts: true for the helicopter and the jet,
+  // 'heli' for the helicopter alone (a bomb never meets the jet it fell from),
+  // false for neither (a falling wreck).
+  function firstContact(x0, y0, x1, y1, craft = true) {
     const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
     let px = x0, py = y0;
     for (let i = 1; i <= n; i++) {
@@ -4055,7 +4125,8 @@ if ('serviceWorker' in navigator) {
       const y = y0 + (y1 - y0) * i / n;
       let what = null, tank = null;
       if (x < -20 || x > W + 20 || y > H + 60) what = 'off';
-      else if (heliHitBy(x, y)) what = 'heli';
+      else if (craft && heliHitBy(x, y)) what = 'heli';
+      else if (craft === true && jetHitBy(x, y)) what = 'jet';
       else if (y >= groundHeightAt(x)) what = 'ground';
       else {
         for (const t of tanks) {
@@ -4072,6 +4143,8 @@ if ('serviceWorker' in navigator) {
 
   function stepProjectile(p, dt) {
     if (p.rolling) { stepRoller(p, dt); return; }
+    // A jet's bomb still in the bay rides along with it until its turn to go.
+    if (p.hold > 0) { p.hold--; p.x += p.vx * dt; return; }
 
     const w = WEAPONS[p.weapon];
     p.age = (p.age || 0) + dt;
@@ -4099,9 +4172,17 @@ if ('serviceWorker' in navigator) {
     // what keeps those from splitting in the shooter's own lap.
     if (w.mirvCount && !p.split && p.vy >= 0 && p.age > 0.15) { splitMirv(p); return; }
 
-    const c = firstContact(x0, y0, p.x, p.y);
+    const c = firstContact(x0, y0, p.x, p.y, p.fromJet ? 'heli' : true);
     if (c && c.what === 'off') {
       p.dead = true; // off the map
+      return;
+    }
+    if (c && c.what === 'jet') {
+      p.x = c.x; p.y = c.y;
+      spawnExplosionFx(p.x, p.y, 28, '#ffd27a');
+      jetShotDown();
+      p.dead = true;
+      shotExploded = true;
       return;
     }
     if ((c && c.what === 'heli') || (!c && missileFuzed(p))) {
@@ -4182,8 +4263,11 @@ if ('serviceWorker' in navigator) {
 
   /** One fixed step: the shells in the air, their blasts, and the helicopter while a shot is on. */
   function simStep(dt) {
-    // Where the helicopter is at this step's moment, before anything can hit it.
+    // A jet and a helicopter that have flown into each other, then where the
+    // helicopter is at this step's moment, before anything can hit it.
+    if (inShot()) jetHeliCollide(simClock);
     if (heli && !heli.falling && inShot()) heliFlyTo(simClock);
+    if (jet && !jet.falling && inShot()) jetFlyTo(simClock);
     if (state === 'FIRING') {
       for (const p of projectiles) stepProjectile(p, dt);
       // Warheads a MIRV split off, or bomblets a cluster bomb threw, join the
@@ -4195,7 +4279,7 @@ if ('serviceWorker' in navigator) {
         // explosion wait and hand the turn straight on.
         // A wreck still coming down holds the turn too, even when this screen's
         // shell missed it (the shooter may have said it was hit): see below.
-        state = (shotExploded || (heli && heli.falling)) ? 'EXPLODING' : 'RESOLVED';
+        state = (shotExploded || (heli && heli.falling) || (jet && jet.falling)) ? 'EXPLODING' : 'RESOLVED';
         explodeTimer = 0;
       }
     }
@@ -4209,7 +4293,8 @@ if ('serviceWorker' in navigator) {
       // (heliAuthority) meaning a different seat on each, so two screens could
       // both work out the crash. Held here, every screen crashes it inside the
       // shooter's turn, and the shooter's result carries the crater.
-      if (explodeTimer > 0.9 && explosions.every(e => e.t > e.maxR / 90) && !(heli && heli.falling)) {
+      if (explodeTimer > 0.9 && explosions.every(e => e.t > e.maxR / 90) &&
+          !(heli && heli.falling) && !(jet && jet.falling)) {
         state = 'RESOLVED';
       }
     }
@@ -4218,6 +4303,7 @@ if ('serviceWorker' in navigator) {
     explosions.forEach(e => { e.t += dt * 90; e.r = Math.min(e.maxR, 4 + e.t); });
     explosions = explosions.filter(e => e.r < e.maxR - 0.5);
     if (heli && heli.falling && inShot()) moveHeli(dt);
+    if (jet && jet.falling && inShot()) moveJet(dt);
     simClock += dt;
   }
 
@@ -4278,9 +4364,17 @@ if ('serviceWorker' in navigator) {
     camFollow(dt);
     netCheckTurnClock();
     rotorAngle += dt * 26;
+    if (!inShot()) jetHeliCollide(netNow());
     if (!heli) heliArrivalTick();
     // Inside a shot, simStep puts it where it is at the shot's own time.
     else if (!inShot()) { if (heli.falling) heliFollowClock(); else heliFlyTo(netNow()); }
+    if (jet && !inShot()) {
+      const armed = jetArmed(currentPlayer);
+      if (jet.falling) jetFollowClock(); else jetFlyTo(netNow());
+      // A pass that ends with its bombs still aboard hands the controls back,
+      // and a jet leaving the sky frees the button for the next one.
+      if (!jet || (armed && !jetArmed(currentPlayer))) { syncControlsFromTank(); updateHUD(); }
+    }
     updateSoundLoops();
     updateTimer();
 
@@ -4546,6 +4640,327 @@ if ('serviceWorker' in navigator) {
     if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) summonHeli();
   });
 
+  // ---------- Jet ----------
+  // The Jet Strike weapon. Picking it calls a jet in from one edge; it makes a
+  // single fast pass across the field and leaves by the other — it never turns
+  // back the way the helicopter does. FIRE, while it is over the field, drops
+  // a stick of bombs from wherever it is at that moment. A bomb leaves with the
+  // jet's speed and then falls like any shell, gravity and wind and all, so it
+  // lands well ahead of where it was let go.
+  //
+  // Like the helicopter it flies a route on the match clock, fixed when it is
+  // called in (t0, fromLeft, speed, y) and announced once (`jet`), so every
+  // screen draws it in the same place and a shot meets it at the shot's own
+  // time (jetFlyTo(simClock) in simStep). It stays up after dropping, until it
+  // is off the far edge, and anything in the air meanwhile can hit it: a jet
+  // that is shot down keeps its speed as it falls, and comes down through
+  // heliCrash — whatever tank it lands on is finished.
+  const JET = {
+    crossMin: 5.5, crossMax: 6.5,  // seconds to cross; the helicopter takes 9-14
+    bombs: 3,                      // released one after another by a single FIRE
+    bombGapSteps: 6,               // fixed steps between bombs: 0.1s at SIM_DT
+    drag: 0.55                     // fraction of a wreck's forward speed kept per second
+  };
+  let jet = null;
+  // The last jet this screen brought down, so late news of it cannot put it
+  // back in the sky (as heliDownId does for the helicopter).
+  let jetDownId = null;
+
+  function jetSize() { return Math.max(30, Math.min(52, W * 0.036)); }
+
+  // From the band the helicopter cruises in to well above it, so the two can
+  // meet (jetMeetsHeliAt) without always doing so: a pass with a helicopter up
+  // hits it about one time in three. Anchored to the tallest peak like the
+  // helicopter, so a tank can reach it on any map.
+  function jetAltitude() {
+    let peak = H * 0.5;
+    for (let x = 0; x < terrain.length; x++) if (terrain[x] < peak) peak = terrain[x];
+    const clearance = Math.max(44, H * 0.075) + Math.random() * H * 0.13;
+    return Math.max(H * 0.06, peak - clearance);
+  }
+
+  /** Where a jet in level flight is at match time T, or null once it has left. */
+  function jetRouteAt(j, T) {
+    const w = jetSize();
+    const dir = j.fromLeft ? 1 : -1;
+    const x = (j.fromLeft ? -w : W + w) + dir * j.speed * Math.max(0, T - j.t0);
+    if (x < -w * 1.01 || x > W + w * 1.01) return null;   // past the far edge: gone for good
+    return { x, y: j.y, dir };
+  }
+
+  /** Put the jet where its route has it at time T — gone, if it has left. */
+  function jetFlyTo(T) {
+    if (!jet || jet.falling) return;
+    const at = jetRouteAt(jet, T);
+    if (!at) { jet = null; return; }
+    jet.x = at.x; jet.y = at.y; jet.dir = at.dir;
+  }
+
+  function jetHitBy(px, py) {
+    if (!jet || jet.falling) return false;
+    const w = jetSize();
+    return Math.abs(px - jet.x) < w * 0.55 && Math.abs(py - jet.y) < w * 0.22;
+  }
+
+  /** The seat's own jet, still carrying its bombs: FIRE drops them. */
+  function jetArmed(seat) {
+    return !!(jet && !jet.falling && !jet.bombed && jet.seat === seat);
+  }
+
+  /** Bombs only fall on the field: over either edge FIRE waits. */
+  function jetOverField() {
+    return !!(jet && !jet.falling && jet.x >= 0 && jet.x <= W);
+  }
+
+  function spawnJet(seat) {
+    jet = {
+      id: Math.floor(Math.random() * 2 ** 31),
+      seat,
+      t0: netNow(),
+      fromLeft: Math.random() < 0.5,
+      speed: W / (JET.crossMin + Math.random() * (JET.crossMax - JET.crossMin)),
+      y: jetAltitude(),
+      bombed: false,
+      falling: false,
+      // Kept up to date from the route; once it is shot down vx, vy, spin and t
+      // are the wreck's own.
+      x: 0, dir: 1, vx: 0, vy: 0, spin: 0, t: 0
+    };
+    jetFlyTo(netNow());
+  }
+
+  /**
+   * Picking the weapon is calling the jet in. The round is spent here rather
+   * than at the drop: the jet is on its way whether or not its bombs are used,
+   * and a pass that ends with them still aboard is simply wasted.
+   */
+  function summonJet() {
+    const seat = currentPlayer;
+    const t = tanks[seat];
+    if (!t || !t.alive || state !== 'AIMING' || jet || !terrain.length) return false;
+    if (isAi(seat) || netRemoteSeat(seat) || !weaponAvailable(t, 'jet')) return false;
+    spawnJet(seat);
+    t.ammo.jet -= 1;
+    t.weapon = 'jet';
+    if (!resolving) Sound.tick();
+    if (netPlaying()) netSend('jet', { jet: jetOut(), seat, ammo: ammoOut(t.ammo) });
+    syncControlsFromTank();
+    updateHUD();
+    return true;
+  }
+
+  /** The stick of bombs, from where the jet is at this step of the shot. */
+  function launchJetBombs(seat) {
+    jetFlyTo(simClock);
+    if (!jet) return [];
+    jet.bombed = true;
+    const out = [];
+    for (let i = 0; i < JET.bombs; i++) {
+      out.push({
+        x: jet.x, y: jet.y + jetSize() * 0.12,
+        vx: jet.dir * jet.speed, vy: 0,   // the jet's own speed: nothing is thrown
+        weapon: 'jet',
+        firedBy: seat,
+        fromJet: true,                    // never collides with the jet it fell from
+        hold: i * JET.bombGapSteps,       // steps still carried in the bay
+        trail: []
+      });
+    }
+    return out;
+  }
+
+  /** A shell has hit the jet (at match time T): it comes down from here, still flying forward. */
+  function jetShotDown(T = simClock) {
+    jet.falling = true;
+    jet.vx = jet.dir * jet.speed;
+    jet.vy = 10;
+    jet.t = T;
+  }
+
+  // The jet and the helicopter can fly into each other. Both routes are fixed
+  // and on the match clock, so the moment they meet is arithmetic: the first
+  // step, on a SIM_DT grid from the later of the two arrivals, at which their
+  // hit boxes overlap. Every screen gets the same moment without a word, and
+  // it is the same moment whether a screen notices it mid-shot (simStep) or
+  // between shots (step) — the wrecks start from where the routes had them
+  // then. Cached, because a shot asks every step; the key holds everything the
+  // answer depends on, and legsTotal because advanceTurn can cut a route short.
+  let jetMeetCache = { key: '', T: null };
+  function jetMeetsHeliAt() {
+    if (!jet || !heli || jet.falling || heli.falling) return null;
+    const key = `${jet.id}|${jet.t0}|${heli.id}|${heli.t0}|${heli.legsTotal}`;
+    if (jetMeetCache.key === key) return jetMeetCache.T;
+    const jw = jetSize(), hw = heliSize();
+    const rx = (jw + hw) * 0.45, ry = jw * 0.22 + hw * 0.28;
+    const start = Math.max(jet.t0, heli.t0);
+    const end = jet.t0 + (W + jw * 2.1) / jet.speed;   // the jet's whole pass
+    let T = null;
+    for (let k = 0; start + k * SIM_DT <= end; k++) {
+      const t = start + k * SIM_DT;
+      const a = jetRouteAt(jet, t), b = heliRouteAt(heli, t);
+      if (a && b && Math.abs(a.x - b.x) < rx && Math.abs(a.y - b.y) < ry) { T = t; break; }
+    }
+    jetMeetCache = { key, T };
+    return T;
+  }
+
+  /** If the jet and the helicopter have met by match time T, both come down. */
+  function jetHeliCollide(T) {
+    const Tc = jetMeetsHeliAt();
+    if (Tc === null || T < Tc) return false;
+    const a = jetRouteAt(jet, Tc), b = heliRouteAt(heli, Tc);
+    jet.x = a.x; jet.y = a.y; jet.dir = a.dir;
+    heli.x = b.x; heli.y = b.y; heli.dir = b.dir; heli.legs = b.legs;
+    jetShotDown(Tc);
+    heli.falling = true;
+    heli.vy = 20;
+    heli.t = Tc;
+    spawnExplosionFx((a.x + b.x) / 2, (a.y + b.y) / 2, 36, '#ffd27a');
+    return true;
+  }
+
+  /**
+   * One step of a shot-down jet. It keeps most of its speed, so the wreck
+   * carries a long way forward before it comes down — which is where it
+   * crashes, through the same heliCrash the helicopter uses.
+   */
+  function moveJet(dt) {
+    if (!jet || !jet.falling) return;
+    jet.t = (Number.isFinite(jet.t) ? jet.t : netNow()) + dt;
+    const x0 = jet.x, y0 = jet.y;
+    jet.vx *= Math.pow(JET.drag, dt);
+    jet.vy += GRAVITY * physScale * dt * 0.8;
+    jet.x += jet.vx * dt;
+    jet.y += jet.vy * dt;
+    jet.spin += dt * (2 + jet.vy * 0.004);
+    if (Math.random() < 0.7) {
+      particles.push({
+        x: jet.x + (Math.random() * 2 - 1) * 6, y: jet.y,
+        vx: -jet.vx * 0.1 + (Math.random() * 2 - 1) * 20, vy: -20 - Math.random() * 30,
+        life: 0.6 + Math.random() * 0.6, age: 0,
+        color: Math.random() < 0.5 ? '#59606b' : '#ff7a45'
+      });
+    }
+    if (jet.x < -60 || jet.x > W + 60) { jetDownId = jet.id; jet = null; return; } // off the map
+    const c = firstContact(x0, y0, jet.x, jet.y, false);
+    if (!c) return;
+    jetDownId = jet.id;
+    jet = null;
+    if (c.what === 'off') return;
+    heliCrash(Math.max(0, Math.min(W - 1, c.px)), c.py, c.tank);
+  }
+
+  /** Between shots, bring a wreck handed over mid-fall up to now (as heliFollowClock). */
+  function jetFollowClock() {
+    const now = netNow();
+    if (!(Math.abs(now - jet.t) <= HELI_CLOCK_SLACK_S)) jet.t = now;
+    while (jet && jet.falling && jet.t + SIM_DT <= now) moveJet(SIM_DT);
+  }
+
+  /** Where to draw it: its route at the match clock's now, like the helicopter. */
+  function jetDrawPos() {
+    if (!jet.falling) return jetRouteAt(jet, netNow()) || { x: jet.x, y: jet.y, dir: jet.dir };
+    const ahead = Math.max(0, Math.min(SIM_DT, netNow() - jet.t));
+    return { x: jet.x + jet.vx * ahead, y: jet.y + jet.vy * ahead, dir: jet.dir };
+  }
+
+  function jetOut() {
+    return jet ? {
+      id: jet.id, seat: jet.seat, t0: jet.t0, fromLeft: jet.fromLeft, speed: jet.speed, y: jet.y,
+      bombed: jet.bombed, falling: jet.falling,
+      t: jet.t, x: jet.x, dir: jet.dir, vx: jet.vx, vy: jet.vy, spin: jet.spin
+    } : null;
+  }
+
+  /** A jet as it arrives from another client, placed at match time T, or null. */
+  function jetIn(j, T = netNow()) {
+    if (!j || (j.id != null && j.id === jetDownId)) return null;
+    const out = { ...j };
+    if (out.falling) {
+      if (!Number.isFinite(out.t)) out.t = netNow();
+      return out;
+    }
+    const at = jetRouteAt(out, T);
+    return at ? Object.assign(out, at) : null;
+  }
+
+  // A side-on fighter, nose to the right before the flip: swept wing, tail fin,
+  // canopy and an afterburner that flickers on the shared animation clock.
+  function drawJet() {
+    if (!jet) return;
+    const w = jetSize(), h = w * 0.22;
+    const at = jetDrawPos();
+    const dead = jet.falling;
+    ctx.save();
+    ctx.translate(at.x, at.y);
+    ctx.scale(at.dir, 1);
+    if (dead) ctx.rotate(Math.min(1.1, jet.spin * 0.35));
+
+    if (!dead) {
+      const flick = 0.75 + 0.25 * Math.sin(rotorAngle * 3.1);
+      const len = w * 0.32 * flick;
+      const flame = ctx.createLinearGradient(-w * 0.48, 0, -w * 0.48 - len, 0);
+      flame.addColorStop(0, 'rgba(255,236,180,0.95)');
+      flame.addColorStop(0.4, 'rgba(255,150,60,0.6)');
+      flame.addColorStop(1, 'rgba(255,90,40,0)');
+      ctx.fillStyle = flame;
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.48, -h * 0.28);
+      ctx.lineTo(-w * 0.48 - len, 0);
+      ctx.lineTo(-w * 0.48, h * 0.28);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // fuselage
+    ctx.fillStyle = dead ? '#6b4a34' : '#8e9aa8';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.52, 0);
+    ctx.quadraticCurveTo(w * 0.30, -h * 0.62, w * 0.02, -h * 0.55);
+    ctx.lineTo(-w * 0.48, -h * 0.40);
+    ctx.lineTo(-w * 0.48, h * 0.40);
+    ctx.lineTo(w * 0.02, h * 0.50);
+    ctx.quadraticCurveTo(w * 0.30, h * 0.50, w * 0.52, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // tail fin
+    ctx.fillStyle = dead ? '#523726' : '#6d7988';
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.26, -h * 0.40);
+    ctx.lineTo(-w * 0.40, -h * 2.0);
+    ctx.lineTo(-w * 0.50, -h * 2.0);
+    ctx.lineTo(-w * 0.48, -h * 0.40);
+    ctx.closePath();
+    ctx.fill();
+
+    // swept wing, seen edge-on below the fuselage line
+    ctx.beginPath();
+    ctx.moveTo(w * 0.14, h * 0.10);
+    ctx.lineTo(-w * 0.22, h * 0.95);
+    ctx.lineTo(-w * 0.32, h * 0.95);
+    ctx.lineTo(-w * 0.14, h * 0.10);
+    ctx.closePath();
+    ctx.fill();
+
+    // canopy
+    ctx.fillStyle = dead ? 'rgba(60,40,30,0.8)' : 'rgba(150,215,255,0.9)';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.22, -h * 0.45, w * 0.12, h * 0.34, -0.08, 0, Math.PI * 2);
+    ctx.fill();
+
+    // the stick still aboard, slung under the belly
+    if (!dead && !jet.bombed) {
+      ctx.fillStyle = WEAPONS.jet.color;
+      for (let i = 0; i < JET.bombs; i++) {
+        ctx.beginPath();
+        ctx.ellipse(w * (0.08 - i * 0.13), h * 0.72, w * 0.055, h * 0.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
   // ---------- Zoom and pan input ----------
   // One finger drags the view, two pinch and drag it. Pointer events cover
   // mouse, pen and touch with one code path; `touch-action: none` on the canvas
@@ -4652,6 +5067,8 @@ if ('serviceWorker' in navigator) {
     let target = null;
     if (projectiles.length) {
       target = projectiles[0];                                // the shell in the air
+    } else if (state === 'AIMING' && !camPanned && jetArmed(currentPlayer)) {
+      target = jetDrawPos();                                  // the jet about to drop
     } else if (state === 'AIMING' && !camPanned && tanks[currentPlayer]) {
       const t = tanks[currentPlayer];
       target = { x: t.x, y: groundHeightAt(t.x) - TANK_H };
@@ -4787,7 +5204,7 @@ if ('serviceWorker' in navigator) {
     // Walked from where the frame started, like a shell, so a wreck falling
     // into a cliff face goes off against the face rather than on top of the
     // cliff. Offset by the 4px the airframe hangs below its centre.
-    const c = firstContact(x0, y0 + 4, heli.x, heli.y + 4);
+    const c = firstContact(x0, y0 + 4, heli.x, heli.y + 4, false);
     if (!c) return;
     heliDownId = heli.id;
     heli = null;
@@ -5138,6 +5555,7 @@ if ('serviceWorker' in navigator) {
     if (state !== 'AIMING') return;
     const t = tanks[currentPlayer];
     if (!t || !t.alive) return;
+    if (t.weapon === 'jet') return;   // the barrel is not what fires this turn
     const full = aimPreviewOn();
     // Everyone gets the short hint on their own turn; only Brutal shows the
     // whole arc, and only Brutal telegraphs a CPU shot.
@@ -5368,10 +5786,12 @@ if ('serviceWorker' in navigator) {
     });
 
     drawHeli();
+    drawJet();
     drawAimPreview();
 
     // trails and shells, one set per warhead in the air
     for (const p of projectiles) {
+      if (p.hold > 0) continue;   // still in the jet's bay, drawn with the jet
       // A fresh shell starts on the drawn barrel's line and eases onto its true
       // path (see muzzleShift); the ease is measured along the flight, so a
       // trail point keeps the displacement it had when the shell passed it.
@@ -5448,6 +5868,17 @@ if ('serviceWorker' in navigator) {
         ctx.closePath();
         ctx.fill();
         ctx.restore();
+      } else if (pw.jet) {
+        // A finned bomb, nose along its path, so the forward throw reads.
+        ctx.save();
+        ctx.translate(hx, hy);
+        ctx.rotate(Math.atan2(p.vy, p.vx));
+        ctx.scale(boost, boost);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 5, 2.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(-7, -2.6, 2.4, 5.2);
+        ctx.restore();
       } else {
         // An unsplit MIRV is drawn fatter than the warheads it carries, and a
         // cluster bomb's bomblets smaller than the casing they came out of.
@@ -5504,7 +5935,8 @@ if ('serviceWorker' in navigator) {
 
   // 2: `turn` carries its result, and the relay answers `time`.
   // 3: the helicopter travels as its route, and `turn` carries `at`.
-  const NET_PROTOCOL = 3;
+  // 4: the jet — its own `jet` message, and a `jet` in `turn` and snapshots.
+  const NET_PROTOCOL = 4;
 
   // A turn nobody takes would otherwise hold the game up for ever: a hidden tab
   // never disconnects, so no timeout at the socket level can ever fire. The seat
@@ -6049,7 +6481,7 @@ if ('serviceWorker' in navigator) {
 
     // Everything that changes the board goes through the inbox, in the order it
     // was sent (netReceive).
-    if (d.k === 'turn' || d.k === 'heli' || d.k === 'timeout' || d.k === 'sync' || d.k === 'rematch') {
+    if (d.k === 'turn' || d.k === 'heli' || d.k === 'jet' || d.k === 'timeout' || d.k === 'sync' || d.k === 'rematch') {
       netReceive(d);
       return;
     }
@@ -6136,6 +6568,17 @@ if ('serviceWorker' in navigator) {
     if (d.k === 'heli') {
       heli = heliIn(d.heli);
       heliDueIn(d);
+      return;
+    }
+    if (d.k === 'jet') {
+      // Called in by the seat holding the turn: its route, and the round it cost.
+      const t = tanks[d.seat];
+      if (state === 'GAMEOVER' || !t) return;
+      jet = jetIn(d.jet);
+      if (d.ammo) t.ammo = ammoIn(d.ammo);
+      if (jet) t.weapon = 'jet';
+      updateHUD();
+      syncControlsFromTank();
       return;
     }
     if (d.k === 'timeout') {
@@ -6369,7 +6812,10 @@ if ('serviceWorker' in navigator) {
       // leaves. heliDue travels too, so both sides expect the next one at
       // the same moment rather than each running its own clock.
       heliDue,
-      heli: heliOut()
+      heli: heliOut(),
+      // The jet stays up after its drop until it is off the far edge, so the
+      // next seat can still get a shot at it.
+      jet: jetOut()
     };
   }
 
@@ -6411,6 +6857,7 @@ if ('serviceWorker' in navigator) {
     // stale local helicopter cannot leave fields behind.
     heli = heliIn(snap.heli);
     heliDueIn(snap);
+    jet = jetIn(snap.jet);
     projectiles = [];
     wind = snap.wind;
     showWind();       // shown, not re-rolled: the snapshot is the authority
@@ -6573,6 +7020,9 @@ if ('serviceWorker' in navigator) {
     heliOut, heliIn, moveHeli, heliFollowClock, netAnnounceHeli, heliAuthority, heliSignature,
     heliDrawPos, heliRouteAt, heliLegAt, heliFlyTo, HELI_MIN_LEGS, HELI_MAX_LEGS,
     isShipTheme, drawHeli,
+    JET, jetSize, spawnJet, summonJet, jetRouteAt, jetFlyTo, jetHitBy, jetArmed, jetOverField,
+    launchJetBombs, jetShotDown, jetMeetsHeliAt, jetHeliCollide, moveJet, jetFollowClock, jetDrawPos, jetIn, jetOut, drawJet,
+    get jet() { return jet; }, set jet(v) { jet = v; },
     SHOT_SKIP_S, SHOT_SKIP_TO_S, SHOT_CATCHUP_FULL_S, CLOCK_RESYNC_MS, netRebaseClock,
     get simClock() { return simClock; },
     SOUND, Sound, FLIGHT, flightOf, panOf, setSoundOn, setSfxLevel, sliderToLevel, levelToSlider,
