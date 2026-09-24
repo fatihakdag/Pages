@@ -98,7 +98,10 @@ one mid-match waits for the next round rather than repainting one screen.
 Jet Strike is a weapon only this build has. Picking it (`pickWeapon('jet')`,
 or the hidden select) is `summonJet()`: a jet comes in from off one edge, and
 the round is spent there and then — a pass that ends with its bombs still aboard
-is wasted, and the turn stays with the player. While it is inbound the weapon
+is wasted, and the turn stays with the player. It flies the way the tank's
+barrel points (`jetFromLeft()`), so aiming left or right before picking it
+chooses the side it comes in from; straight up, it heads across the wider
+stretch of field from the tank. While it is inbound the weapon
 choice is locked, the aim preview and the slingshot are off, the banner says
 FIRE TO DROP, and the camera follows the jet. FIRE drops a stick of
 `JET.bombs` from wherever it is, one every `JET.bombGapSteps` fixed steps; each

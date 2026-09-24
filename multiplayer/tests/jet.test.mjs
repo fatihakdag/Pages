@@ -45,6 +45,42 @@ test('picking the jet calls one in from an edge and spends the round', () => {
   assert.equal(g.jetArmed(0), true);
 });
 
+test('the jet flies the way the barrel points', () => {
+  for (const [angle, fromLeft] of [[30, true], [89, true], [91, false], [150, false]]) {
+    const h = loadFlat();
+    const { g } = h;
+    g.heliDue = g.netNow() + 1e6;
+    g.tanks[0].angle = angle;
+
+    g.pickWeapon('jet');
+
+    assert.equal(g.jet.fromLeft, fromLeft, `barrel at ${angle}°: in from the ${fromLeft ? 'left' : 'right'}`);
+    assert.equal(g.jet.dir, fromLeft ? 1 : -1);
+    assert.ok(fromLeft ? g.jet.x <= 0 : g.jet.x >= g.W, 'off the edge it comes in from');
+  }
+});
+
+test('straight up, it heads across the wider stretch of field', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const t = g.tanks[0];
+  t.angle = 90;
+  t.x = g.W * 0.2;
+  assert.equal(g.jetFromLeft(t), true, 'a tank on the left sends it right');
+  t.x = g.W * 0.8;
+  assert.equal(g.jetFromLeft(t), false, 'a tank on the right sends it left');
+});
+
+test('the chosen side is the one the other screen sees', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.tanks[0].angle = 160;
+  g.pickWeapon('jet');
+  const there = g.jetIn(g.jetOut());
+  assert.equal(there.fromLeft, false);
+  assert.equal(there.dir, -1);
+});
+
 test('once the jet is inbound the choice is made', () => {
   const h = loadFlat();
   const { g } = h;

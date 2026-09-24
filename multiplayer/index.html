@@ -2619,8 +2619,8 @@ if ('serviceWorker' in navigator) {
     // only reliable way to choose when it falls.
     missile:  { radius: 24, damageMax: 28, color: '#ff4d5e', label: 'Guided Missile',
                 startAmmo: 2, guides: true, enabled: MISSILE.enabled },
-    // Not fired from the tank at all. Choosing it calls a jet in from one edge
-    // (summonJet), and FIRE releases a stick of bombs from wherever the jet is
+    // Not fired from the tank at all. Choosing it calls a jet in from one edge,
+    // flying the way the barrel points (summonJet), and FIRE releases a stick of bombs from wherever the jet is
     // at that moment. Each bomb leaves with the jet's own speed and falls under
     // gravity and the wind like any shell, so the drop has to be led well ahead
     // of the target. See "Jet".
@@ -4667,8 +4667,8 @@ if ('serviceWorker' in navigator) {
   });
 
   // ---------- Jet ----------
-  // The Jet Strike weapon. Picking it calls a jet in from one edge; it makes a
-  // single fast pass across the field and leaves by the other — it never turns
+  // The Jet Strike weapon. Picking it calls a jet in from one edge, flying the
+  // way the tank's barrel points (jetFromLeft); it makes a single fast pass across the field and leaves by the other — it never turns
   // back the way the helicopter does. FIRE, while it is over the field, drops
   // a stick of bombs from wherever it is at that moment. A bomb leaves with the
   // jet's speed and then falls like any shell, gravity and wind and all, so it
@@ -4738,12 +4738,12 @@ if ('serviceWorker' in navigator) {
     return !!(jet && !jet.falling && jet.x >= 0 && jet.x <= W);
   }
 
-  function spawnJet(seat) {
+  function spawnJet(seat, fromLeft = Math.random() < 0.5) {
     jet = {
       id: Math.floor(Math.random() * 2 ** 31),
       seat,
       t0: netNow(),
-      fromLeft: Math.random() < 0.5,
+      fromLeft,
       speed: W / (JET.crossMin + Math.random() * (JET.crossMax - JET.crossMin)),
       y: jetAltitude(),
       bombed: false,
@@ -4756,6 +4756,18 @@ if ('serviceWorker' in navigator) {
   }
 
   /**
+   * Which way the tank's jet flies: the way its barrel points, so aiming left
+   * or right before picking the weapon is choosing the side it comes in from.
+   * Straight up there is no way to read, so it heads across the wider stretch
+   * of field from the tank. True is in from the left, flying right.
+   */
+  function jetFromLeft(t) {
+    if (t.angle < 90) return true;
+    if (t.angle > 90) return false;
+    return t.x < W / 2;
+  }
+
+  /**
    * Picking the weapon is calling the jet in. The round is spent here rather
    * than at the drop: the jet is on its way whether or not its bombs are used,
    * and a pass that ends with them still aboard is simply wasted.
@@ -4765,7 +4777,7 @@ if ('serviceWorker' in navigator) {
     const t = tanks[seat];
     if (!t || !t.alive || state !== 'AIMING' || jet || !terrain.length) return false;
     if (isAi(seat) || netRemoteSeat(seat) || !weaponAvailable(t, 'jet')) return false;
-    spawnJet(seat);
+    spawnJet(seat, jetFromLeft(t));
     t.ammo.jet -= 1;
     t.weapon = 'jet';
     if (!resolving) Sound.tick();
@@ -7091,7 +7103,7 @@ if ('serviceWorker' in navigator) {
     heliOut, heliIn, moveHeli, heliFollowClock, netAnnounceHeli, heliAuthority, heliSignature,
     heliDrawPos, heliRouteAt, heliLegAt, heliFlyTo, HELI_MIN_LEGS, HELI_MAX_LEGS,
     isShipTheme, drawHeli,
-    JET, jetSize, spawnJet, summonJet, jetRouteAt, jetFlyTo, jetHitBy, jetArmed, jetOverField,
+    JET, jetSize, spawnJet, jetFromLeft, summonJet, jetRouteAt, jetFlyTo, jetHitBy, jetArmed, jetOverField,
     launchJetBombs, jetShotDown, jetMeetsHeliAt, jetHeliCollide, moveJet, jetFollowClock, jetDrawPos, jetIn, jetOut, drawJet,
     get jet() { return jet; }, set jet(v) { jet = v; },
     SHOT_SKIP_S, SHOT_SKIP_TO_S, SHOT_CATCHUP_FULL_S, CLOCK_RESYNC_MS, netRebaseClock,
