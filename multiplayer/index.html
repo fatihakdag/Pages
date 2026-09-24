@@ -4263,7 +4263,9 @@ if ('serviceWorker' in navigator) {
 
   /** One fixed step: the shells in the air, their blasts, and the helicopter while a shot is on. */
   function simStep(dt) {
-    // Where the helicopter is at this step's moment, before anything can hit it.
+    // A jet and a helicopter that have flown into each other, then where the
+    // helicopter is at this step's moment, before anything can hit it.
+    if (inShot()) jetHeliCollide(simClock);
     if (heli && !heli.falling && inShot()) heliFlyTo(simClock);
     if (jet && !jet.falling && inShot()) jetFlyTo(simClock);
     if (state === 'FIRING') {
@@ -4362,6 +4364,7 @@ if ('serviceWorker' in navigator) {
     camFollow(dt);
     netCheckTurnClock();
     rotorAngle += dt * 26;
+    if (!inShot()) jetHeliCollide(netNow());
     if (!heli) heliArrivalTick();
     // Inside a shot, simStep puts it where it is at the shot's own time.
     else if (!inShot()) { if (heli.falling) heliFollowClock(); else heliFlyTo(netNow()); }
@@ -4665,12 +4668,14 @@ if ('serviceWorker' in navigator) {
 
   function jetSize() { return Math.max(30, Math.min(52, W * 0.036)); }
 
-  // Higher than the helicopter cruises, but still anchored to the tallest peak
-  // so a tank can reach it on any map.
+  // From the band the helicopter cruises in to well above it, so the two can
+  // meet (jetMeetsHeliAt) without always doing so: a pass with a helicopter up
+  // hits it about one time in three. Anchored to the tallest peak like the
+  // helicopter, so a tank can reach it on any map.
   function jetAltitude() {
     let peak = H * 0.5;
     for (let x = 0; x < terrain.length; x++) if (terrain[x] < peak) peak = terrain[x];
-    const clearance = Math.max(50, H * 0.1) + Math.random() * H * 0.05;
+    const clearance = Math.max(44, H * 0.075) + Math.random() * H * 0.13;
     return Math.max(H * 0.06, peak - clearance);
   }
 
@@ -4764,12 +4769,54 @@ if ('serviceWorker' in navigator) {
     return out;
   }
 
-  /** A shell has hit the jet: it comes down from here, still flying forward. */
-  function jetShotDown() {
+  /** A shell has hit the jet (at match time T): it comes down from here, still flying forward. */
+  function jetShotDown(T = simClock) {
     jet.falling = true;
     jet.vx = jet.dir * jet.speed;
     jet.vy = 10;
-    jet.t = simClock;
+    jet.t = T;
+  }
+
+  // The jet and the helicopter can fly into each other. Both routes are fixed
+  // and on the match clock, so the moment they meet is arithmetic: the first
+  // step, on a SIM_DT grid from the later of the two arrivals, at which their
+  // hit boxes overlap. Every screen gets the same moment without a word, and
+  // it is the same moment whether a screen notices it mid-shot (simStep) or
+  // between shots (step) — the wrecks start from where the routes had them
+  // then. Cached, because a shot asks every step; the key holds everything the
+  // answer depends on, and legsTotal because advanceTurn can cut a route short.
+  let jetMeetCache = { key: '', T: null };
+  function jetMeetsHeliAt() {
+    if (!jet || !heli || jet.falling || heli.falling) return null;
+    const key = `${jet.id}|${jet.t0}|${heli.id}|${heli.t0}|${heli.legsTotal}`;
+    if (jetMeetCache.key === key) return jetMeetCache.T;
+    const jw = jetSize(), hw = heliSize();
+    const rx = (jw + hw) * 0.45, ry = jw * 0.22 + hw * 0.28;
+    const start = Math.max(jet.t0, heli.t0);
+    const end = jet.t0 + (W + jw * 2.1) / jet.speed;   // the jet's whole pass
+    let T = null;
+    for (let k = 0; start + k * SIM_DT <= end; k++) {
+      const t = start + k * SIM_DT;
+      const a = jetRouteAt(jet, t), b = heliRouteAt(heli, t);
+      if (a && b && Math.abs(a.x - b.x) < rx && Math.abs(a.y - b.y) < ry) { T = t; break; }
+    }
+    jetMeetCache = { key, T };
+    return T;
+  }
+
+  /** If the jet and the helicopter have met by match time T, both come down. */
+  function jetHeliCollide(T) {
+    const Tc = jetMeetsHeliAt();
+    if (Tc === null || T < Tc) return false;
+    const a = jetRouteAt(jet, Tc), b = heliRouteAt(heli, Tc);
+    jet.x = a.x; jet.y = a.y; jet.dir = a.dir;
+    heli.x = b.x; heli.y = b.y; heli.dir = b.dir; heli.legs = b.legs;
+    jetShotDown(Tc);
+    heli.falling = true;
+    heli.vy = 20;
+    heli.t = Tc;
+    spawnExplosionFx((a.x + b.x) / 2, (a.y + b.y) / 2, 36, '#ffd27a');
+    return true;
   }
 
   /**
@@ -6974,7 +7021,7 @@ if ('serviceWorker' in navigator) {
     heliDrawPos, heliRouteAt, heliLegAt, heliFlyTo, HELI_MIN_LEGS, HELI_MAX_LEGS,
     isShipTheme, drawHeli,
     JET, jetSize, spawnJet, summonJet, jetRouteAt, jetFlyTo, jetHitBy, jetArmed, jetOverField,
-    launchJetBombs, jetShotDown, moveJet, jetFollowClock, jetDrawPos, jetIn, jetOut, drawJet,
+    launchJetBombs, jetShotDown, jetMeetsHeliAt, jetHeliCollide, moveJet, jetFollowClock, jetDrawPos, jetIn, jetOut, drawJet,
     get jet() { return jet; }, set jet(v) { jet = v; },
     SHOT_SKIP_S, SHOT_SKIP_TO_S, SHOT_CATCHUP_FULL_S, CLOCK_RESYNC_MS, netRebaseClock,
     get simClock() { return simClock; },

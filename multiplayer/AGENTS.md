@@ -119,6 +119,16 @@ the jet it fell from. A shot-down jet keeps most of its forward speed
 through `heliCrash()`, so it crushes a tank it comes down on. One jet at a time;
 the CPU never calls one in.
 
+The jet and the helicopter share the sky. A bomb can hit the helicopter (it
+passes `craft: 'heli'`, so only its own jet is ignored), and the two aircraft
+can fly into each other. That needs no message either: both routes are fixed,
+so `jetMeetsHeliAt()` works out the first moment on a `SIM_DT` grid that their
+hit boxes overlap, and `jetHeliCollide(T)` — called from `simStep` inside a
+shot and from `step` between shots — brings both down from where the routes had
+them at that moment. Either wreck crushes a tank it lands on. The jet cruises
+from the helicopter's band to well above it, so a pass with a helicopter up
+meets it about a third of the time.
+
 ## What differs from the single-player build
 
 **The simulation is in world units, not canvas pixels.** This is the whole

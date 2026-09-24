@@ -4,7 +4,7 @@
 // whatever is below it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { load, loadFlat } from './harness.mjs';
+import { load, loadFlat, routeHeli } from './harness.mjs';
 
 /** A jet in level flight passing x heading `dir` at this game's current match time. */
 function routeJet(g, { x = 300, y = 150, dir = 1, speed = 180, id = 7, seat = 0, bombed = false } = {}) {
@@ -432,4 +432,120 @@ test('a round restart clears the sky', () => {
   h.g.jet = h.g.jetIn(routeJet(h.g, { x: 500 }));
   h.g.resetGame();
   assert.equal(h.g.jet, null);
+});
+
+// ---------- The jet and the helicopter ----------
+
+test('a jet’s bomb can bring the helicopter down', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.heliDue = g.netNow() + 1e6;
+  h.placeTanksAt([60, 940]);
+  // Released at x=300 from y=100 at 180 u/s, the first bomb passes y=200 about
+  // 138 further on: a helicopter all but hovering there is in its way.
+  g.jet = g.jetIn(routeJet(g, { x: 300, y: 100, dir: 1, speed: 180 }));
+  g.heli = g.heliIn(routeHeli(g, { x: 438, y: 200, dir: -1, speed: 1 }));
+  assert.equal(g.jetMeetsHeliAt(), null, 'a hundred apart in height: they do not collide');
+  g.tanks[0].weapon = 'jet';
+
+  g.fire();
+  let downed = false;
+  h.advanceUntil(() => {
+    if (g.heli && g.heli.falling) downed = true;
+    return g.state === 'AIMING' || g.state === 'GAMEOVER';
+  }, { maxMs: 20000 });
+
+  assert.ok(downed, 'the bomb burst on the airframe');
+  assert.equal(g.heli, null, 'and the wreck came down inside the shot');
+  assert.ok(g.jet && !g.jet.falling, 'the jet that dropped it flies on');
+});
+
+/** A jet and a helicopter at the same height, heading into each other. */
+function collisionCourse(g) {
+  g.heliDue = g.netNow() + 1e6;
+  g.jet = g.jetIn(routeJet(g, { x: 100, y: 150, dir: 1, speed: 180, bombed: true }));
+  g.heli = g.heliIn(routeHeli(g, { x: 500, y: 150, dir: -1, speed: 80 }));
+}
+
+test('a jet that flies into the helicopter brings both down', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.placeTanksAt([60, 940]);
+  collisionCourse(g);
+  const T = g.jetMeetsHeliAt();
+  assert.ok(T !== null && T > g.netNow(), 'they are going to meet');
+
+  h.advanceUntil(() => g.jet && g.jet.falling, { maxMs: 5000 });
+  assert.ok(g.heli && g.heli.falling, 'the helicopter is coming down too');
+  assert.equal(g.jet.t >= T, true);
+  assert.ok(Math.abs(g.jet.y - 150) < 40 && Math.abs(g.heli.y - 150) < 40, 'from where they met');
+  assert.ok(g.explosions.length > 0, 'with a bang');
+
+  h.advanceUntil(() => !g.jet && !g.heli, { maxMs: 10000 });
+  assert.equal(g.jet, null);
+  assert.equal(g.heli, null, 'and both land');
+});
+
+test('they meet at the same moment on every screen, with nothing sent', () => {
+  const { host, guest, hs } = liveMatch();
+  for (const c of [host, guest]) collisionCourse(c.g);
+  host.advanceUntil(() => host.g.jet && host.g.jet.falling, { maxMs: 5000 });
+  guest.advanceUntil(() => guest.g.jet && guest.g.jet.falling, { maxMs: 5000 });
+
+  assert.equal(guest.g.jetMeetsHeliAt(), null, 'nothing left to meet');
+  assert.ok(Math.abs(host.g.jet.x - guest.g.jet.x) < 5, 'the jet wreck starts in the same place');
+  assert.ok(Math.abs(host.g.heli.x - guest.g.heli.x) < 5, 'and so does the helicopter’s');
+  assert.deepEqual(hs.payloads('jet'), [], 'without a jet message');
+});
+
+test('the wreckage of a collision destroys a tank it lands on', () => {
+  // Where the two wrecks come down, found by letting it happen once.
+  const probe = loadFlat();
+  probe.placeTanksAt([30, 970]);
+  collisionCourse(probe.g);
+  let jetX = null, heliX = null;
+  probe.advanceUntil(() => {
+    if (probe.g.jet) jetX = probe.g.jet.x;
+    if (probe.g.heli) heliX = probe.g.heli.x;
+    return !probe.g.jet && !probe.g.heli;
+  }, { maxMs: 10000 });
+  assert.ok(jetX > 150 && jetX < 850 && heliX > 150 && heliX < 850, 'both land on the field');
+
+  for (const [who, x] of [['jet', jetX], ['helicopter', heliX]]) {
+    const h = loadFlat();
+    h.placeTanksAt([Math.abs(x - 30) > 300 ? 30 : 970, Math.round(x)]);
+    collisionCourse(h.g);
+    h.advanceUntil(() => !h.g.jet && !h.g.heli, { maxMs: 10000 });
+    assert.equal(h.g.tanks[1].alive, false, `the ${who} wreck finishes the tank under it`);
+    assert.equal(h.g.tanks[0].alive, true, 'one far away is untouched');
+  }
+});
+
+test('a collision during a shot holds the turn and lands the same on both screens', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  for (const c of [host, guest]) {
+    c.flatTerrain(400);
+    c.placeTanksAt([150, 900]);
+    collisionCourse(c.g);
+  }
+  // A short lob that lands well before the two wrecks do.
+  host.g.tanks[0].angle = 60;
+  host.g.tanks[0].power = 30;
+  host.g.fire();
+  const [turn] = hs.payloads('turn');
+  assert.ok(turn.result.jet === null && turn.result.heli === null, 'the result has both down already');
+  gs.deliver({ t: 'msg', from: 1, d: turn });
+
+  let heldForWreck = false;
+  host.advanceUntil(() => {
+    if (host.g.jet && host.g.jet.falling && host.g.state === 'EXPLODING') heldForWreck = true;
+    return host.g.state === 'AIMING' && !host.g.activeShot;
+  }, { maxMs: 20000 });
+  guest.advanceUntil(() => guest.g.state === 'AIMING' && !guest.g.activeShot, { maxMs: 20000 });
+
+  assert.ok(heldForWreck, 'the turn waited for the wreckage');
+  assert.deepEqual(Array.from(guest.g.terrain), Array.from(host.g.terrain), 'the same craters');
+  assert.deepEqual(Array.from(guest.g.tanks, t => t.hp), Array.from(host.g.tanks, t => t.hp));
+  assert.equal(host.g.currentPlayer, 1);
+  assert.equal(guest.g.currentPlayer, 1);
 });
