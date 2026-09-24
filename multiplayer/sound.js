@@ -445,7 +445,9 @@
     // its warheads: small, fast and thin — high, quick spin, little air
     warhead:  { pitch: 1.45, spin: 1.35, tumble: 0.9, shriek: 1.3, rush: 0.7,  level: 0.8 },
     // a missile gliding after its burn: finned, so no tumble, all airflow
-    missile:  { pitch: 1.2,  spin: 0.25, tumble: 0.2, shriek: 0.55, rush: 1.45, level: 0.9 }
+    missile:  { pitch: 1.2,  spin: 0.25, tumble: 0.2, shriek: 0.55, rush: 1.45, level: 0.9 },
+    // a jet's bomb: finned and heavy, a low steady moan with little tumble
+    jet:      { pitch: 0.7,  spin: 0.35, tumble: 0.4, shriek: 0.8, rush: 1.3,  level: 1.05 }
   };
 
   // A split MIRV keeps weapon 'mirv' and is marked split, so that is what
@@ -608,6 +610,37 @@
         l.filt.frequency.value = falling ? 300 : 900;
         l.hum.gain.value = falling ? 0.02 : 0.05;
         for (const o of l.oscs) o.frequency.value = o.base * (falling ? 0.55 : 1);
+      }
+      panLoop(l, x01);
+    },
+
+    // A jet on its pass: a broad roar under a turbine whine. It is heard
+    // across the field, so it fades in over half a second rather than
+    // starting on the tick it spawns. A wreck loses the whine and the roar
+    // goes dark and ragged.
+    jet(on, falling, x01) {
+      if (!on) { stopLoop('jet'); return; }
+      const l = startLoop('jet', (ctx, dest) => {
+        const t = ctx.currentTime;
+        const out = ctx.createGain();
+        out.gain.setValueAtTime(0.0001, t);
+        out.gain.exponentialRampToValueAtTime(1, t + 0.5);
+        out.connect(dest);
+        const bed = loopBed(ctx, { freq: 700, q: 0.6, rate: 0.9, gain: 0.12, dest: out });
+        const whine = ctx.createOscillator();
+        whine.type = 'triangle';
+        whine.frequency.value = 1650;
+        const whineGain = ctx.createGain();
+        whineGain.gain.value = 0.018;
+        whine.connect(whineGain); whineGain.connect(out);
+        whine.start(t);
+        const stop = bed.src.stop.bind(bed.src);
+        bed.src.stop = (when) => { try { whine.stop(when); } catch (e) { /* stopped */ } stop(when); };
+        return { src: bed.src, gain: out, out, filt: bed.filt, whine, whineGain };
+      });
+      if (l) {
+        l.filt.frequency.value = falling ? 320 : 700;
+        l.whineGain.gain.value = falling ? 0 : 0.018;
       }
       panLoop(l, x01);
     },

@@ -93,6 +93,32 @@ per-theme gravity would have to travel in the snapshot. In a match the theme tra
 preference of whoever deals the round (the host) that everyone sees; picking
 one mid-match waits for the next round rather than repainting one screen.
 
+## The jet
+
+Jet Strike is a weapon only this build has. Picking it (`pickWeapon('jet')`,
+or the hidden select) is `summonJet()`: a jet comes in from off one edge, and
+the round is spent there and then — a pass that ends with its bombs still aboard
+is wasted, and the turn stays with the player. While it is inbound the weapon
+choice is locked, the aim preview and the slingshot are off, the banner says
+FIRE TO DROP, and the camera follows the jet. FIRE drops a stick of
+`JET.bombs` from wherever it is, one every `JET.bombGapSteps` fixed steps; each
+bomb leaves with the jet's velocity and no downward throw, then falls under
+gravity and wind like any shell. FIRE does nothing until the jet is over the
+field.
+
+It is built the way the helicopter is. Its route — `t0`, `fromLeft`, `speed`,
+`y` — is fixed when it is called in and announced once in a `jet` message
+(with the seat's ammo), so every screen places it from the match clock
+(`jetRouteAt`) and a shot meets it at the shot's own time (`jetFlyTo(simClock)`
+in `simStep`). It crosses in 5.5–6.5s (the helicopter takes 9–14) and never
+turns back: past the far edge the route is over. It stays up after its drop, so
+`turn`, its `result` and every snapshot carry it, and the next seat can still
+shoot it. `firstContact()` takes a `craft` argument because a bomb must not hit
+the jet it fell from. A shot-down jet keeps most of its forward speed
+(`JET.drag`), holds the turn in `EXPLODING` like a helicopter wreck, and lands
+through `heliCrash()`, so it crushes a tank it comes down on. One jet at a time;
+the CPU never calls one in.
+
 ## What differs from the single-player build
 
 **The simulation is in world units, not canvas pixels.** This is the whole
@@ -233,7 +259,7 @@ the seat, `fire()` first runs the whole shot to the end on a copy of the world
 flight, blasts, craters, damage, a helicopter brought down and where its wreck
 lands, the turn handed on and the new wind. Then one message goes out:
 
-- **`turn`** — `{seat, angle, power, weapon, ai, turn, at, seed, wind, heli, result}`.
+- **`turn`** — `{seat, angle, power, weapon, ai, turn, at, seed, wind, heli, jet, result}`.
   `result` is the snapshot the shot leaves behind. Every screen, the shooter's
   too, replays the shot from the inputs (`beginShot()`) and takes `result` as
   the board when it lands (`finishShot()`).
@@ -258,8 +284,8 @@ What makes a replay land exactly on `result` (there are tests for each):
 - **The same starting world.** The message carries the wind, the helicopter's
   route and the moment it was fired (`at`); terrain and tanks are the previous
   `result`.
-- **Nothing lands on a replay in progress.** `turn`, `heli`, `timeout` and
-  `sync` go through `netReceive()`: applied in the order sent, and only when no
+- **Nothing lands on a replay in progress.** `turn`, `heli`, `jet`, `timeout`
+  and `sync` go through `netReceive()`: applied in the order sent, and only when no
   shot is playing (`activeShot`) — otherwise queued in `online.inbox` and
   drained by `finishShot()`. A screen a whole shot behind (one queued, another
   arrives) skips to the current shot's result rather than falling further back.

@@ -23,7 +23,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // 2: `time`, and the game's `turn` carries its result.
 // 3: the game sends the helicopter as its route.
-export const PROTOCOL = 3;
+// 4: the game sends the jet.
+export const PROTOCOL = 4;
 
 // Room codes are read aloud and typed on phones, so the alphabet drops the
 // characters people confuse: O/0, I/1, S/5.
