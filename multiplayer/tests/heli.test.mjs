@@ -58,11 +58,73 @@ test('the wreck crushes whatever it lands on and blasts what is nearby', () => {
   g.tanks.forEach(t => { t.hp = 100; t.alive = true; });
   g.state = 'FIRING'; // mid-shot, so the crash does not try to resolve the turn
 
-  g.heliCrash(400, g.groundHeightAt(400));
+  g.heliCrash(400, g.groundHeightAt(400) - 18, g.tanks[0]); // on its roof
 
   assert.equal(g.tanks[0].alive, false, 'a direct landing destroys the tank outright');
   assert.ok(g.tanks[1].hp < 100 && g.tanks[1].hp > 0, 'a near miss takes heavy damage');
   assert.equal(g.tanks[2].hp, 100, 'the far tank is clear');
+});
+
+test('a wreck on the ground does not destroy a tank: the blast eases off, then fades', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.playerCount = 6;
+  g.resetGame();
+  h.flatTerrain(400);
+  const off = [4, 6, 16, 26, 50, 74];
+  h.placeTanksAt(off.map((_, i) => 100 + i * 200));
+  g.tanks.forEach(t => { t.hp = 100; t.alive = true; });
+  g.state = 'FIRING'; // mid-shot, so the crash does not try to resolve the turn
+
+  // One crash per tank, each far enough from the others to touch only its own.
+  g.tanks.forEach((t, i) => g.heliCrash(t.x + off[i], g.groundHeightAt(t.x)));
+
+  const took = g.tanks.map(t => 100 - t.hp);
+  assert.ok(g.tanks.every(t => t.alive), 'not even 4px off centre, on the ground beside it');
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  assert.ok(near(took[0], 80), `80 at 4px, took ${took[0]}`);
+  assert.ok(near(took[1], 80), `80 at 6px, took ${took[1]}`);
+  assert.ok(near(took[2], 70), `70 at 16px, took ${took[2]}`);
+  assert.ok(near(took[3], 60), `60 at 26px, took ${took[3]}`);
+  assert.ok(near(took[4], 30), `30 at 50px, took ${took[4]}`);
+  assert.equal(took[5], 0, 'nothing at 74px');
+});
+
+test('a wreck that hits a tank within 5px of its centre line destroys it', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.flatTerrain(400);
+  h.placeTanksAt([300, 800]);
+  g.state = 'FIRING';
+  const roof = g.groundHeightAt(300) - 14 - 4.5;   // where the hull stops a falling wreck
+
+  for (const [dx, dies] of [[0, true], [4.9, true], [-4.9, true], [5, false], [10, false]]) {
+    g.tanks.forEach(t => { t.hp = 100; t.alive = true; });
+    g.heliCrash(300 + dx, roof, g.tanks[0]);
+    assert.equal(g.tanks[0].alive, !dies, `${dx}px across: ${dies ? 'destroyed' : 'survives'}`);
+  }
+});
+
+test('a wreck falling onto a tank finds it, and is judged across only', () => {
+  const h = loadFlat();
+  const { g } = h;
+  h.flatTerrain(400);
+  h.placeTanksAt([300, 800]);
+  const t = g.tanks[0];
+  const drop = (dx) => {
+    g.tanks.forEach(tk => { tk.hp = 100; tk.alive = true; });
+    g.state = 'FIRING';
+    // Straight down (no speed, so no drift) from well above the roof.
+    g.heli = { id: 1, falling: true, t: g.netNow(), x: t.x + dx, y: 100, dir: 1, speed: 0,
+      vy: 0, spin: 0, legs: 1, seen: new Set() };
+    for (let i = 0; i < 2000 && g.heli; i++) g.moveHeli(1 / 60);
+    return t;
+  };
+  assert.equal(drop(4).alive, false, '4px off the centre line: crushed');
+  assert.equal(drop(-4).alive, false, 'either side');
+  const clipped = drop(8);
+  assert.equal(clipped.alive, true, '8px off: the roof is hit, but not square on');
+  assert.ok(clipped.hp < 100, 'and the blast still hurts');
 });
 
 test('a crash that ends the round is resolved on the spot', () => {
@@ -73,7 +135,7 @@ test('a crash that ends the round is resolved on the spot', () => {
   g.currentPlayer = 0;
   g.state = 'AIMING';
 
-  g.heliCrash(800, g.groundHeightAt(800)); // lands on the only opponent
+  g.heliCrash(800, g.groundHeightAt(800) - 18, g.tanks[1]); // lands on the only opponent
 
   assert.equal(g.tanks[1].alive, false);
   assert.equal(g.state, 'GAMEOVER');
@@ -91,7 +153,7 @@ test('a crash that kills the seat whose turn it is hands the turn on', () => {
   g.currentPlayer = 1;
   g.state = 'AIMING';
 
-  g.heliCrash(500, g.groundHeightAt(500));
+  g.heliCrash(500, g.groundHeightAt(500) - 18, g.tanks[1]);
 
   assert.equal(g.tanks[1].alive, false);
   assert.notEqual(g.currentPlayer, 1, 'the dead seat does not keep the turn');
@@ -240,7 +302,7 @@ test('the wreck\'s blast is measured to the whole hull, not just its roof', () =
 
   g.heliCrash(t.x + 40, g.groundHeightAt(t.x)); // on the ground beside the tracks
 
-  assert.ok(Math.abs(t.hp - (100 - 80 * (1 - 40 / 74))) < 1e-6,
+  assert.ok(Math.abs(t.hp - (100 - 60 * (74 - 40) / (74 - 26))) < 1e-6,
     `took ${(100 - t.hp).toFixed(2)}, expected the blast at 40px`);
 });
 
