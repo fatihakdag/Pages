@@ -4053,7 +4053,7 @@ if ('serviceWorker' in navigator) {
     for (let i = 1; i <= n; i++) {
       const x = x0 + (x1 - x0) * i / n;
       const y = y0 + (y1 - y0) * i / n;
-      let what = null;
+      let what = null, tank = null;
       if (x < -20 || x > W + 20 || y > H + 60) what = 'off';
       else if (heliHitBy(x, y)) what = 'heli';
       else if (y >= groundHeightAt(x)) what = 'ground';
@@ -4061,10 +4061,10 @@ if ('serviceWorker' in navigator) {
         for (const t of tanks) {
           if (!t.alive) continue;
           const topY = groundHeightAt(t.x) - TANK_H;
-          if (Math.abs(x - t.x) < TANK_W / 2 && y > topY - 4 && y < topY + TANK_H) { what = 'tank'; break; }
+          if (Math.abs(x - t.x) < TANK_W / 2 && y > topY - 4 && y < topY + TANK_H) { what = 'tank'; tank = t; break; }
         }
       }
-      if (what) return { what, x, y, px, py };
+      if (what) return { what, x, y, px, py, tank };
       px = x; py = y;
     }
     return null;
@@ -4464,10 +4464,13 @@ if ('serviceWorker' in navigator) {
 
   // Landing on a tank destroys it outright; everything close by takes a big
   // blast. This is deliberately harsher than any shell in the game.
-  function heliCrash(x, y) {
-    // Only a wreck that comes down square on a tank destroys it. Around that
-    // the blast does BLAST_DMG out to NEAR, eases to EDGE_DMG at EDGE, and
-    // fades from there to nothing at BLAST.
+  /** A wreck comes down at (x, y) — on `onTank`, if it hit one rather than the ground. */
+  function heliCrash(x, y, onTank = null) {
+    // Only a wreck that comes down on a tank, within CRUSH of its centre line,
+    // destroys it. Measured across only: the hull stops the wreck 4-5 above
+    // the roof, so a distance that counted that height left a window barely
+    // 3 wide. Otherwise the blast does BLAST_DMG out to NEAR, eases to EDGE_DMG
+    // at EDGE, and fades from there to nothing at BLAST.
     const CRUSH = 5, NEAR = 6, EDGE = 26, BLAST = 74;
     const BLAST_DMG = 80, EDGE_DMG = 60;
     // Inside a shot every screen works the crash out: each is replaying the same
@@ -4482,10 +4485,11 @@ if ('serviceWorker' in navigator) {
     if (ours) {
       for (const t of tanks) {
         if (!t.alive) continue;
-        const dist = hullDistance(t, x, y);
         // Crushed only if the wreck comes down on it. Testing the horizontal
-        // alone flattened a tank on a ledge far above or below the crash.
-        if (dist < CRUSH) { t.hp = 0; t.alive = false; continue; }
+        // alone, without the hit, flattened a tank on a ledge far above or
+        // below the crash.
+        if (t === onTank && Math.abs(t.x - x) < CRUSH) { t.hp = 0; t.alive = false; continue; }
+        const dist = hullDistance(t, x, y);
         if (dist < BLAST) {
           t.hp -= dist <= NEAR ? BLAST_DMG
             : dist <= EDGE ? BLAST_DMG - (BLAST_DMG - EDGE_DMG) * (dist - NEAR) / (EDGE - NEAR)
@@ -4788,7 +4792,7 @@ if ('serviceWorker' in navigator) {
     heliDownId = heli.id;
     heli = null;
     if (c.what === 'off') return;
-    heliCrash(Math.max(0, Math.min(W - 1, c.px)), c.py);
+    heliCrash(Math.max(0, Math.min(W - 1, c.px)), c.py, c.tank);
   }
 
   /**
