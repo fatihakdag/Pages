@@ -122,11 +122,16 @@ the CPU never calls one in.
 It looks and sounds like an F-22. `drawJet()` draws the side profile in units of
 the jet's length (chined nose, gold-tinted canopy, caret intake, twin canted
 fins, flat nozzle with an afterburner), so it stays inside `jetHitBy()`'s box.
-`Sound.jet` in `sound.js` layers a brown-noise roar, a tearing rush, an
-afterburner crackle (slow noise through a dead-zone waveshaper) and a turbine
-whine. `updateSoundLoops()` passes it `approach` (heading into the middle of the
-view or away from it), which bends the pitch like a pass, and `near`, which
-swells it overhead to just above a shell's whistle.
+`Sound.jet` in `sound.js` is tuned against a recording of a real F-22 pass:
+coming in it is bright and led by a turbine whine near 3 kHz, going away it is
+a dark exhaust roar with the whine Doppler-dropped to near 1 kHz, and it is
+loudest a little after it passes. It is a brown-noise roar and a white-noise
+rush (both lowpassed, which together come out close to the recording's flat
+spread), the whine, and a little afterburner crackle near the peak. The game
+passes only where the jet is on screen and its direction; `jetPass()` turns
+that into `approach` (which way through the pass) and `near` (the loudness).
+Every number is in `JET_VOICE`, pairs being [coming in, gone by]. At its
+loudest it sits just above a shell's whistle.
 
 The jet and the helicopter share the sky. A bomb can hit the helicopter (it
 passes `craft: 'heli'`, so only its own jet is ignored), and the two aircraft

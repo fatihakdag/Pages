@@ -1549,7 +1549,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v68';
+  const BUILD = 'v69';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -3070,13 +3070,9 @@ if ('serviceWorker' in navigator) {
     const ship = isShipTheme();
     Sound.rotor(!!heli && !ship, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
     Sound.thruster(!!heli && ship, !!(heli && heli.falling), heli ? screenX01(heli.x) : 0.5);
-    // The jet's pass: whether it is closing on the middle of the view or
-    // leaving it bends its pitch, and how near overhead it is swells it.
-    const jetX = jet ? screenX01(jet.x) : 0.5;
-    Sound.jet(!!jet, !!(jet && jet.falling), jetX, {
-      approach: jet ? Math.tanh((0.5 - jetX) * jet.dir * 3) : 0,
-      near: jet ? Math.max(0, 1 - Math.abs(jetX - 0.5) * 1.4) : 0
-    });
+    // Where the jet is on screen and which way it flies: sound.js works out
+    // the pass from that (jetPass) — its pitch drop and its swell.
+    Sound.jet(!!jet, !!(jet && jet.falling), jet ? screenX01(jet.x) : 0.5, jet ? jet.dir : 1);
     let burning = false, burnX = 0.5, rolling = 0, rollX = 0.5;
     let flying = false, fall = 0, flyX = 0.5, impactIn = Infinity, speed = 0, flight = null;
     for (const p of projectiles) {
