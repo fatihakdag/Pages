@@ -4465,7 +4465,9 @@ if ('serviceWorker' in navigator) {
   // Landing on a tank destroys it outright; everything close by takes a big
   // blast. This is deliberately harsher than any shell in the game.
   function heliCrash(x, y) {
-    const CRUSH = 26, BLAST = 74, BLAST_DMG = 80;
+    // Only a wreck that comes down square on a tank destroys it. Near that, the
+    // blast does its full damage; past FULL it fades to nothing at BLAST.
+    const CRUSH = 5, FULL = 26, BLAST = 74, BLAST_DMG = 80;
     // Inside a shot every screen works the crash out: each is replaying the same
     // shot in the same fixed steps and gets the same answer, and the shooter's
     // result carries it regardless. Between turns (a wreck that arrived mid-fall
@@ -4483,7 +4485,7 @@ if ('serviceWorker' in navigator) {
         // alone flattened a tank on a ledge far above or below the crash.
         if (dist < CRUSH) { t.hp = 0; t.alive = false; continue; }
         if (dist < BLAST) {
-          t.hp -= BLAST_DMG * (1 - dist / BLAST);
+          t.hp -= dist <= FULL ? BLAST_DMG : BLAST_DMG * (BLAST - dist) / (BLAST - FULL);
           if (t.hp <= 0) { t.hp = 0; t.alive = false; }
         }
       }
