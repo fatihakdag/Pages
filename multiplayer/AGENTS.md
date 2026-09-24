@@ -294,6 +294,11 @@ the edge and comes in over the one it left by. So:
   becomes the leg it is on plus one (two at least, `HELI_MAX_LEGS` at most). That
   is inside the result everyone takes, where an edge is reached by each screen at
   its own moment. Past its last leg the route is over and each screen drops it.
+- **When the next one comes is a match-clock moment too** (`heliDue`), carried
+  in `heli` and every snapshot. It keeps passing through shots, other seats'
+  turns and CPU turns. It is brought in only by the client playing the current
+  turn (`heliAuthority()`: the seat's own client, or whoever plays a CPU-held
+  seat), and only between shots. Each round sets its own first one (`resetGame()`).
 - A shot-down wreck leaves its route: it becomes `x, y, vy, spin, t` stepped by
   `moveHeli()` inside the shot, and holds the turn in `EXPLODING` until it lands,
   so every screen crashes it inside the shot and agrees on what it did.

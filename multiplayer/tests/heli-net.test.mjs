@@ -77,7 +77,7 @@ test('only the player whose turn it is brings one in', () => {
 test('the whole helicopter travels, not a sketch of it', () => {
   const { host, guest, gs } = liveMatch();
   host.g.heli = host.g.heliIn(routeHeli(host.g, { x: 321, y: 150, dir: -1, speed: 88, legsTotal: 3 }));
-  host.g.heliTimer = 17.5;
+  host.g.heliDue = host.g.netNow() + 17.5;
 
   let snap = JSON.parse(JSON.stringify(host.g.netSnapshot()));
   gs.deliver({ t: 'msg', from: 1, d: { k: 'sync', state: snap } });
@@ -88,7 +88,7 @@ test('the whole helicopter travels, not a sketch of it', () => {
   }
   assert.deepEqual(h.ys, host.g.heli.ys, 'every leg’s altitude');
   assert.deepEqual([...h.seen].sort(), [0, 1], 'including who has had a crack at it');
-  assert.equal(guest.g.heliTimer, 17.5, 'and the countdown to the next one');
+  assert.equal(guest.g.heliDue, host.g.heliDue, 'and when the next one is due');
 
   // A wreck is off its route: its own position and fall travel instead.
   host.g.heli = { id: 9, falling: true, t: host.g.netNow(), x: 321, y: 150, dir: -1, speed: 88,
@@ -161,7 +161,59 @@ test('a helicopter arriving mid-turn is seen at once, not at the end of it', () 
   const T = host.g.netNow();
   assert.deepEqual({ ...guest.g.heliRouteAt(guest.g.heli, T) }, { ...host.g.heliRouteAt(host.g.heli, T) },
     'on the same route, so in the same place at any moment');
-  assert.equal(guest.g.heliTimer, host.g.heliTimer);
+  assert.equal(guest.g.heliDue, host.g.heliDue);
+});
+
+// The next fly-by is a moment on the match clock. It used to be a countdown
+// that only ran while the seat holding the turn was aiming, so every shot and
+// every turn of somebody else's froze it, and in a real match the first one
+// came minutes after its 60–110 seconds.
+test('the wait for one runs through other players’ turns', () => {
+  const { host } = liveMatch();
+  host.g.heli = null;
+  host.g.heliDue = host.g.netNow() + 30;
+  host.g.currentPlayer = 1;     // the guest's turn: not ours to bring one in
+  for (let i = 0; i < 8; i++) { host.g.netResetTurnClock(); host.advance(5000); }
+  assert.equal(host.g.heli, null, 'it waits for a turn of ours');
+
+  host.g.currentPlayer = 0;
+  host.advance(50);
+  assert.ok(host.g.heli, 'and is there the moment one begins, not 30 seconds into it');
+});
+
+test('time in the air counts toward the next one', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  for (const c of [host, guest]) c.g.heli = null;
+  host.g.heliDue = host.g.netNow() + 1;   // falls due while the shot is flying
+  host.g.fire();
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('turn')[0] });
+  assert.ok(guest.advanceUntil(() => guest.g.state === 'AIMING' && guest.g.currentPlayer === 1,
+    { maxMs: 30000 }), 'the shot lands and the turn is the guest’s');
+  guest.advance(50);
+  assert.ok(guest.g.heli, 'it fell due in the air, so it is there as the guest starts aiming');
+});
+
+test('a CPU-held seat’s turn can bring one in, on the client playing it', () => {
+  const { host, guest } = liveMatch();
+  for (const c of [host, guest]) {
+    c.g.heli = null;
+    c.g.online.aiSeats = [1];
+    c.g.currentPlayer = 1;
+    c.g.state = 'AIMING';
+    c.g.heliDue = c.g.netNow() - 1;
+  }
+  host.advance(50);
+  guest.advance(50);
+  assert.ok(host.g.heli, 'the host covers the CPU seat, so it brings it in');
+  assert.equal(guest.g.heli, null, 'the seat’s own absent player does not');
+});
+
+test('each round schedules its own first fly-by', () => {
+  const h = loadFlat();
+  h.g.heliDue = h.g.netNow() + 500;   // what a long previous round left behind
+  h.g.resetGame();
+  const wait = h.g.heliDue - h.g.netNow();
+  assert.ok(wait >= 60 && wait <= 110, `first one due in ${wait}s`);
 });
 
 test('a helicopter leaving is announced too', () => {

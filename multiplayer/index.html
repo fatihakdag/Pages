@@ -2737,6 +2737,7 @@ if ('serviceWorker' in navigator) {
     explosions = [];
     particles = [];
     heli = null;
+    heliScheduleFirst(); // a round's first comes on its own clock, not what the last one left
     nextTheme();
     newTerrain();
     placeTanks();
@@ -3509,7 +3510,7 @@ if ('serviceWorker' in navigator) {
       tanks: tanks.map(t => ({ ...t, ammo: { ...t.ammo } })),
       terrain: terrain.slice(),
       wind, currentPlayer, state, turnSeq, lastWinner, shotExploded, explodeTimer,
-      heliTimer, heliDownId, simRandom, activeShot, projectiles, spawnQueue,
+      heliDue, heliDownId, simRandom, activeShot, projectiles, spawnQueue,
       simClock, shotBudget, shotLead,
       explosions: explosions.map(e => ({ ...e })),
       particles: particles.map(p => ({ ...p })),
@@ -3521,7 +3522,7 @@ if ('serviceWorker' in navigator) {
     tanks = s.tanks; terrain = s.terrain; wind = s.wind;
     currentPlayer = s.currentPlayer; state = s.state; turnSeq = s.turnSeq;
     lastWinner = s.lastWinner; shotExploded = s.shotExploded; explodeTimer = s.explodeTimer;
-    heliTimer = s.heliTimer; heliDownId = s.heliDownId; simRandom = s.simRandom;
+    heliDue = s.heliDue; heliDownId = s.heliDownId; simRandom = s.simRandom;
     activeShot = s.activeShot; projectiles = s.projectiles; spawnQueue = s.spawnQueue;
     explosions = s.explosions; particles = s.particles; heli = s.heli;
     simClock = s.simClock; shotBudget = s.shotBudget; shotLead = s.shotLead;
@@ -4277,7 +4278,7 @@ if ('serviceWorker' in navigator) {
     camFollow(dt);
     netCheckTurnClock();
     rotorAngle += dt * 26;
-    if (!heli) heliArrivalTick(dt);
+    if (!heli) heliArrivalTick();
     // Inside a shot, simStep puts it where it is at the shot's own time.
     else if (!inShot()) { if (heli.falling) heliFollowClock(); else heliFlyTo(netNow()); }
     updateSoundLoops();
@@ -4392,8 +4393,15 @@ if ('serviceWorker' in navigator) {
   // whatever it lands on is finished, which makes it a gamble worth taking.
   let heli = null;
   let rotorAngle = 0;
-  // the first one comes sooner so it gets discovered; after that it's rare
-  let heliTimer = 60 + Math.random() * 50;
+  // When the next one is due, on the match clock (netNow). A moment rather than
+  // a countdown: a countdown only ran on the screen whose turn it was, and only
+  // while that player aimed, so every shot, every other player's turn and every
+  // CPU turn stopped it and a fly-by came several minutes late. A moment on the
+  // shared clock passes the same for everyone, whatever is on screen.
+  // The first one comes sooner so it gets discovered; after that it's rare.
+  let heliDue = 0;
+  function heliScheduleFirst() { heliDue = netNow() + 60 + Math.random() * 50; }
+  function heliScheduleNext() { heliDue = netNow() + 120 + Math.random() * 60; }
 
   function heliSize() { return Math.max(30, Math.min(58, W * 0.04)); }
 
@@ -4515,7 +4523,7 @@ if ('serviceWorker' in navigator) {
     // alone until the next snapshot wiped it again.
     if (!heliAuthority()) return;
     spawnHeli();
-    heliTimer = 120 + Math.random() * 60; // don't let a scheduled one pile in behind it
+    heliScheduleNext(); // don't let a scheduled one pile in behind it
     netAnnounceHeli();
   }
 
@@ -4655,19 +4663,22 @@ if ('serviceWorker' in navigator) {
 
   /**
    * Who decides what the helicopter does. Offline that is us; in a match it is
-   * whoever's turn it is, and their snapshot carries the result to everyone
-   * else. Without this each client runs its own arrival timer and its own
+   * whoever's turn it is — or, on a CPU-held seat, the client playing it
+   * (netCpuPlaysHere) — and their snapshot carries the result to everyone else. Without this each client runs its own arrival timer and its own
    * Math.random, so one player is shooting at a helicopter the other cannot
    * see — and the two disagree about whether the shot hit anything.
    *
    * Movement needs no authority at all: the route is fixed when it spawns, and
    * every screen works out the same position from it and the match clock.
    */
-  function heliAuthority() { return !netPlaying() || currentPlayer === online.seat; }
+  function heliAuthority() {
+    if (!netPlaying()) return true;
+    return netSeatIsAi(currentPlayer) ? netCpuPlaysHere(currentPlayer) : currentPlayer === online.seat;
+  }
 
   function updateHeli(dt) {
     rotorAngle += dt * 26;
-    if (!heli) { heliArrivalTick(dt); return; }
+    if (!heli) { heliArrivalTick(); return; }
     if (heli.falling) moveHeli(dt); else heliFlyTo(netNow());
   }
 
@@ -4716,11 +4727,14 @@ if ('serviceWorker' in navigator) {
     heli.x = at.x; heli.y = at.y; heli.dir = at.dir; heli.legs = at.legs;
   }
 
-  /** Count down to the next fly-by, on the client whose turn it is — never mid-shot. */
-  function heliArrivalTick(dt) {
+  /**
+   * Bring in the next fly-by once it is due — on the client whose turn it is,
+   * and never mid-shot. One that falls due during a shot or a turn nobody here
+   * plays turns up as soon as a turn that is ours begins.
+   */
+  function heliArrivalTick() {
     if (inShot() || state === 'GAMEOVER' || !heliAuthority()) return;
-    heliTimer -= dt;
-    if (heliTimer <= 0) { spawnHeli(); heliTimer = 120 + Math.random() * 60; }
+    if (netNow() >= heliDue) { spawnHeli(); heliScheduleNext(); }
   }
 
   // Further apart than this and the stamp is from another clock (the page was
@@ -5567,6 +5581,7 @@ if ('serviceWorker' in navigator) {
    * somewhere else entirely and the shot on screen would try to catch up years.
    */
   function netRebaseClock(shift) {
+    heliDue += shift;
     if (heli) {
       if (Number.isFinite(heli.t0)) heli.t0 += shift;
       if (Number.isFinite(heli.t)) heli.t += shift;
@@ -5676,6 +5691,12 @@ if ('serviceWorker' in navigator) {
     if (i >= 0) online.aiSeats.splice(i, 1);
   }
 
+  /** Is this CPU-held seat played here? See netPlayAiTurn for who that is. */
+  function netCpuPlaysHere(seat) {
+    const cover = netActsForSeat(seat);
+    return cover === online.seat || (cover === -1 && seat === online.seat);
+  }
+
   /** Play a CPU-held seat, on the client that speaks for it. */
   function netPlayAiTurn() {
     if (!netPlaying() || state !== 'AIMING') return;
@@ -5685,8 +5706,7 @@ if ('serviceWorker' in navigator) {
     // that is where its player comes back, and a CPU firing for them there too
     // sent two shots for one turn. The seat's own client stands in only when
     // nobody else can (everyone else is CPU-held too), or the game would stall.
-    const cover = netActsForSeat(seat);
-    if (!(cover === online.seat || (cover === -1 && seat === online.seat))) return;
+    if (!netCpuPlaysHere(seat)) return;
     const token = turnToken;
     const stillTheirTurn = () =>
       turnToken === token && state === 'AIMING' && currentPlayer === seat;
@@ -6105,7 +6125,7 @@ if ('serviceWorker' in navigator) {
     }
     if (d.k === 'heli') {
       heli = heliIn(d.heli);
-      if (typeof d.heliTimer === 'number') heliTimer = d.heliTimer;
+      heliDueIn(d);
       return;
     }
     if (d.k === 'timeout') {
@@ -6263,6 +6283,16 @@ if ('serviceWorker' in navigator) {
    * whether there is one (and which), whether it is coming down, and how many
    * legs it will fly. Turnarounds are not news — they are part of the route.
    */
+  /**
+   * The next fly-by's due time from a `heli` or a snapshot. A page still on the
+   * old build (the service worker can hold one for a visit) sends a countdown,
+   * `heliTimer`, instead: read as from now, it is at least never worse.
+   */
+  function heliDueIn(m) {
+    if (typeof m.heliDue === 'number') heliDue = m.heliDue;
+    else if (typeof m.heliTimer === 'number') heliDue = netNow() + m.heliTimer;
+  }
+
   function heliSignature() {
     return heli ? `${heli.id}|${heli.falling ? 1 : 0}|${heli.legsTotal}` : 'none';
   }
@@ -6307,7 +6337,7 @@ if ('serviceWorker' in navigator) {
     // receiving does not keep deciding it has news.
     heliAnnounced = heliSignature();
     if (!netPlaying() || !heliAuthority()) return;
-    netSend('heli', { heli: heliOut(), heliTimer });
+    netSend('heli', { heli: heliOut(), heliDue });
   }
 
   function netSnapshot() {
@@ -6326,9 +6356,9 @@ if ('serviceWorker' in navigator) {
       theme: THEMES.indexOf(theme),
       // The whole helicopter, not a sketch of it: a falling one that loses vy
       // and spin lands somewhere different, and legs/seen decide when it
-      // leaves. heliTimer travels too, so both sides expect the next one at
+      // leaves. heliDue travels too, so both sides expect the next one at
       // the same moment rather than each running its own clock.
-      heliTimer,
+      heliDue,
       heli: heliOut()
     };
   }
@@ -6370,7 +6400,7 @@ if ('serviceWorker' in navigator) {
     // Rebuilt from the snapshot rather than merged over whatever we had, so a
     // stale local helicopter cannot leave fields behind.
     heli = heliIn(snap.heli);
-    if (typeof snap.heliTimer === 'number') heliTimer = snap.heliTimer;
+    heliDueIn(snap);
     projectiles = [];
     wind = snap.wind;
     showWind();       // shown, not re-rolled: the snapshot is the authority
@@ -6556,7 +6586,7 @@ if ('serviceWorker' in navigator) {
     get currentPlayer() { return currentPlayer; }, set currentPlayer(v) { currentPlayer = v; },
     get projectiles() { return projectiles; }, set projectiles(v) { projectiles = v; },
     get heli() { return heli; }, set heli(v) { heli = v; },
-    get heliTimer() { return heliTimer; }, set heliTimer(v) { heliTimer = v; },
+    get heliDue() { return heliDue; }, set heliDue(v) { heliDue = v; },
     get cpuMode() { return cpuMode; }, set cpuMode(v) { cpuMode = v; },
     get aiDifficulty() { return aiDifficulty; }, set aiDifficulty(v) { aiDifficulty = v; },
     get playerCount() { return playerCount; }, set playerCount(v) { playerCount = v; },
