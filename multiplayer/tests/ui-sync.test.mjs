@@ -433,6 +433,56 @@ test('releasing inside the dead zone cancels and restores the aim', () => {
   assert.deepEqual([t.angle, t.power], [60, 40]);
 });
 
+test('a finger gets a ring wider than the finger to cancel in', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.currentPlayer = 0;
+  const t = g.tanks[0];
+  t.angle = 60; t.power = 40;
+  const touch = (type, id, x, y) =>
+    g.canvas.dispatch(type, { pointerId: id, pointerType: 'touch', button: 0, clientX: x, clientY: y });
+
+  // Pull out, then come back to 30 px from the press - outside a mouse's ring,
+  // inside a finger's - and let go: a cancel, not a feeble shot.
+  touch('pointerdown', 1, 300, 200);
+  touch('pointermove', 1, 300, 300);
+  assert.equal(t.angle, 90, 'the pull moved the aim');
+  touch('pointermove', 1, 300, 230);
+  assert.deepEqual([t.angle, t.power], [60, 40], 'inside the ring shows the old aim');
+  g.render(); // draws the cancel cross
+  touch('pointerup', 1, 300, 230);
+  assert.equal(g.state, 'AIMING', 'a release inside the finger ring does not fire');
+  assert.deepEqual([t.angle, t.power], [60, 40]);
+
+  // Power still starts at the ring's edge, so the stroke past it is unchanged.
+  touch('pointerdown', 2, 300, 200);
+  touch('pointermove', 2, 300, 200 + 40 + g.pullReach() / 2);
+  assert.equal(t.power, 50);
+  touch('pointercancel', 2, 300, 200);
+
+  // A mouse released at the same 30 px fires, as it always has.
+  pull(g, 3, 300, 200, 300, 300);
+  g.canvas.dispatch('pointermove', { pointerId: 3, clientX: 300, clientY: 230 });
+  g.canvas.dispatch('pointerup', { pointerId: 3, clientX: 300, clientY: 230 });
+  assert.notEqual(g.state, 'AIMING', 'a mouse ring is still 14 px');
+});
+
+test('crossing the ring ticks, where the device can vibrate', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const ticks = [];
+  h.ctx.navigator.vibrate = (ms) => { ticks.push(ms); return true; };
+  g.currentPlayer = 0;
+
+  pull(g, 1, 300, 200, 300, 205);
+  assert.equal(ticks.length, 0, 'inside the ring: nothing yet');
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: 300, clientY: 300 });
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: 300, clientY: 310 });
+  assert.equal(ticks.length, 1, 'once on the way out, not on every move');
+  g.canvas.dispatch('pointermove', { pointerId: 1, clientX: 300, clientY: 203 });
+  assert.equal(ticks.length, 2, 'and once on the way back in');
+});
+
 test('pulling does nothing on a CPU turn or mid-flight', () => {
   const h = loadFlat();
   const { g } = h;

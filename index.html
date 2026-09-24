@@ -882,7 +882,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v55';
+  const BUILD = 'v56';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2627,8 +2627,22 @@
   // length sets the power, so the sliders follow along while you pull. Pulling
   // back into the dead zone around where you pressed and releasing there
   // cancels, and puts the aim back how it was — a stray tap never fires.
-  let aimDrag = null; // { id, ax, ay, x, y, angle, power } in canvas pixels
-  const PULL_DEAD = 14; // px of pull before it counts as aiming
+  let aimDrag = null; // { id, ax, ay, x, y, angle, power, dead, armed, wasArmed } in canvas pixels
+  // Pull before it counts as aiming. It is also where you let go to cancel, so
+  // for a finger it has to be wider than the finger: at 14 px a fingertip
+  // covers the whole zone, and a cancel that lands just outside it fires a
+  // feeble shot instead. A mouse or a pen can hit the small one.
+  const PULL_DEAD = 14;
+  const PULL_DEAD_TOUCH = 40;
+  function pullDead() {
+    return aimDrag ? aimDrag.dead : PULL_DEAD;
+  }
+  // A tick as the pull crosses the ring, either way: the finger is on top of
+  // the ring, so this is how you feel that you are back in it. Where there is
+  // no vibrate (iOS, desktop) it is simply silent.
+  function pullTick() {
+    try { if (navigator.vibrate) navigator.vibrate(8); } catch (_) { /* not allowed */ }
+  }
 
   function turretPos(t) {
     return { x: t.x, y: groundHeightAt(t.x) - TANK_H };
@@ -2647,12 +2661,13 @@
   function aimFromPull(dx, dy) {
     if (!canPull()) return false;
     const dist = Math.hypot(dx, dy);
-    if (dist < PULL_DEAD) return false;
+    const dead = pullDead();
+    if (dist < dead) return false;
     const t = tanks[currentPlayer];
     let angle = Math.round(Math.atan2(-dy, dx) * 180 / Math.PI);
     if (angle < 0) angle = dx >= 0 ? 0 : 180; // pulled upward: barrel flat
     t.angle = Math.max(0, Math.min(180, angle));
-    t.power = Math.max(0, Math.min(100, Math.round((dist - PULL_DEAD) / pullReach() * 100)));
+    t.power = Math.max(0, Math.min(100, Math.round((dist - dead) / pullReach() * 100)));
     syncControlsFromTank();
     return true;
   }
@@ -2676,7 +2691,7 @@
   }
   function releasePull(e) {
     if (!aimDrag || (e && e.pointerId !== aimDrag.id)) return;
-    if (pullLength() < PULL_DEAD || !canPull()) { cancelPull(); return; }
+    if (pullLength() < pullDead() || !canPull()) { cancelPull(); return; }
     aimDrag = null;
     fire();
   }
@@ -2692,7 +2707,10 @@
     }
     e.preventDefault();
     const t = tanks[currentPlayer];
-    aimDrag = { id: e.pointerId, ax: pt.x, ay: pt.y, x: pt.x, y: pt.y, angle: t.angle, power: t.power };
+    aimDrag = {
+      id: e.pointerId, ax: pt.x, ay: pt.y, x: pt.x, y: pt.y, angle: t.angle, power: t.power,
+      dead: e.pointerType === 'touch' ? PULL_DEAD_TOUCH : PULL_DEAD, armed: false, wasArmed: false
+    };
     if (canvas.setPointerCapture) {
       try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* already released */ }
     }
@@ -2703,7 +2721,13 @@
     const pt = canvasPoint(e);
     aimDrag.x = pt.x;
     aimDrag.y = pt.y;
-    if (!aimFromPull(aimDrag.ax - pt.x, aimDrag.ay - pt.y)) {
+    const armed = aimFromPull(aimDrag.ax - pt.x, aimDrag.ay - pt.y);
+    if (armed !== aimDrag.armed) {
+      aimDrag.armed = armed;
+      if (armed) aimDrag.wasArmed = true;
+      pullTick();
+    }
+    if (!armed) {
       // Back in the dead zone: show the aim you started from.
       const t = tanks[currentPlayer];
       if (t.angle !== aimDrag.angle || t.power !== aimDrag.power) {
@@ -4068,20 +4092,40 @@
 
   // The slingshot while pulling: a ring where you pressed, a band out to the
   // finger, and a knob on the end. Inside the dead zone it dims, to read as
-  // "let go here and nothing happens".
+  // "let go here and nothing happens" — and once you have pulled out and come
+  // back, it fills and shows a cross, since that release is now a cancel.
+  // The ring is always drawn at the mouse's size: a finger's cancel zone is
+  // wider (PULL_DEAD_TOUCH), but drawn at that size it swamps the field. The
+  // band vanishing and the tick say you are in it.
   function drawAimDrag() {
     if (!aimDrag) return;
     if (!canPull()) { aimDrag = null; return; }
     const t = tanks[currentPlayer];
-    const armed = pullLength() >= PULL_DEAD;
+    const dead = pullDead();
+    const armed = pullLength() >= dead;
+    // Pulled out and come back in: this release is a cancel, so say so plainly.
+    const cancelling = !armed && aimDrag.wasArmed;
     ctx.save();
     ctx.strokeStyle = t.color;
     ctx.fillStyle = t.color;
-    ctx.globalAlpha = armed ? 0.8 : 0.35;
+    ctx.globalAlpha = armed || cancelling ? 0.8 : 0.35;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(aimDrag.ax, aimDrag.ay, PULL_DEAD, 0, Math.PI * 2);
     ctx.stroke();
+    if (cancelling) {
+      ctx.globalAlpha = 0.2;
+      ctx.fill();
+      const k = PULL_DEAD * 0.45;
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(aimDrag.ax - k, aimDrag.ay - k);
+      ctx.lineTo(aimDrag.ax + k, aimDrag.ay + k);
+      ctx.moveTo(aimDrag.ax + k, aimDrag.ay - k);
+      ctx.lineTo(aimDrag.ax - k, aimDrag.ay + k);
+      ctx.stroke();
+    }
     if (armed) {
       ctx.globalAlpha = 0.55;
       ctx.lineWidth = 3;
