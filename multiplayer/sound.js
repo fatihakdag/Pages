@@ -457,6 +457,41 @@
     return FLIGHT[p.weapon] || FLIGHT.standard;
   }
 
+  // The jet's voice, tuned against a recording of a real F-22 pass. Pairs are
+  // [coming in, gone by]; everything between is mixed by how far through the
+  // pass it is. Kept together so the whole character can be adjusted, and
+  // measured, from one place.
+  const JET_VOICE = {
+    levelMin: 0.05, levelMax: 0.55,     // far off .. at its loudest
+    airHz: [4200, 3200],                // the top end the distance leaves
+    // The roar is brown noise and the rush white, both lowpassed: brown falls
+    // 3 dB an octave and white rises 3, so together they come out close to
+    // the flat-per-octave spread of the recording coming in.
+    roarHz: [2200, 750], roarGain: [1.0, 1.1], roarLowCut: 150,
+    rushHz: [2800, 2000], rushQ: 0.5, rushType: 'lowpass', rushGain: [0.36, 0.15],
+    whineHz: 1740, whineShift: 0.79,    // ~3 kHz coming in, ~1 kHz going away
+    whineGain: [0.12, 0.035],
+    crackleGain: 0.18, crackleDrive: 3.4,
+    peakAfter: 0.2                      // screen widths past the middle it is loudest
+  };
+
+  // Where a jet is in its pass, as the voice needs it. x01 is its place on
+  // screen (0 left edge .. 1 right) and dir the way it flies. The pitch drops
+  // as it crosses the middle of the view, over about a tenth of the screen.
+  // The loudness peaks well after that, as in the recording: by then it is
+  // already the dark exhaust roar you hear, not the whine. It falls away
+  // behind the jet faster than it built up in front, to a tail rather than to
+  // nothing.
+  function jetPass(x01, dir) {
+    const d = ((Number.isFinite(x01) ? x01 : 0.5) - 0.5) * (dir < 0 ? -1 : 1);   // < 0 coming, > 0 gone
+    const approach = Math.tanh(-d * 9);
+    const peak = JET_VOICE.peakAfter;
+    const near = d < peak
+      ? Math.max(0, 1 - (peak - d) / 0.75)
+      : Math.max(0.35 * Math.max(0, 1 - (d - peak) / 0.8), 1 - (d - peak) / 0.2);
+    return { approach, near };
+  }
+
   // ---- the game's voices ----
   const Sound = {
     available: soundAvailable,
@@ -614,20 +649,22 @@
       panLoop(l, x01);
     },
 
-    // An F-22 going over: two big turbofans in afterburner. It is built from
-    // four layers, each one a thing you hear in a real pass:
-    //  - the roar, brown noise kept low — the weight you feel in your chest;
-    //  - the tearing rush in the band above it, the air being ripped;
-    //  - the afterburner's crackle, slow noise pushed through a dead zone so
-    //    that only its peaks get out, then highpassed into sharp pops;
-    //  - a thin, high turbine whine riding on top.
-    // `o.approach` (1 closing on the middle of the view .. -1 leaving it)
-    // bends the pitch the way a pass does, up while it comes in and dropping
-    // as it goes by, and `o.near` (0 at the edges .. 1 overhead) swells the
-    // lot. A wreck loses its whine and its burner, and the roar goes dark.
-    jet(on, falling, x01, o) {
+    // An F-22 going over, matched against a recording of a real one. What a
+    // pass sounds like is mostly two things changing at once:
+    //  - Coming in, it is bright and led by the turbine: a strong whine near
+    //    3 kHz over a broad rush. Going away, it is dark and led by the exhaust:
+    //    a low roar, with the same whine Doppler-dropped to near 1 kHz. The
+    //    drop happens fast, as it passes.
+    //  - It is loudest just after it passes — the exhaust points backwards —
+    //    and fades out behind it slowly.
+    // So the voice is a brown-noise roar, a band of rush whose centre falls
+    // with the pass, the whine, and a little afterburner crackle near the
+    // loudest moment. jetPass() turns where the jet is into `approach` (1
+    // coming in .. -1 gone by) and `near` (the loudness, 0..1). A wreck loses
+    // its whine and crackle, and its roar goes dark.
+    jet(on, falling, x01, dir) {
       if (!on) { stopLoop('jet'); return; }
-      o = o || {};
+      const V = JET_VOICE;
       const l = startLoop('jet', (ctx, dest) => {
         const t = ctx.currentTime;
         const out = ctx.createGain();            // stopLoop fades this one
@@ -635,11 +672,21 @@
         out.gain.exponentialRampToValueAtTime(1, t + 0.6);
         out.connect(dest);
         const level = ctx.createGain();          // the swell, set per frame
-        level.gain.value = 0.18;
-        level.connect(out);
+        level.gain.value = V.levelMin;
+        // Nothing much above a few kHz reaches the ground from a jet at height.
+        const air = ctx.createBiquadFilter();
+        air.type = 'lowpass';
+        air.frequency.value = V.airHz[0];
+        air.Q.value = 0.5;
+        level.connect(air); air.connect(out);
 
-        const roar = loopBed(ctx, { brown: true, freq: 420, q: 0.6, gain: 0.42, dest: level });
-        const rush = loopBed(ctx, { freq: 1500, q: 0.8, type: 'bandpass', gain: 0.075, dest: level });
+        // The roar has little under ~100 Hz: brown noise alone is mostly that.
+        const lowCut = ctx.createBiquadFilter();
+        lowCut.type = 'highpass';
+        lowCut.frequency.value = V.roarLowCut;
+        lowCut.connect(level);
+        const roar = loopBed(ctx, { brown: true, freq: V.roarHz[0], q: 0.5, gain: V.roarGain[0], dest: lowCut });
+        const rush = loopBed(ctx, { freq: V.rushHz[0], q: V.rushQ, type: V.rushType, gain: V.rushGain[0], dest: level });
 
         const crackle = ctx.createBufferSource();
         crackle.buffer = noiseBuf;
@@ -649,7 +696,7 @@
         smooth.type = 'lowpass';
         smooth.frequency.value = 260;
         const drive = ctx.createGain();
-        drive.gain.value = 4.2;
+        drive.gain.value = V.crackleDrive;
         const gate = ctx.createWaveShaper();     // silent under the threshold, a pop over it
         const curve = new Float32Array(1025);
         for (let i = 0; i < curve.length; i++) {
@@ -659,43 +706,59 @@
         gate.curve = curve;
         const snap = ctx.createBiquadFilter();
         snap.type = 'highpass';
-        snap.frequency.value = 700;
+        snap.frequency.value = 500;
         const crackleGain = ctx.createGain();
-        crackleGain.gain.value = 0.5;
+        crackleGain.gain.value = 0;
         crackle.connect(smooth); smooth.connect(drive); drive.connect(gate);
         gate.connect(snap); snap.connect(crackleGain); crackleGain.connect(level);
 
+        // The whine, with a slow wander on its pitch so it is a machine and
+        // not a test tone.
         const whine = ctx.createOscillator();
         whine.type = 'sine';
-        whine.frequency.value = 2600;
+        whine.frequency.value = V.whineHz;
+        const wob = ctx.createBufferSource();
+        wob.buffer = brownBuf; wob.loop = true; wob.playbackRate.value = 0.4;
+        const wobFilt = ctx.createBiquadFilter();
+        wobFilt.type = 'lowpass'; wobFilt.frequency.value = 6;
+        const wobDepth = ctx.createGain();
+        wobDepth.gain.value = V.whineHz * 0.012;
+        wob.connect(wobFilt); wobFilt.connect(wobDepth); wobDepth.connect(whine.frequency);
         const whineGain = ctx.createGain();
-        whineGain.gain.value = 0.012;
+        whineGain.gain.value = 0;
         whine.connect(whineGain); whineGain.connect(level);
 
         const offset = Math.random() * SOUND.noiseSeconds * 0.5;
         crackle.start(t, offset);
+        wob.start(t, offset);
         whine.start(t);
         const stop = roar.src.stop.bind(roar.src);
         roar.src.stop = (when) => {
-          for (const s of [rush.src, crackle, whine]) { try { s.stop(when); } catch (e) { /* stopped */ } }
+          for (const s of [rush.src, crackle, wob, whine]) { try { s.stop(when); } catch (e) { /* stopped */ } }
           stop(when);
         };
-        return { src: roar.src, gain: out, out, level, roar, rush, crackle, crackleGain, whine, whineGain };
+        return { src: roar.src, gain: out, out, level, air, roar, rush, crackleGain, whine, wobDepth, whineGain };
       });
       if (l && audio) {
         const now = audio.currentTime;
-        const clamp = (v, a, b) => Math.max(a, Math.min(b, Number.isFinite(v) ? v : 0));
-        const bend = 1 + 0.11 * clamp(o.approach, -1, 1);
-        const near = clamp(o.near, 0, 1);
-        // Overhead it sits just above a shell's whistle rather than burying it.
-        l.level.gain.setTargetAtTime(0.13 + 0.47 * near * near, now, 0.08);
-        l.roar.filt.frequency.setTargetAtTime((falling ? 200 : 420) * bend, now, 0.08);
-        l.roar.src.playbackRate.setTargetAtTime(bend, now, 0.08);
-        l.rush.filt.frequency.setTargetAtTime((falling ? 700 : 1500) * bend, now, 0.08);
-        l.rush.src.playbackRate.setTargetAtTime(bend, now, 0.08);
-        l.whine.frequency.setTargetAtTime(2600 * bend, now, 0.08);
-        l.whineGain.gain.setTargetAtTime(falling ? 0 : 0.012, now, 0.1);
-        l.crackleGain.gain.setTargetAtTime(falling ? 0 : 0.5, now, 0.1);
+        const p = jetPass(x01, dir);
+        const k = (p.approach + 1) / 2;          // 1 coming in .. 0 gone by
+        const mix = (pair) => pair[1] + (pair[0] - pair[1]) * k;
+        const dark = falling ? 0.5 : 1;
+        const set = (param, v, tc = 0.06) => param.setTargetAtTime(v, now, tc);
+        set(l.level.gain, V.levelMin + (V.levelMax - V.levelMin) * Math.pow(p.near, 1.6));
+        set(l.air.frequency, mix(V.airHz) * dark);
+        set(l.roar.filt.frequency, mix(V.roarHz) * dark);
+        set(l.rush.filt.frequency, mix(V.rushHz) * dark);
+        set(l.rush.gain.gain, mix(V.rushGain));
+        set(l.roar.gain.gain, mix(V.roarGain));
+        // Doppler: up to `whineShift` octaves above its own pitch coming in, as
+        // far below it going away.
+        const f = V.whineHz * Math.pow(2, V.whineShift * p.approach);
+        set(l.whine.frequency, f, 0.04);
+        set(l.wobDepth.gain, f * 0.012);
+        set(l.whineGain.gain, falling ? 0 : mix(V.whineGain), 0.08);
+        set(l.crackleGain.gain, falling ? 0 : V.crackleGain * Math.pow(p.near, 4), 0.1);
       }
       panLoop(l, x01);
     },
@@ -889,7 +952,7 @@
   }
 
   window.BarrageSound = {
-    SOUND, Sound, FLIGHT, RELOADS, flightOf, panOf,
+    SOUND, Sound, FLIGHT, RELOADS, JET_VOICE, jetPass, flightOf, panOf,
     audioCtx, gunPanner, zonePanner, soundAvailable, stopAllSound,
     setSoundOn, setSfxLevel, sliderToLevel, levelToSlider, loadLevel, wake,
     isOn: () => soundOn,
