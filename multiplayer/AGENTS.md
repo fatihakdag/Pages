@@ -129,6 +129,13 @@ them at that moment. Either wreck crushes a tank it lands on. The jet cruises
 from the helicopter's band to well above it, so a pass with a helicopter up
 meets it about a third of the time.
 
+The guided missile hunts either one. When its motor lights it locks onto
+whichever aircraft in flight is nearer to it (`nearestCraft()`, ties to the
+helicopter) — `p.chase` is `'heli'`, `'jet'` or `null` — and `chaseTarget()`
+and the proximity fuze follow that one only. Locked once, as before: if its
+target is shot down or leaves mid-burn it drops back into its dive rather than
+switching to the other.
+
 ## What differs from the single-player build
 
 **The simulation is in world units, not canvas pixels.** This is the whole

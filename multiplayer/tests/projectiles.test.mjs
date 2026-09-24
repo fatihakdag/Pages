@@ -113,7 +113,7 @@ test('a guided missile lights its motor at the apex', (t) => {
   assert.equal(p.armed, true);
   assert.ok(p.burnLeft > 0, 'the motor has fuel');
   assert.ok(p.burnSpeed > 0);
-  assert.equal(p.chase, false, 'nothing to chase with no helicopter up');
+  assert.equal(p.chase, null, 'nothing to chase with nothing in the air');
 });
 
 test('a guided missile comes down near the spot the same shell would have hit', (t) => {
@@ -156,7 +156,7 @@ test('a guided missile chases a helicopter that is up when the motor lights', (t
   g.state = 'FIRING';
   g.stepProjectile(p, 0.05);
 
-  assert.equal(p.chase, true);
+  assert.equal(p.chase, 'heli');
 
   // A helicopter that leaves mid-burn drops it back into its dive rather than
   // flying at a target that is not there.

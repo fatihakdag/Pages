@@ -549,3 +549,99 @@ test('a collision during a shot holds the turn and lands the same on both screen
   assert.equal(host.g.currentPlayer, 1);
   assert.equal(guest.g.currentPlayer, 1);
 });
+
+// ---------- The guided missile and the jet ----------
+
+/** A guided missile at its apex, about to light its motor. */
+function missileAt(x, y, vx = 120) {
+  return { x, y, vx, vy: -1, weapon: 'missile', firedBy: 1, age: 1, aimX: 900, trail: [] };
+}
+
+test('a guided missile locks onto a jet in the air', (t) => {
+  const h = loadFlat();
+  const { g } = h;
+  if (!g.weaponEnabled('missile')) return t.skip('guided missile is switched off');
+  g.jet = g.jetIn(routeJet(g, { x: 600, y: 200, bombed: true }));
+  const p = missileAt(300, 150);
+  g.projectiles = [p];
+  g.state = 'FIRING';
+  g.stepProjectile(p, 0.05);
+
+  assert.equal(p.armed, true);
+  assert.equal(p.chase, 'jet');
+});
+
+test('with both in the air it goes for whichever is nearer', (t) => {
+  const h = loadFlat();
+  const { g } = h;
+  if (!g.weaponEnabled('missile')) return t.skip('guided missile is switched off');
+  const lockWith = (jetX, heliX) => {
+    g.jet = g.jetIn(routeJet(g, { x: jetX, y: 160, bombed: true }));
+    g.heli = g.heliIn(routeHeli(g, { x: heliX, y: 200, dir: -1 }));
+    const p = missileAt(300, 150);
+    g.projectiles = [p];
+    g.state = 'FIRING';
+    g.stepProjectile(p, 0.05);
+    return p.chase;
+  };
+  assert.equal(lockWith(420, 700), 'jet', 'the jet, when it is closer');
+  assert.equal(lockWith(800, 380), 'heli', 'the helicopter, when that is');
+  assert.equal(g.nearestCraft({ x: 500, y: 100 }), 'heli');
+  g.heli.falling = true;
+  assert.equal(g.nearestCraft({ x: 500, y: 100 }), 'jet', 'a wreck is not a target');
+});
+
+test('a missile locked onto a jet runs it down', (t) => {
+  const h = loadFlat();
+  const { g } = h;
+  if (!g.weaponEnabled('missile')) return t.skip('guided missile is switched off');
+  g.heliDue = g.netNow() + 1e6;
+  // A tail chase at the jet's top speed, the hardest case: flying away from it.
+  g.jet = g.jetIn(routeJet(g, { x: 380, y: 150, dir: 1, speed: 182, bombed: true }));
+  const p = missileAt(300, 200);
+  g.projectiles = [p];
+  g.state = 'FIRING';
+  for (let i = 0; i < 180 && !(g.jet && g.jet.falling); i++) g.simStep(g.SIM_DT);
+
+  assert.equal(p.chase, 'jet');
+  assert.ok(g.jet && g.jet.falling, 'it caught the jet and brought it down');
+  assert.equal(p.dead, true);
+});
+
+test('a missile whose jet is gone does not switch to the helicopter', (t) => {
+  const h = loadFlat();
+  const { g } = h;
+  if (!g.weaponEnabled('missile')) return t.skip('guided missile is switched off');
+  g.jet = g.jetIn(routeJet(g, { x: 350, y: 150, bombed: true }));
+  g.heli = g.heliIn(routeHeli(g, { x: 800, y: 200, dir: -1 }));
+  const p = missileAt(300, 150);
+  g.projectiles = [p];
+  g.state = 'FIRING';
+  g.stepProjectile(p, 0.05);
+  assert.equal(p.chase, 'jet');
+
+  g.jet = null;
+  p.x = g.heli.x; p.y = g.heli.y - g.heliSize() * 0.5;   // near enough to fuze on it
+  assert.equal(g.missileFuzed(p), null, 'locked once: it does not go off on the other one');
+});
+
+test('a missile chasing a jet ends the same on both screens', (t) => {
+  const { host, guest, hs, gs } = liveMatch();
+  if (!host.g.weaponEnabled('missile')) return t.skip('guided missile is switched off');
+  for (const c of [host, guest]) {
+    c.flatTerrain(400);
+    c.placeTanksAt([150, 900]);
+    c.g.jet = c.g.jetIn(routeJet(c.g, { x: 200, y: 160, dir: 1, speed: 170, seat: 1, bombed: true }));
+  }
+  Object.assign(host.g.tanks[0], { weapon: 'missile', angle: 60, power: 55 });
+  host.g.fire();
+  const [turn] = hs.payloads('turn');
+  assert.equal(turn.result.jet, null, 'the shooter worked out that it brought the jet down');
+  gs.deliver({ t: 'msg', from: 1, d: turn });
+
+  host.advanceUntil(() => host.g.state === 'AIMING' && !host.g.activeShot, { maxMs: 20000 });
+  guest.advanceUntil(() => guest.g.state === 'AIMING' && !guest.g.activeShot, { maxMs: 20000 });
+  assert.equal(guest.g.jet, null);
+  assert.deepEqual(Array.from(guest.g.terrain), Array.from(host.g.terrain), 'the same craters');
+  assert.deepEqual(Array.from(guest.g.tanks, t => t.hp), Array.from(host.g.tanks, t => t.hp));
+});
