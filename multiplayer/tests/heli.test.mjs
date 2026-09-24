@@ -65,13 +65,13 @@ test('the wreck crushes whatever it lands on and blasts what is nearby', () => {
   assert.equal(g.tanks[2].hp, 100, 'the far tank is clear');
 });
 
-test('only a wreck square on a tank destroys it; close by it does full damage, then fades', () => {
+test('only a wreck square on a tank destroys it; around that the blast eases off, then fades', () => {
   const h = loadFlat();
   const { g } = h;
   g.playerCount = 6;
   g.resetGame();
   h.flatTerrain(400);
-  const off = [4, 6, 26, 50, 74, 90];
+  const off = [4, 6, 16, 26, 50, 74];
   h.placeTanksAt(off.map((_, i) => 100 + i * 200));
   g.tanks.forEach(t => { t.hp = 100; t.alive = true; });
   g.state = 'FIRING'; // mid-shot, so the crash does not try to resolve the turn
@@ -79,14 +79,15 @@ test('only a wreck square on a tank destroys it; close by it does full damage, t
   // One crash per tank, each far enough from the others to touch only its own.
   g.tanks.forEach((t, i) => g.heliCrash(t.x + off[i], g.groundHeightAt(t.x)));
 
-  const [square, close, edge, mid, rim, clear] = g.tanks;
-  assert.equal(square.alive, false, '4px off centre: destroyed');
-  assert.equal(close.alive, true, '6px off: survives');
-  assert.equal(close.hp, 20, 'with the full 80 taken');
-  assert.equal(edge.hp, 20, 'full damage out to 26px');
-  assert.ok(Math.abs(mid.hp - (100 - 80 * 24 / 48)) < 1e-6, `half of it at 50px, took ${100 - mid.hp}`);
-  assert.equal(rim.hp, 100, 'nothing at 74px');
-  assert.equal(clear.hp, 100, 'or beyond');
+  const took = g.tanks.map(t => 100 - t.hp);
+  assert.equal(g.tanks[0].alive, false, '4px off centre: destroyed');
+  assert.equal(g.tanks[1].alive, true, '6px off: survives');
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  assert.ok(near(took[1], 80), `80 at 6px, took ${took[1]}`);
+  assert.ok(near(took[2], 70), `70 at 16px, took ${took[2]}`);
+  assert.ok(near(took[3], 60), `60 at 26px, took ${took[3]}`);
+  assert.ok(near(took[4], 30), `30 at 50px, took ${took[4]}`);
+  assert.equal(took[5], 0, 'nothing at 74px');
 });
 
 test('a crash that ends the round is resolved on the spot', () => {
@@ -264,7 +265,7 @@ test('the wreck\'s blast is measured to the whole hull, not just its roof', () =
 
   g.heliCrash(t.x + 40, g.groundHeightAt(t.x)); // on the ground beside the tracks
 
-  assert.ok(Math.abs(t.hp - (100 - 80 * (74 - 40) / (74 - 26))) < 1e-6,
+  assert.ok(Math.abs(t.hp - (100 - 60 * (74 - 40) / (74 - 26))) < 1e-6,
     `took ${(100 - t.hp).toFixed(2)}, expected the blast at 40px`);
 });
 
