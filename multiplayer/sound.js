@@ -407,7 +407,7 @@
   // motor and the rolling mine — they differ only in filter and modulation.
   function loopBed(ctx, o) {
     const src = ctx.createBufferSource();
-    src.buffer = noiseBuf;
+    src.buffer = o.brown ? brownBuf : noiseBuf;
     src.loop = true;
     src.playbackRate.value = o.rate || 1;
     const filt = ctx.createBiquadFilter();
@@ -614,33 +614,88 @@
       panLoop(l, x01);
     },
 
-    // A jet on its pass: a broad roar under a turbine whine. It is heard
-    // across the field, so it fades in over half a second rather than
-    // starting on the tick it spawns. A wreck loses the whine and the roar
-    // goes dark and ragged.
-    jet(on, falling, x01) {
+    // An F-22 going over: two big turbofans in afterburner. It is built from
+    // four layers, each one a thing you hear in a real pass:
+    //  - the roar, brown noise kept low — the weight you feel in your chest;
+    //  - the tearing rush in the band above it, the air being ripped;
+    //  - the afterburner's crackle, slow noise pushed through a dead zone so
+    //    that only its peaks get out, then highpassed into sharp pops;
+    //  - a thin, high turbine whine riding on top.
+    // `o.approach` (1 closing on the middle of the view .. -1 leaving it)
+    // bends the pitch the way a pass does, up while it comes in and dropping
+    // as it goes by, and `o.near` (0 at the edges .. 1 overhead) swells the
+    // lot. A wreck loses its whine and its burner, and the roar goes dark.
+    jet(on, falling, x01, o) {
       if (!on) { stopLoop('jet'); return; }
+      o = o || {};
       const l = startLoop('jet', (ctx, dest) => {
         const t = ctx.currentTime;
-        const out = ctx.createGain();
+        const out = ctx.createGain();            // stopLoop fades this one
         out.gain.setValueAtTime(0.0001, t);
-        out.gain.exponentialRampToValueAtTime(1, t + 0.5);
+        out.gain.exponentialRampToValueAtTime(1, t + 0.6);
         out.connect(dest);
-        const bed = loopBed(ctx, { freq: 700, q: 0.6, rate: 0.9, gain: 0.12, dest: out });
+        const level = ctx.createGain();          // the swell, set per frame
+        level.gain.value = 0.18;
+        level.connect(out);
+
+        const roar = loopBed(ctx, { brown: true, freq: 420, q: 0.6, gain: 0.42, dest: level });
+        const rush = loopBed(ctx, { freq: 1500, q: 0.8, type: 'bandpass', gain: 0.075, dest: level });
+
+        const crackle = ctx.createBufferSource();
+        crackle.buffer = noiseBuf;
+        crackle.loop = true;
+        crackle.playbackRate.value = 0.11;       // slow noise: its peaks come tens of times a second
+        const smooth = ctx.createBiquadFilter();
+        smooth.type = 'lowpass';
+        smooth.frequency.value = 260;
+        const drive = ctx.createGain();
+        drive.gain.value = 4.2;
+        const gate = ctx.createWaveShaper();     // silent under the threshold, a pop over it
+        const curve = new Float32Array(1025);
+        for (let i = 0; i < curve.length; i++) {
+          const x = i / 512 - 1, over = Math.abs(x) - 0.62;
+          curve[i] = over > 0 ? Math.sign(x) * Math.min(1, over * 2.6) : 0;
+        }
+        gate.curve = curve;
+        const snap = ctx.createBiquadFilter();
+        snap.type = 'highpass';
+        snap.frequency.value = 700;
+        const crackleGain = ctx.createGain();
+        crackleGain.gain.value = 0.5;
+        crackle.connect(smooth); smooth.connect(drive); drive.connect(gate);
+        gate.connect(snap); snap.connect(crackleGain); crackleGain.connect(level);
+
         const whine = ctx.createOscillator();
-        whine.type = 'triangle';
-        whine.frequency.value = 1650;
+        whine.type = 'sine';
+        whine.frequency.value = 2600;
         const whineGain = ctx.createGain();
-        whineGain.gain.value = 0.018;
-        whine.connect(whineGain); whineGain.connect(out);
+        whineGain.gain.value = 0.012;
+        whine.connect(whineGain); whineGain.connect(level);
+
+        const offset = Math.random() * SOUND.noiseSeconds * 0.5;
+        crackle.start(t, offset);
         whine.start(t);
-        const stop = bed.src.stop.bind(bed.src);
-        bed.src.stop = (when) => { try { whine.stop(when); } catch (e) { /* stopped */ } stop(when); };
-        return { src: bed.src, gain: out, out, filt: bed.filt, whine, whineGain };
+        const stop = roar.src.stop.bind(roar.src);
+        roar.src.stop = (when) => {
+          for (const s of [rush.src, crackle, whine]) { try { s.stop(when); } catch (e) { /* stopped */ } }
+          stop(when);
+        };
+        return { src: roar.src, gain: out, out, level, roar, rush, crackle, crackleGain, whine, whineGain };
       });
-      if (l) {
-        l.filt.frequency.value = falling ? 320 : 700;
-        l.whineGain.gain.value = falling ? 0 : 0.018;
+      if (l && audio) {
+        const now = audio.currentTime;
+        const clamp = (v, a, b) => Math.max(a, Math.min(b, Number.isFinite(v) ? v : 0));
+        const bend = 1 + 0.11 * clamp(o.approach, -1, 1);
+        const near = clamp(o.near, 0, 1);
+        // Overhead it sits just above a shell's whistle rather than burying it.
+        l.level.gain.setTargetAtTime(0.13 + 0.47 * near * near, now, 0.08);
+        l.roar.filt.frequency.setTargetAtTime((falling ? 200 : 420) * bend, now, 0.08);
+        l.roar.src.playbackRate.setTargetAtTime(bend, now, 0.08);
+        l.rush.filt.frequency.setTargetAtTime((falling ? 700 : 1500) * bend, now, 0.08);
+        l.rush.src.playbackRate.setTargetAtTime(bend, now, 0.08);
+        l.whine.frequency.setTargetAtTime(2600 * bend, now, 0.08);
+        l.whineGain.gain.setTargetAtTime(falling ? 0 : 0.012, now, 0.1);
+        l.crackleGain.gain.setTargetAtTime(falling ? 0 : 0.5, now, 0.1);
       }
       panLoop(l, x01);
     },
