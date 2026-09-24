@@ -1549,7 +1549,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v66';
+  const BUILD = 'v67';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1574,7 +1574,7 @@ if ('serviceWorker' in navigator) {
                         // loops in ~170px: enough to reverse onto a helicopter
                         // that is behind it without flying into the ground
     diveAngle: 78,      // deg below horizontal it pitches to with nothing to chase
-    heliLead: 0.15,     // s of lead when chasing the helicopter
+    heliLead: 0.15,     // s of lead when chasing the helicopter or the jet
     lockRadius: 50,     // px either side of the aim point an enemy tank has to
                         // be in for the missile to take it as its target when
                         // the motor lights. About twice the blast radius: it
@@ -2610,10 +2610,10 @@ if ('serviceWorker' in navigator) {
                 mirvCount: 3, mirvSpread: 55 },
     // Climbs on the arc you aimed, then lights its motor at the top and comes
     // down almost vertically — so it drops behind a ridge onto a tank a flat
-    // parabola would sail over or bury itself short of. If a helicopter is up
-    // when the motor lights it chases that instead: the wreck is the most
-    // violent thing in the game, and this is the only reliable way to choose
-    // when it falls.
+    // parabola would sail over or bury itself short of. If a helicopter or a
+    // jet is up when the motor lights it chases that instead — whichever is
+    // nearer: the wreck is the most violent thing in the game, and this is the
+    // only reliable way to choose when it falls.
     missile:  { radius: 24, damageMax: 28, color: '#ff4d5e', label: 'Guided Missile',
                 startAmmo: 2, guides: true, enabled: MISSILE.enabled },
     // Not fired from the tank at all. Choosing it calls a jet in from one edge
@@ -4005,11 +4005,13 @@ if ('serviceWorker' in navigator) {
     // no fixed cruise time can hold across the power range or across screen
     // sizes. This is what makes the weapon aimable on instinct.
     p.armX = p.x;
-    // Locked once, here: a helicopter that shows up later isn't chased, and one
-    // that is shot down or leaves mid-burn drops the missile back into its dive.
-    p.chase = !!(heli && !heli.falling);
+    // Locked once, here, onto whichever aircraft is nearer — 'heli', 'jet', or
+    // nothing. One that shows up later isn't chased, and one that is shot down
+    // or leaves mid-burn drops the missile back into its dive rather than onto
+    // the other.
+    p.chase = nearestCraft(p);
     // Also locked once: an enemy tank close to the aim point becomes the aim
-    // point. The helicopter still comes first, since the chase overrides aimX;
+    // point. An aircraft still comes first, since the chase overrides aimX;
     // if it leaves mid-burn the dive goes to the tank instead.
     const locked = lockOnTank(p);
     if (locked) p.aimX = locked.x;
@@ -4017,6 +4019,22 @@ if ('serviceWorker' in navigator) {
     // rather than preserving what little is there.
     p.burnSpeed = Math.max(Math.hypot(p.vx, p.vy), MISSILE.boostSpeed * physScale);
     spawnDust(p.x, p.y, WEAPONS.missile.color);
+  }
+
+  // The aircraft in flight nearest the missile as its motor lights: 'heli',
+  // 'jet' or null. A tie goes to the helicopter, so every screen picks the same.
+  function nearestCraft(p) {
+    const dh = heli && !heli.falling ? Math.hypot(heli.x - p.x, heli.y - p.y) : Infinity;
+    const dj = jet && !jet.falling ? Math.hypot(jet.x - p.x, jet.y - p.y) : Infinity;
+    if (dh === Infinity && dj === Infinity) return null;
+    return dh <= dj ? 'heli' : 'jet';
+  }
+
+  // What a locked missile is chasing, while it is still there to chase.
+  function chaseTarget(p) {
+    if (p.chase === 'heli' && heli && !heli.falling) return heli;
+    if (p.chase === 'jet' && jet && !jet.falling) return jet;
+    return null;
   }
 
   // The nearest living tank, other than the shooter's own, within lockRadius
@@ -4047,7 +4065,7 @@ if ('serviceWorker' in navigator) {
   // speed, and the nose swings toward what it wants at a capped rate.
   function flyMissile(p, dt) {
     p.burnLeft -= dt;
-    const target = (p.chase && heli && !heli.falling) ? heli : null;
+    const target = chaseTarget(p);
     let want;
     if (target) {
       const lead = target.dir * target.speed * MISSILE.heliLead;
@@ -4092,10 +4110,12 @@ if ('serviceWorker' in navigator) {
   // A chasing missile goes off when it gets close enough, rather than having to
   // thread the airframe's own hit box. Only a missile that locked on: everything
   // else still has to actually hit.
+  // Answers which one it went off on: 'heli', 'jet', or null.
   function missileFuzed(p) {
-    if (!p.chase || !heli || heli.falling) return false;
-    const r = heliSize() * MISSILE.fuze;
-    return Math.hypot(p.x - heli.x, p.y - heli.y) < r;
+    const target = chaseTarget(p);
+    if (!target) return null;
+    const r = (target === jet ? jetSize() : heliSize()) * MISSILE.fuze;
+    return Math.hypot(p.x - target.x, p.y - target.y) < r ? p.chase : null;
   }
 
   // ---------- Per-shell flight ----------
@@ -4177,15 +4197,16 @@ if ('serviceWorker' in navigator) {
       p.dead = true; // off the map
       return;
     }
-    if (c && c.what === 'jet') {
-      p.x = c.x; p.y = c.y;
+    const fuzed = c ? null : missileFuzed(p);
+    if ((c && c.what === 'jet') || fuzed === 'jet') {
+      if (c) { p.x = c.x; p.y = c.y; }
       spawnExplosionFx(p.x, p.y, 28, '#ffd27a');
       jetShotDown();
       p.dead = true;
       shotExploded = true;
       return;
     }
-    if ((c && c.what === 'heli') || (!c && missileFuzed(p))) {
+    if ((c && c.what === 'heli') || fuzed === 'heli') {
       if (c) { p.x = c.x; p.y = c.y; }
       // the shell bursts on the airframe; the wreck falls on its own from here
       spawnExplosionFx(p.x, p.y, 32, '#ffd27a');
@@ -6999,7 +7020,7 @@ if ('serviceWorker' in navigator) {
     freshAmmo, weaponEnabled, lockOnTank, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,
     pickWeapon, weaponButtons, weaponCounts, WEAPON_ICONS,
     fire, applyDamageAndCrater, hullDistance, stepProjectile, stepRoller, detonateRoller, splitMirv, scatterBomblets, firstContact,
-    armMissile, flyMissile, missileFuzed, predictLandingX, traceShot, step, resize,
+    armMissile, flyMissile, missileFuzed, nearestCraft, predictLandingX, traceShot, step, resize,
     simStep, inShot, SIM_DT, resolveShot, beginShot, finishShot, advanceTurn,
     initSetup, endTurnCheckWin, nextTurn, resetGame, maybeAiTurn, chooseAiShot, aiFireDelayMs,
     setWind, showWind, windStrength, windForce, isAi, txt, upper, playerName,
