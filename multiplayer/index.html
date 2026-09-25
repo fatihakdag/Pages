@@ -758,6 +758,28 @@
     touch-action: manipulation;
   }
   #net-rejoin[hidden] { display: none; }
+  #net-leave {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--panel-line);
+    border-radius: 2px;
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    padding: 3px 6px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #net-leave:hover { color: var(--text-main); border-color: #55526a; }
+  #net-leave .nl-sure { display: none; }
+  #net-leave.armed { border-color: var(--accent-p1); color: var(--text-main); }
+  #net-leave.armed .nl-idle { display: none; }
+  #net-leave.armed .nl-sure { display: inline; }
+  /* A finger needs more than the mouse-sized chip: this one ends a match. */
+  @media (pointer: coarse) {
+    #net-leave { padding: 6px 10px; }
+  }
 
   #settings-modal {
     position: fixed;
@@ -1372,6 +1394,9 @@
       <span id="net-pill" class="hud-pill" hidden>
         <span id="net-status">off</span>
         <button type="button" id="net-rejoin" data-i18n="rejoin" hidden>REJOIN</button>
+        <!-- Back to a game on this screen. In a match it takes two taps, like
+             RESTART ROUND; anywhere else there is nothing to lose. -->
+        <button type="button" id="net-leave"><span class="nl-idle" data-i18n="leaveGame">LEAVE</span><span class="nl-sure" data-i18n="leaveSure">SURE?</span></button>
       </span>
     </div>
     <button id="fire-btn" data-i18n="fire">FIRE</button>
@@ -1549,7 +1574,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v73';
+  const BUILD = 'v74';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1619,6 +1644,7 @@ if ('serviceWorker' in navigator) {
   const netPill = document.getElementById('net-pill');
   const netStatusEl = document.getElementById('net-status');
   const netRejoinBtn = document.getElementById('net-rejoin');
+  const netLeaveBtn = document.getElementById('net-leave');
   const netInviteBtn = document.getElementById('net-invite');
   const onlineHostBtn = document.getElementById('online-host');
   const onlineJoinBtn = document.getElementById('online-join');
@@ -1656,7 +1682,7 @@ if ('serviceWorker' in navigator) {
       aimLeft: 'Aim one degree left', aimRight: 'Aim one degree right',
       powerDown: 'Power down one', powerUp: 'Power up one',
       zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomFit: 'Fit the whole battlefield',
-      online: 'ONLINE', onlineMode: 'Online', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE',
+      online: 'ONLINE', onlineMode: 'Online', hostGame: 'HOST', joinGame: 'JOIN', leaveGame: 'LEAVE', leaveSure: 'SURE?',
       round: 'ROUND', restartRound: 'RESTART ROUND', restartSure: 'TAP AGAIN TO RESTART',
       restartHostOnly: 'Only the host can restart a match.',
       roomCode: 'CODE', roomCodeLabel: 'Room code', rejoin: 'REJOIN',
@@ -1700,7 +1726,7 @@ if ('serviceWorker' in navigator) {
       aimLeft: 'Bir derece sola nişan al', aimRight: 'Bir derece sağa nişan al',
       powerDown: 'Gücü bir azalt', powerUp: 'Gücü bir artır',
       zoomIn: 'Yakınlaştır', zoomOut: 'Uzaklaştır', zoomFit: 'Tüm sahayı göster',
-      online: 'ÇEVRİMİÇİ', onlineMode: 'Çevrimiçi', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL',
+      online: 'ÇEVRİMİÇİ', onlineMode: 'Çevrimiçi', hostGame: 'KUR', joinGame: 'KATIL', leaveGame: 'AYRIL', leaveSure: 'EMİN MİSİN?',
       round: 'TUR', restartRound: 'TURU YENİDEN BAŞLAT', restartSure: 'BAŞLATMAK İÇİN TEKRAR DOKUN',
       restartHostOnly: 'Maçı yalnızca ev sahibi yeniden başlatabilir.',
       roomCode: 'KOD', roomCodeLabel: 'Oda kodu', rejoin: 'YENİDEN BAĞLAN',
@@ -6217,6 +6243,7 @@ if ('serviceWorker' in navigator) {
     missed: [],        // consecutive turns each seat has let run out
     aiSeats: [],       // seats the CPU is playing until their player returns
     peerAway: false,   // their window is hidden, so their game loop is stopped
+    dealt: false,      // the board on screen is a match's, so leaving deals a local one
 
     inbox: []          // board-changing messages waiting for the shot on screen to land
   };
@@ -6531,6 +6558,7 @@ if ('serviceWorker' in navigator) {
     netPill.hidden = !engaged;
     netInviteBtn.hidden = engaged;
     netRejoinBtn.hidden = !netCanRejoin();
+    if (!netPlaying()) disarmLeave();   // nothing left to lose: one tap again
     refreshRestartUi();
   }
 
@@ -6567,6 +6595,9 @@ if ('serviceWorker' in navigator) {
       netHandle(m);
     });
     ws.addEventListener('close', () => {
+      // A socket we already let go of (LEAVE drops it at once, and a browser
+      // reports the close later): what it has to say is no longer news.
+      if (ws !== online.ws) return;
       const wasPlaying = netPlaying();
       const room = online.room;
       online.ws = null;
@@ -6635,6 +6666,12 @@ if ('serviceWorker' in navigator) {
       // so nobody was willing to deal a new match.
       online.host = (m.host === online.id);
       online.peerAway = false;   // they are not away, they are gone
+      // Still in the lobby and the host was who went: the hello we sent went
+      // with them, and the new host deals only to players it has heard from.
+      // Say it again. Repeating it to a host that already has it changes nothing.
+      if (online.status === 'waiting' && !online.host) {
+        netSend('ready', { token: online.token, name: netMyName() });
+      }
       const seat = online.seats.indexOf(m.id);
       if (seat >= 0) {
         online.seats[seat] = null;
@@ -6715,6 +6752,7 @@ if ('serviceWorker' in navigator) {
       online.seatNames = d.seats.map((_, i) => cleanName((d.names || [])[i]));
       online.seat = d.seats.indexOf(online.id);
       online.status = 'playing';
+      online.dealt = true;
       cpuMode = false;
       playerCount = d.seats.length;
       countSelect.value = String(playerCount);
@@ -6733,7 +6771,7 @@ if ('serviceWorker' in navigator) {
 
     // Everything that changes the board goes through the inbox, in the order it
     // was sent (netReceive).
-    if (d.k === 'turn' || d.k === 'heli' || d.k === 'jet' || d.k === 'timeout' || d.k === 'sync' || d.k === 'rematch') {
+    if (d.k === 'turn' || d.k === 'heli' || d.k === 'jet' || d.k === 'timeout' || d.k === 'sync' || d.k === 'rematch' || d.k === 'leaving') {
       netReceive(d);
       return;
     }
@@ -6840,6 +6878,16 @@ if ('serviceWorker' in navigator) {
       return;
     }
     if (d.k === 'sync') netApplyState(d.state);
+    if (d.k === 'leaving') {
+      // They pressed LEAVE: the CPU takes the seat now, rather than after two
+      // turns run out. The chair is still held for them — their token resumes
+      // it, and taking a turn hands it back, as with any stand-in.
+      if (!tanks[d.seat]) return;
+      if (!netSeatIsAi(d.seat)) online.aiSeats.push(d.seat);
+      updateHUD();
+      syncControlsFromTank();
+      netPlayAiTurn();   // and if it is their turn, it is played now
+    }
   }
 
   /** Host only: deal seats and hand out the world everyone will play on. */
@@ -6867,6 +6915,7 @@ if ('serviceWorker' in navigator) {
     online.missed = [];
     online.seat = online.seats.indexOf(online.id);
     online.status = 'playing';
+    online.dealt = true;
     online.round++;
     refreshOpponentUi();
     resetGame();
@@ -7186,12 +7235,67 @@ if ('serviceWorker' in navigator) {
     }, REJOIN_DELAYS_MS[tries]);
   }
 
-  /** A deliberate departure, so we do not fight the player by rejoining. */
+  /**
+   * LEAVE: a deliberate departure, and back to a game on this screen.
+   *
+   * In a match it says goodbye first, so the others hand the seat to the CPU
+   * at once instead of timing it out twice; the seat stays held for this
+   * player's token, so JOIN with the same code still gets back in. Then the
+   * socket is dropped without waiting for it to report closing, and nothing
+   * reconnects. A board that was a match's is replaced by a fresh local round
+   * on this player's own settings; leaving a lobby, or clearing an error,
+   * leaves the local game on screen alone.
+   */
   function netLeave() {
+    disarmLeave();
+    if (netPlaying() && online.seat >= 0) netSend('leaving', { seat: online.seat });
+    const ws = online.ws;
+    online.ws = null;   // first, so its close (now or later) is ignored
     online.left = true;
     online.rejoin = null;
-    if (online.ws) online.ws.close();
+    if (ws) { try { ws.close(); } catch { /* already gone */ } }
+
+    const onBoard = online.dealt;
+    Object.assign(online, {
+      status: 'offline', error: null, host: false, seat: -1, seats: [],
+      seatTokens: [], seatNames: [], vacancies: [], aiSeats: [], missed: [],
+      peerAway: false, inbox: [], dealt: false
+    });
+    netPeerIds = [];
+    if (onBoard) {
+      // This player's own TANKS and OPPONENTS again. OPPONENTS reads Online
+      // until now, which initSetup() keeps when nothing was ever saved, so it
+      // starts from the page's default the way a first visit does.
+      if (modeSelect.value === 'online') modeSelect.value = 'cpu';
+      initSetup();
+      refreshOpponentUi();
+      resetGame();
+    } else {
+      refreshOpponentUi();
+    }
+    refreshOnlineUi();
+    syncControlsFromTank();
+    updateHUD();
   }
+
+  // In a match LEAVE takes two taps, the way RESTART ROUND does: the first
+  // arms it and asks, the second — within the same window — leaves. Out of a
+  // match there is nothing to lose, so one tap does it.
+  let leaveArmTimer = null;
+  function disarmLeave() {
+    clearTimeout(leaveArmTimer);
+    leaveArmTimer = null;
+    netLeaveBtn.classList.remove('armed');
+  }
+  function onLeaveClicked() {
+    if (netPlaying() && !leaveArmTimer) {
+      leaveArmTimer = setTimeout(disarmLeave, RESTART_ARM_MS);
+      netLeaveBtn.classList.add('armed');
+      return;
+    }
+    netLeave();
+  }
+  netLeaveBtn.addEventListener('click', onLeaveClicked);
 
   // Same door as JOIN, minus the typing: the room we were in is remembered.
   netRejoinBtn.addEventListener('click', () => {
@@ -7272,7 +7376,7 @@ if ('serviceWorker' in navigator) {
     netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineNameInput, onlineStatus,
-           netPill, netStatusEl, netRejoinBtn, netInviteBtn },
+           netPill, netStatusEl, netRejoinBtn, netInviteBtn, netLeaveBtn },
     syncControlsFromTank, updateHUD, nudge,
     aimFromPull, pullReach, canvas, get aimDrag() { return aimDrag; },
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
