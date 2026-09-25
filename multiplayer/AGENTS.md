@@ -164,12 +164,16 @@ old Android too.
   stored as `barrage.reactions`) is on and this screen has a seat
   (`youSeat()`: the dealt seat in a match, player 1 against the CPU). All human
   on one screen there is nobody to react to, so the button is hidden.
-- **Sending**: the 🙂 button in the battlefield's bottom-left corner opens a
-  tray of eight (two rows of four on a narrow screen); E opens it from the
-  keyboard and 1–8 pick. It sits over the battlefield rather than in the
-  control rail so it is in the same place in every layout and visible against
-  the CPU, and above the round-over overlay, because that is when GG is said.
-  A tap anywhere else closes it. `sendEmote(e)` shows the bubble here at once.
+- **Sending**: the 🙂 button beside the online status (`#net-row`, next to
+  PLAY WITH OTHERS or the room code) opens a tray of eight in two rows of four,
+  narrow enough for the side rails; E opens it from the keyboard and 1–8 pick. It is
+  kept off the battlefield on purpose. The tray is `position: fixed` and placed
+  by `placeTray()` from the button's own position, on whichever side has more
+  room — above it on a phone, below it in the desktop rail, where an upward
+  tray would cover the scores — and always on screen, so no layout has to
+  make room for it. A tap anywhere else
+  closes it. `sendEmote(e)` shows the bubble here at once. Nothing is ever
+  suggested or offered after a shot: reacting is only ever the player's idea.
 - **The wire**: an `emote` message carries `e`, an **index** into `EMOTES`,
   and `turn`. No text ever travels, so there is nothing to moderate or
   translate, and a receiver ignores anything that is not 0–7. The seat is the
@@ -190,18 +194,15 @@ old Android too.
   three per seat at most, gone after `EMOTE_SHOW_MS`; a copy on the player's
   card; and `Sound.pop`, panned to the tank. Dead tanks' players can still
   react — they are often the most talkative.
-- **The quick row**: every screen plays every shot and lands on the same
-  board, so each works out what a shot did by itself: `watchShot()` in
-  `beginShot()` notes the tanks, `watchBlast()` in `spawnExplosionFx()` the
-  blasts, `watchDowned()` a helicopter or jet shot down, and `shotLanded()` in
-  `finishShot()` hands them to `classifyShot()` (pure) — hits, kills, a
-  self-hit, a near miss (`NEAR_MISS`), a wild one (`WILD_MISS`), the round
-  over. `suggestFor(ev, me)` picks up to three for this player's point of view
-  — fired, hit, or watching — and the row shows along the bottom of the
-  battlefield for `QUICK_MS`. An ordinary miss offers nothing.
-- **The CPU reacts**, against the CPU only (`cpuReact()`): 💀 destroyed, 😈
-  after hitting you, 😱 when hit, 😂 at a wild miss, 🤝 at the end, and it may
-  answer your 😈, 👏 or 🤝 (`cpuAnswer()`). One per shot at most, never within
+- **The CPU reacts**, against the CPU only (`cpuReact()`), to what a shot did.
+  Every screen plays every shot and lands on the same board, so it works that
+  out by itself: `watchShot()` in `beginShot()` notes the tanks,
+  `watchBlast()` in `spawnExplosionFx()` the blasts, `watchDowned()` a
+  helicopter or jet shot down, and `shotLanded()` in `finishShot()` hands them
+  to `classifyShot()` (pure) — hits, kills, a self-hit, a near miss
+  (`NEAR_MISS`), a wild one (`WILD_MISS`), the round over. It reacts with 💀
+  destroyed, 😈 after hitting you, 😱 when hit, 😂 at a wild miss, 🤝 at the
+  end, and it may answer your 😈, 👏 or 🤝 (`cpuAnswer()`). One per shot at most, never within
   `CPU_EMOTE_GAP_MS`, odds in `CPU_EMOTE_ODDS`, half a second or so after the
   fact, and a new round cancels one on its way. Its dice are `reactRandom`, not
   `Math.random`, so reacting never shifts the AI's aim; the harness hands every
