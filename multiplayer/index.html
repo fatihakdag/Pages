@@ -318,6 +318,86 @@
     #view-controls button { width: 42px; height: 42px; font-size: 18px; }
   }
 
+  /* Reactions: the button in the corner opposite the zoom, the tray it opens
+     upward, and the quick row of suggestions along the bottom. Above the
+     round-over overlay, because the end of a round is exactly when GG is said. */
+  #react-ctl {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    z-index: 21;
+  }
+  #react-ctl[hidden], #react-tray[hidden], #quick-react[hidden] { display: none; }
+  #react-btn, #react-tray button, #quick-react button {
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 8px;
+    background: rgba(12,11,16,0.62);
+    color: var(--text);
+    font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+  #react-btn { width: 36px; height: 36px; font-size: 18px; position: relative; }
+  #react-btn[aria-expanded="true"] { border-color: var(--text-main); }
+  /* Out of reactions for a moment: say so, rather than eat the tap. */
+  #react-btn.cooling, #react-tray button:disabled, #quick-react button:disabled { opacity: 0.4; cursor: default; }
+  #react-tray {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 6px);
+    display: grid;
+    grid-template-columns: repeat(8, 34px);
+    gap: 4px;
+    padding: 5px;
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 10px;
+    background: rgba(12,11,16,0.82);
+  }
+  #react-tray button { width: 34px; height: 34px; font-size: 19px; background: transparent; border-color: transparent; }
+  #react-tray button:not(:disabled):hover { background: rgba(255,255,255,0.1); }
+  #quick-react {
+    position: absolute;
+    left: 50%;
+    bottom: 8px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    z-index: 21;
+    animation: quick-in 0.18s ease-out;
+  }
+  #quick-react button { width: 40px; height: 40px; font-size: 21px; }
+  @keyframes quick-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+  @media (pointer: coarse) {
+    #react-btn { width: 42px; height: 42px; font-size: 21px; }
+    #react-tray button { width: 38px; height: 38px; font-size: 22px; }
+    #react-tray { grid-template-columns: repeat(8, 38px); }
+    #quick-react button { width: 44px; height: 44px; font-size: 23px; }
+  }
+  /* Eight across does not fit a narrow battlefield: two rows of four. */
+  @media (max-width: 420px) {
+    #react-tray { grid-template-columns: repeat(4, 38px); }
+  }
+
+  /* The latest reaction on a player's card, and the mark of a muted one. */
+  .player-card { position: relative; }
+  .card-emote, .card-mute {
+    position: absolute;
+    top: -4px;
+    right: 0;
+    font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    font-size: 15px;
+    line-height: 1;
+    pointer-events: none;
+  }
+  .card-emote { opacity: 0; transform: scale(0.6); transition: opacity 0.25s, transform 0.2s; }
+  .card-emote.show { opacity: 1; transform: scale(1); }
+  .card-mute { display: none; font-size: 11px; top: 0; }
+  .player-card.muted .card-mute { display: inline; }
+  .player-card.can-mute { cursor: pointer; }
+
   canvas#game {
     /* width/height are set in resize(), to keep the world aspect; inset+margin
        centres whatever size that came out as. */
@@ -1345,6 +1425,14 @@
       <button type="button" id="zoom-fit" aria-label="Fit the whole battlefield">⛶</button>
       <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
     </div>
+    <!-- Reactions (see "Reactions" in the script): the button, the tray of
+         eight it opens, and the few it suggests after something happens.
+         Buttons are built from EMOTES. -->
+    <div id="react-ctl" hidden>
+      <div id="react-tray" role="menu" hidden></div>
+      <button type="button" id="react-btn" aria-haspopup="menu" aria-expanded="false" aria-label="React">🙂</button>
+    </div>
+    <div id="quick-react" role="group" hidden></div>
     <div id="overlay">
       <h1 id="overlay-title">Tank 1 wins!</h1>
       <p id="overlay-sub">Round over.</p>
@@ -1472,6 +1560,14 @@
             <option value="actual">Actual</option>
           </select>
         </div>
+        <div class="ctrl-group" id="reactions-group">
+          <div class="ctrl-label" data-i18n="reactions">REACTIONS</div>
+          <!-- Off hides the button and ignores everyone else's, the CPU's too. -->
+          <select id="reactions-select">
+            <option value="on" selected>On</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
         <div class="ctrl-group" id="online-group">
           <div class="ctrl-label"><span data-i18n="online">ONLINE</span></div>
           <div class="online-row">
@@ -1574,7 +1670,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v74';
+  const BUILD = 'v75';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1698,6 +1794,10 @@ if ('serviceWorker' in navigator) {
       netVersion: 'update the page', netLost: 'connection lost',
       theme: 'THEME', randomTheme: 'Random',
       tankSize: 'TANK SIZE', sizeLarge: 'Large', sizeActual: 'Actual',
+      reactions: 'REACTIONS', reactOn: 'On', reactOff: 'Off', react: 'React',
+      e_clap: 'Nice shot', e_fire: 'On fire', e_lol: 'LOL', e_whoa: 'Close one!',
+      e_taunt: 'Watch this', e_please: 'Please miss', e_rip: 'RIP', e_gg: 'GG',
+      muteName: 'Mute {name}', unmuteName: 'Unmute {name}',
     },
     tr: {
       wind: 'RÜZGÂR', angle: 'AÇI', power: 'GÜÇ', weapon: 'SİLAH',
@@ -1742,6 +1842,10 @@ if ('serviceWorker' in navigator) {
       netVersion: 'sayfayı yenileyin', netLost: 'bağlantı koptu',
       theme: 'TEMA', randomTheme: 'Rastgele',
       tankSize: 'TANK BOYUTU', sizeLarge: 'Büyük', sizeActual: 'Gerçek',
+      reactions: 'TEPKİLER', reactOn: 'Açık', reactOff: 'Kapalı', react: 'Tepki ver',
+      e_clap: 'Güzel atış', e_fire: 'Harika', e_lol: 'Komik', e_whoa: 'Az kalsın!',
+      e_taunt: 'Sıra bende', e_please: 'Ne olur ıskala', e_rip: 'Elveda', e_gg: 'İyi oyundu',
+      muteName: '{name} sustur', unmuteName: '{name} sesini aç',
       'Dusk Ridge': 'Alacakaranlık Sırtı', 'Salt Flats': 'Tuz Düzlükleri',
       'Ash Peaks': 'Kül Tepeleri', 'Glacier': 'Buzul', 'Verdant Hills': 'Yeşil Tepeler',
       'Night Crater': 'Gece Krateri', 'Rust Canyon': 'Pas Kanyonu',
@@ -1839,6 +1943,8 @@ if ('serviceWorker' in navigator) {
     relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
     relabel(themeSelect, ['randomTheme', ...THEMES.map(th => th.name)]);
     relabel(sizeSelect, ['sizeLarge', 'sizeActual']);
+    relabel(reactionsSelect, ['reactOn', 'reactOff']);
+    relabelReactions();
     const aria = { 'zoom-in': 'zoomIn', 'zoom-out': 'zoomOut', 'zoom-fit': 'zoomFit',
                    'angle-left': 'aimLeft', 'angle-right': 'aimRight',
                    'power-dec': 'powerDown', 'power-inc': 'powerUp',
@@ -2834,6 +2940,7 @@ if ('serviceWorker' in navigator) {
     updateHUD();
     overlay.classList.remove('show');
     markYou();
+    reactionsNewRound();
     syncControlsFromTank();
     maybeAiTurn();
   }
@@ -2841,6 +2948,7 @@ if ('serviceWorker' in navigator) {
   function updateHUD() {
     playersRow.dataset.count = tanks.length;
     refreshCardNames();
+    refreshReactUi();
     for (let i = 0; i < MAX_PLAYERS; i++) {
       const t = tanks[i];
       cards[i].hidden = !t;
@@ -3514,6 +3622,7 @@ if ('serviceWorker' in navigator) {
 
   function spawnExplosionFx(x, y, radius, color) {
     if (!resolving) Sound.explode(radius, screenX01(x)); // the one place every blast in the game passes through
+    watchBlast(x, y, radius);
     explosions.push({ x, y, r: 4, maxR: radius * 1.15, t: 0, color });
     const count = Math.round(radius * 0.9);
     for (let i = 0; i < count; i++) {
@@ -3653,6 +3762,7 @@ if ('serviceWorker' in navigator) {
     shotBudget = 0;
     shotLead = resolving ? 0 : Math.max(0, simClock - netNow());
     simRandom = seededRandom(shot.seed || 0);
+    watchShot(shot.seat);
     launchShot();
   }
 
@@ -3717,6 +3827,7 @@ if ('serviceWorker' in navigator) {
     } else {
       nextTurn();
     }
+    shotLanded();
     netDrainInbox();
   }
 
@@ -4291,6 +4402,7 @@ if ('serviceWorker' in navigator) {
       if (c) { p.x = c.x; p.y = c.y; }
       spawnExplosionFx(p.x, p.y, 28, '#ffd27a');
       jetShotDown();
+      watchDowned();
       p.dead = true;
       shotExploded = true;
       return;
@@ -4299,6 +4411,7 @@ if ('serviceWorker' in navigator) {
       if (c) { p.x = c.x; p.y = c.y; }
       // the shell bursts on the airframe; the wreck falls on its own from here
       spawnExplosionFx(p.x, p.y, 32, '#ffd27a');
+      watchDowned();
       heli.falling = true;
       heli.vy = 20;
       heli.t = simClock;   // the wreck's own clock starts at the step it was hit on
@@ -6182,6 +6295,8 @@ if ('serviceWorker' in navigator) {
     screenTransform();
     if (!hudWindVisible) drawWindGauge();
     drawYouMarker();
+    drawEmotes();
+    updateCardEmotes();
     drawAimDrag();
     worldTransform();
   }
@@ -6740,6 +6855,7 @@ if ('serviceWorker' in navigator) {
       // A new round, or a seat this screen has not held: point at the tank.
       // Someone else resuming into the same round is neither.
       if (d.round !== online.round || d.seats.indexOf(online.id) !== online.seat) markYou();
+      if (d.round !== online.round) reactionsNewRound();
       // The host's word on which seats are empty and which the CPU is playing:
       // a restart keeps a missing player's chair for them, and every screen
       // has to agree on who covers it.
@@ -6768,6 +6884,10 @@ if ('serviceWorker' in navigator) {
     }
 
     if (!netPlaying()) return;
+
+    // A reaction changes nothing on the board, so it skips the inbox: shown on
+    // arrival, or held only as long as the shot it is about (netEmoteIn).
+    if (d.k === 'emote') { netEmoteIn(d, m.from); return; }
 
     // Everything that changes the board goes through the inbox, in the order it
     // was sent (netReceive).
@@ -7310,6 +7430,533 @@ if ('serviceWorker' in navigator) {
     if (code.length) netConnect(code);
   });
 
+  // ---------- Reactions ----------
+  // A fixed set of eight emoji a player can send over their own tank: from the
+  // button in the battlefield's corner, from the few suggested right after a
+  // shot (the quick row), or with E then 1-8. Online they go to everyone; against
+  // the CPU the CPU sends its own. All human on one screen there is no one to
+  // react to, so there is no button.
+  //
+  // Nothing about a reaction touches the game. The message carries an index
+  // into EMOTES, never text, so there is nothing to moderate or translate and
+  // nothing but these eight can arrive. The seat is the sender's own, looked up
+  // from who the relay says sent it — a message cannot speak for someone else.
+  // Only the multiplayer build has this.
+  const EMOTES = [
+    { ch: '👏', key: 'e_clap' },  { ch: '🔥', key: 'e_fire' },
+    { ch: '😂', key: 'e_lol' },   { ch: '😱', key: 'e_whoa' },
+    { ch: '😈', key: 'e_taunt' }, { ch: '🙏', key: 'e_please' },
+    { ch: '💀', key: 'e_rip' },   { ch: '🤝', key: 'e_gg' }
+  ];
+  const EM = { CLAP: 0, FIRE: 1, LOL: 2, WHOA: 3, TAUNT: 4, PLEASE: 5, RIP: 6, GG: 7 };
+  const EMOTE_SHOW_MS = 2600;   // a bubble's life over its tank
+  const EMOTE_STACK = 3;        // bubbles per seat at once; a fourth pushes the oldest off
+  // Sending: three in any five seconds. The relay cuts a socket off at 40
+  // messages a second, and the game treats that as a lost connection, so
+  // reactions have to stay nowhere near it. Receiving allows a little more,
+  // for clocks that disagree, and drops the rest — a modified client cannot
+  // bury anyone's screen.
+  const SEND_BURST = 3, SEND_WINDOW_MS = 5000, RECV_BURST = 4;
+  const QUICK_MS = 4000;        // how long the quick row stays up
+  const EMOTE_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+
+  const reactCtl = document.getElementById('react-ctl');
+  const reactBtn = document.getElementById('react-btn');
+  const reactTray = document.getElementById('react-tray');
+  const quickReact = document.getElementById('quick-react');
+  const reactionsSelect = document.getElementById('reactions-select');
+
+  let reactionsOn = true;
+  let emotes = [];      // { seat, e, at } bubbles on screen
+  let emoteHold = [];   // { seat, e, turn } arrived ahead of the shot they are about
+  let sentAt = [];      // when this screen last sent, for SEND_BURST
+  const recvAt = {};    // seat -> when its reactions arrived, for RECV_BURST
+  const trayBtns = [];
+  const cardEmotes = [], cardMutes = [];
+  const cardEmoteUntil = [];
+  let quickTimer = null, cooldownTimer = null;
+
+  /** Which seat this screen reacts as, or -1 if it has none (see youSeat). */
+  function reactSeat() { return youSeat(); }
+
+  /** Whether this screen can react at all: switched on, and a seat to react from. */
+  function canReact() {
+    const seat = reactSeat();
+    return reactionsOn && seat >= 0 && !!tanks[seat];
+  }
+
+  function validEmote(e) { return Number.isInteger(e) && e >= 0 && e < EMOTES.length; }
+
+  /** Milliseconds until this screen may send again; 0 when it can now. */
+  function sendCooldownMs(now = performance.now()) {
+    sentAt = sentAt.filter(t => now - t < SEND_WINDOW_MS);
+    return sentAt.length < SEND_BURST ? 0 : Math.ceil(SEND_WINDOW_MS - (now - sentAt[0]));
+  }
+
+  /**
+   * Send reaction `e` from this screen's seat. Shown here at once; online it
+   * goes to everyone, and against the CPU the CPU may answer it. False when it
+   * could not go: switched off, no seat, or out of reactions for a moment.
+   */
+  function sendEmote(e) {
+    if (!validEmote(e) || !canReact()) return false;
+    const now = performance.now();
+    if (sendCooldownMs(now) > 0) { refreshReactUi(); return false; }
+    sentAt.push(now);
+    const seat = reactSeat();
+    showEmote(seat, e);
+    if (netPlaying()) netSend('emote', { e, turn: turnSeq });
+    else cpuAnswer(e);
+    closeTray();
+    hideQuick();
+    refreshReactUi();
+    return true;
+  }
+
+  /** Put a reaction up over `seat`'s tank and on its card, unless muted or off. */
+  function showEmote(seat, e) {
+    if (!reactionsOn || !validEmote(e) || !tanks[seat] || isMuted(seat)) return;
+    const now = performance.now();
+    emotes.push({ seat, e, at: now });
+    const mine = emotes.filter(m => m.seat === seat);
+    if (mine.length > EMOTE_STACK) emotes.splice(emotes.indexOf(mine[0]), 1);
+    cardEmoteUntil[seat] = now + EMOTE_SHOW_MS;
+    if (cardEmotes[seat]) {
+      cardEmotes[seat].textContent = EMOTES[e].ch;
+      cardEmotes[seat].classList.add('show');
+    }
+    Sound.pop(screenX01(tanks[seat].x));
+  }
+
+  /**
+   * A reaction from another player. Held back if it is about a shot this screen
+   * is still playing — sent from a later turn than the one on screen — so a
+   * slow replay never hears 🔥 before the hit it is about.
+   */
+  function netEmoteIn(d, from) {
+    if (!reactionsOn || !validEmote(d.e)) return;
+    if (typeof d.round === 'number' && d.round !== online.round) return;
+    const seat = online.seats.indexOf(from);
+    if (seat < 0 || seat === online.seat) return;
+    const now = performance.now();
+    const seen = (recvAt[seat] || []).filter(t => now - t < SEND_WINDOW_MS);
+    if (seen.length >= RECV_BURST) { recvAt[seat] = seen; return; }
+    seen.push(now);
+    recvAt[seat] = seen;
+    if (activeShot && Number.isFinite(d.turn) && d.turn > turnSeq) {
+      emoteHold.push({ seat, e: d.e, turn: d.turn });
+      return;
+    }
+    showEmote(seat, d.e);
+  }
+
+  /** The shot on screen has landed: let through what was waiting on it. */
+  function releaseHeldEmotes() {
+    if (!emoteHold.length) return;
+    const due = emoteHold.filter(h => h.turn <= turnSeq);
+    emoteHold = emoteHold.filter(h => h.turn > turnSeq);
+    for (const h of due) showEmote(h.seat, h.e);
+  }
+
+  /** A new board: nothing from the old one is about it any more. */
+  function reactionsNewRound() {
+    emoteHold = [];
+    shotWatch = null;
+    cpuEmoteToken++;
+    hideQuick();
+  }
+
+  // ---- drawing ----
+  /** Where a tank's top is on screen, in CSS pixels, unclamped. */
+  function tankTopOnScreen(t) {
+    const k = viewScale * camZoom;
+    const top = groundHeightAt(t.x) - (TANK_H + BARREL_LEN) * spriteBoost();
+    return { x: (t.x - camX) * k, y: (top - camY) * k };
+  }
+
+  function drawEmotes() {
+    const now = performance.now();
+    emotes = emotes.filter(m => now - m.at < EMOTE_SHOW_MS);
+    if (!emotes.length) return;
+    const R = 15, STEP = 34;
+    ctx.save();
+    ctx.font = `20px ${EMOTE_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const bySeat = new Map();
+    for (const m of emotes) {
+      if (!bySeat.has(m.seat)) bySeat.set(m.seat, []);
+      bySeat.get(m.seat).push(m);
+    }
+    for (const [seat, list] of bySeat) {
+      const t = tanks[seat];
+      if (!t) continue;
+      const top = tankTopOnScreen(t);
+      // Above the YOU marker when that is up over the same tank.
+      const lift = (seat === youSeat() && youMarkAlpha() > 0) ? 30 : 0;
+      const x = Math.max(R + 4, Math.min(viewW - R - 4, top.x));
+      // Newest nearest the tank; older ones stacked above it.
+      for (let k = 0; k < list.length; k++) {
+        const m = list[list.length - 1 - k];
+        const age = now - m.at;
+        const pop = age < 140 ? 0.6 + 0.55 * (age / 140) : age < 240 ? 1.15 - 0.15 * ((age - 140) / 100) : 1;
+        const fade = Math.min(1, (EMOTE_SHOW_MS - age) / 600);
+        const y = Math.max(R + 4, Math.min(viewH - R - 4,
+          top.y - 8 - R - lift - k * STEP - 14 * (age / EMOTE_SHOW_MS)));
+        ctx.globalAlpha = Math.max(0, fade);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(pop, pop);
+        ctx.beginPath();
+        ctx.arc(0, 0, R, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(12,11,16,0.72)';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = t.color;
+        ctx.stroke();
+        ctx.fillText(EMOTES[m.e].ch, 0, 1);
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+
+  /** The card copies expire on their own clock; written only when one changes. */
+  function updateCardEmotes() {
+    const now = performance.now();
+    for (let i = 0; i < cardEmotes.length; i++) {
+      if (cardEmoteUntil[i] && now >= cardEmoteUntil[i]) {
+        cardEmoteUntil[i] = 0;
+        cardEmotes[i].classList.remove('show');
+      }
+    }
+  }
+
+  // ---- the button, the tray and the quick row ----
+  function buildReactUi() {
+    EMOTES.forEach((em, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'menuitem');
+      b.textContent = em.ch;
+      b.addEventListener('click', () => sendEmote(i));
+      reactTray.appendChild(b);
+      trayBtns.push(b);
+    });
+    cards.forEach((card, i) => {
+      const e = document.createElement('span');
+      e.className = 'card-emote';
+      e.setAttribute('aria-hidden', 'true');
+      const m = document.createElement('span');
+      m.className = 'card-mute';
+      m.setAttribute('aria-hidden', 'true');
+      m.textContent = '🔇';
+      card.appendChild(e);
+      card.appendChild(m);
+      cardEmotes[i] = e;
+      cardMutes[i] = m;
+      card.addEventListener('click', () => toggleMute(i));
+    });
+    relabelReactions();
+  }
+
+  function relabelReactions() {
+    reactBtn.setAttribute('aria-label', txt('react'));
+    reactBtn.title = txt('react') + ' (E)';   // the keyboard hint row is full
+    trayBtns.forEach((b, i) => {
+      b.setAttribute('aria-label', txt(EMOTES[i].key));
+      b.title = txt(EMOTES[i].key);
+    });
+  }
+
+  function trayOpen() { return !reactTray.hidden; }
+  function openTray() {
+    if (!canReact()) return;
+    hideQuick();
+    reactTray.hidden = false;
+    reactBtn.setAttribute('aria-expanded', 'true');
+  }
+  function closeTray() {
+    reactTray.hidden = true;
+    reactBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  /** Offer these reactions for a few seconds, one tap each. */
+  function showQuick(list) {
+    if (!canReact() || !list.length || trayOpen()) return;
+    quickReact.textContent = '';
+    for (const e of list) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = EMOTES[e].ch;
+      b.setAttribute('aria-label', txt(EMOTES[e].key));
+      b.title = txt(EMOTES[e].key);
+      b.disabled = sendCooldownMs() > 0;
+      b.addEventListener('click', () => sendEmote(e));
+      quickReact.appendChild(b);
+    }
+    quickReact.dataset.emotes = list.join(',');
+    quickReact.hidden = false;
+    clearTimeout(quickTimer);
+    quickTimer = setTimeout(hideQuick, QUICK_MS);
+  }
+  function hideQuick() {
+    clearTimeout(quickTimer);
+    quickTimer = null;
+    quickReact.hidden = true;
+    quickReact.textContent = '';
+    delete quickReact.dataset.emotes;
+  }
+
+  /** Show, hide and grey out to match what this screen can do right now. */
+  function refreshReactUi() {
+    const can = canReact();
+    reactCtl.hidden = !can;
+    if (!can) { closeTray(); hideQuick(); }
+    const wait = can ? sendCooldownMs() : 0;
+    reactBtn.classList.toggle('cooling', wait > 0);
+    trayBtns.forEach(b => { b.disabled = wait > 0; });
+    for (const b of quickReact.children) b.disabled = wait > 0;
+    clearTimeout(cooldownTimer);
+    if (wait > 0) cooldownTimer = setTimeout(refreshReactUi, wait + 20);
+    refreshMuteUi();
+  }
+
+  reactBtn.addEventListener('click', () => { trayOpen() ? closeTray() : openTray(); });
+  // A tap anywhere else puts the tray away, and the quick row with it: the row
+  // sits over the battlefield, so it must never be in the way of starting a pull.
+  const inside = (el, target) => !!(el.contains && target && el.contains(target));
+  document.addEventListener('pointerdown', (e) => {
+    if (trayOpen() && !inside(reactCtl, e.target)) closeTray();
+    if (!quickReact.hidden && !inside(quickReact, e.target)) hideQuick();
+  });
+  // E opens the tray, 1-8 pick from it, Escape closes it. Not while typing a
+  // name or a code, and not behind the settings panel.
+  window.addEventListener('keydown', (e) => {
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (settingsIsOpen() || !canReact()) return;
+    if (e.key === 'e' || e.key === 'E') {
+      trayOpen() ? closeTray() : openTray();
+      e.preventDefault();
+    } else if (trayOpen() && e.key >= '1' && e.key <= String(EMOTES.length)) {
+      sendEmote(Number(e.key) - 1);
+      e.preventDefault();
+    } else if (trayOpen() && e.key === 'Escape') {
+      closeTray();
+    }
+  });
+
+  function setReactionsOn(on) {
+    reactionsOn = !!on;
+    reactionsSelect.value = reactionsOn ? 'on' : 'off';
+    if (!reactionsOn) {
+      emotes = [];
+      emoteHold = [];
+      cpuEmoteToken++;
+      cardEmoteUntil.fill(0);
+      cardEmotes.forEach(el => el.classList.remove('show'));
+    }
+    refreshReactUi();
+  }
+  reactionsSelect.addEventListener('change', () => {
+    setReactionsOn(reactionsSelect.value !== 'off');
+    try { localStorage.setItem('barrage.reactions', reactionsOn ? 'on' : 'off'); } catch (e) { /* private mode */ }
+  });
+  function initReactions() {
+    let stored = null;
+    try { stored = localStorage.getItem('barrage.reactions'); } catch (e) { /* private mode */ }
+    buildReactUi();
+    setReactionsOn(stored !== 'off');
+  }
+
+  // ---- what just happened (the quick row, and the CPU's reactions) ----
+  // Every screen plays every shot out and ends on the same board, so each can
+  // work out what a shot did by itself and nothing more has to be sent: tanks
+  // as they were when it was fired against how it left them, the blasts it
+  // made on the way, and whether it brought an aircraft down.
+  const NEAR_MISS = 24;    // a blast edge this close to a tank it did not hurt
+  const WILD_MISS = 260;   // every blast at least this far from any enemy
+  let shotWatch = null;    // { seat, before: [{ hp, alive, x }], blasts: [{ x, y, r }], downed }
+
+  function watchShot(seat) {
+    if (resolving) return;
+    shotWatch = { seat, before: tanks.map(t => ({ hp: t.hp, alive: t.alive, x: t.x })), blasts: [], downed: false };
+  }
+  function watchBlast(x, y, r) { if (!resolving && shotWatch) shotWatch.blasts.push({ x, y, r }); }
+  function watchDowned() { if (!resolving && shotWatch) shotWatch.downed = true; }
+
+  /**
+   * What a shot did, from a watch and the tanks it left. Pure, for the tests:
+   * hits on others (with kills), the shooter's own damage, a near miss, a wild
+   * miss, an aircraft down, and whether the round is over.
+   */
+  function classifyShot(w, after, over = false, winner = -1) {
+    const hits = [];
+    let self = null;
+    w.before.forEach((b, i) => {
+      const a = after[i];
+      if (!a || !b.alive) return;
+      const dmg = Math.max(0, b.hp - a.hp);
+      if (dmg < 1 && a.alive) return;
+      const hit = { seat: i, dmg: Math.round(dmg), killed: !a.alive };
+      if (i === w.seat) self = hit; else hits.push(hit);
+    });
+    const enemies = w.before.map((b, i) => ({ ...b, seat: i }))
+      .filter(b => b.alive && b.seat !== w.seat && !hits.some(h => h.seat === b.seat));
+    let edge = Infinity, closest = Infinity;
+    for (const bl of w.blasts) {
+      for (const b of enemies) {
+        const t = after[b.seat] || b;
+        edge = Math.min(edge, hullDistance(t, bl.x, bl.y) - bl.r);
+        closest = Math.min(closest, Math.abs(bl.x - b.x));
+      }
+    }
+    const missed = !hits.length && !self && !w.downed;
+    return {
+      shooter: w.seat, hits, self,
+      kills: hits.filter(h => h.killed).map(h => h.seat),
+      nearMiss: missed && w.blasts.length > 0 && edge < NEAR_MISS,
+      wild: missed && (w.blasts.length === 0 || closest > WILD_MISS),
+      downed: w.downed, over, winner: over ? winner : -1
+    };
+  }
+
+  /**
+   * The reactions worth offering `me` after `ev`, best first, at most three:
+   * what you would say depends on whether you fired, were hit, or watched.
+   */
+  function suggestFor(ev, me) {
+    if (me < 0) return [];
+    const mine = ev.hits.find(h => h.seat === me);
+    if (ev.over) return ev.winner === me ? [EM.GG, EM.FIRE, EM.TAUNT] : [EM.GG, EM.CLAP, EM.RIP];
+    if ((mine && mine.killed) || (ev.shooter === me && ev.self && ev.self.killed)) return [EM.RIP, EM.WHOA, EM.CLAP];
+    if (mine) return [EM.WHOA, EM.PLEASE, EM.TAUNT];
+    if (ev.shooter === me) {
+      if (ev.self) return [EM.LOL, EM.WHOA];
+      if (ev.kills.length) return [EM.FIRE, EM.TAUNT];
+      if (ev.hits.length || ev.downed) return [EM.TAUNT, EM.FIRE];
+      if (ev.nearMiss) return [EM.WHOA, EM.LOL];
+      if (ev.wild) return [EM.LOL];
+      return [];
+    }
+    if (ev.kills.length) return [EM.FIRE, EM.CLAP, EM.WHOA];
+    if (ev.self) return [EM.LOL, EM.CLAP];
+    if (ev.hits.length || ev.downed) return [EM.CLAP, EM.FIRE];
+    if (ev.nearMiss) return [EM.WHOA, EM.LOL];
+    if (ev.wild) return [EM.LOL];
+    return [];
+  }
+
+  /** finishShot(): the board is final — say what happened, let held ones through. */
+  function shotLanded() {
+    releaseHeldEmotes();
+    const w = shotWatch;
+    shotWatch = null;
+    if (!w) return;
+    const over = state === 'GAMEOVER';
+    const ev = classifyShot(w, tanks, over, over ? lastWinner : -1);
+    if (canReact()) showQuick(suggestFor(ev, reactSeat()));
+    cpuReact(ev);
+  }
+
+  // ---- the CPU's reactions (against the CPU only) ----
+  // It reacts to what happens to it and to you, now and then: one reaction per
+  // shot at most, and never twice within CPU_EMOTE_GAP_MS. A little after the
+  // fact, the way a person would, and cancelled by a new round. Its dice are
+  // its own (reactRandom), so reacting never shifts the AI's aim.
+  const CPU_EMOTE_GAP_MS = 6000;
+  const CPU_EMOTE_ODDS = { taunt: 0.5, hurt: 0.35, rip: 0.7, selfHit: 0.5, laugh: 0.3, gg: 0.8, answer: 0.45 };
+  let cpuEmoteAt = -Infinity, cpuEmoteToken = 0;
+  let reactRandom = seededRandom(Date.now() >>> 0);
+
+  function cpuReacts() { return reactionsOn && cpuMode && !netPlaying(); }
+
+  /** Maybe have CPU `seat` react with `e`, with probability `odds`. */
+  function cpuEmote(seat, e, odds) {
+    if (!cpuReacts() || !isAi(seat) || !tanks[seat]) return false;
+    const now = performance.now();
+    if (now - cpuEmoteAt < CPU_EMOTE_GAP_MS) return false;
+    if (reactRandom() >= odds) return false;
+    cpuEmoteAt = now;
+    const token = cpuEmoteToken;
+    setTimeout(() => { if (token === cpuEmoteToken) showEmote(seat, e); }, 500 + reactRandom() * 600);
+    return true;
+  }
+
+  /** The one reaction, if any, a CPU seat has to what a shot did. */
+  function cpuReact(ev) {
+    if (!cpuReacts()) return;
+    const cpus = tanks.map((_, i) => i).filter(i => isAi(i));
+    if (!cpus.length) return;
+    if (ev.over) {
+      const who = isAi(ev.winner) ? ev.winner : cpus[0];
+      cpuEmote(who, EM.GG, CPU_EMOTE_ODDS.gg);
+      return;
+    }
+    const killed = ev.hits.find(h => h.killed && isAi(h.seat));
+    if (killed) { cpuEmote(killed.seat, EM.RIP, CPU_EMOTE_ODDS.rip); return; }
+    if (isAi(ev.shooter)) {
+      if (ev.self) { cpuEmote(ev.shooter, EM.WHOA, CPU_EMOTE_ODDS.selfHit); return; }
+      if (ev.hits.some(h => !isAi(h.seat))) { cpuEmote(ev.shooter, EM.TAUNT, CPU_EMOTE_ODDS.taunt); return; }
+      return;
+    }
+    const hurt = ev.hits.find(h => isAi(h.seat));
+    if (hurt) { cpuEmote(hurt.seat, EM.WHOA, CPU_EMOTE_ODDS.hurt); return; }
+    if (ev.wild) {
+      const alive = cpus.filter(i => tanks[i].alive);
+      if (alive.length) cpuEmote(alive[0], EM.LOL, CPU_EMOTE_ODDS.laugh);
+    }
+  }
+
+  /** You reacted in a game against the CPU: it may answer. */
+  function cpuAnswer(e) {
+    if (!cpuReacts()) return;
+    const alive = tanks.map((_, i) => i).filter(i => isAi(i) && tanks[i].alive);
+    const who = alive.length ? alive[Math.floor(reactRandom() * alive.length)] : -1;
+    if (who < 0) return;
+    if (e === EM.TAUNT) cpuEmote(who, reactRandom() < 0.5 ? EM.PLEASE : EM.LOL, CPU_EMOTE_ODDS.answer);
+    else if (e === EM.GG) cpuEmote(who, EM.GG, CPU_EMOTE_ODDS.answer);
+    else if (e === EM.CLAP) cpuEmote(who, EM.GG, CPU_EMOTE_ODDS.answer * 0.5);
+  }
+
+  // ---- muting a player ----
+  // Tap a player's card to stop seeing their reactions, on this screen only.
+  // Online the mute follows the player's token, so it survives a rematch and a
+  // reconnect; against the CPU it is simply the seat.
+  const mutedKeys = new Set();
+  function muteKey(seat) {
+    return netPlaying() ? 'tok:' + (online.seatTokens[seat] || seat) : 'seat:' + seat;
+  }
+  function isMuted(seat) { return mutedKeys.has(muteKey(seat)); }
+  function canMute(seat) { return canReact() && seat !== reactSeat() && !!tanks[seat]; }
+
+  function toggleMute(seat) {
+    if (!canMute(seat)) return false;
+    const key = muteKey(seat);
+    if (mutedKeys.has(key)) mutedKeys.delete(key);
+    else {
+      mutedKeys.add(key);
+      emotes = emotes.filter(m => m.seat !== seat);
+      emoteHold = emoteHold.filter(h => h.seat !== seat);
+      cardEmoteUntil[seat] = 0;
+      if (cardEmotes[seat]) cardEmotes[seat].classList.remove('show');
+    }
+    refreshMuteUi();
+    return true;
+  }
+
+  function refreshMuteUi() {
+    cards.forEach((card, i) => {
+      if (!card) return;
+      const can = canMute(i);
+      const muted = can && isMuted(i);
+      card.classList.toggle('can-mute', can);
+      card.classList.toggle('muted', muted);
+      card.title = can ? txt(muted ? 'unmuteName' : 'muteName', { name: playerName(i) }) : '';
+    });
+  }
+
   // ---------- Boot ----------
   // The canvas is sized entirely in resize() now, so missing a size change
   // leaves the playfield visibly wrong rather than merely blurry — the old
@@ -7338,6 +7985,7 @@ if ('serviceWorker' in navigator) {
   initSound();
   initTheme();
   initSizePref();
+  initReactions();
   initSetup();
   refreshOpponentUi();
   resetGame();
@@ -7371,6 +8019,15 @@ if ('serviceWorker' in navigator) {
     netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
     firstSeat, slotOrder, setDealRandom(fn) { dealRandom = fn; },
     youMarkAlpha, drawYouMarker, YOU_HOLD_MS, YOU_FADE_MS,
+    EMOTES, EM, sendEmote, showEmote, netEmoteIn, canReact, sendCooldownMs, classifyShot, suggestFor,
+    toggleMute, isMuted, setReactionsOn, drawEmotes, cpuReact, cpuAnswer, trayOpen, openTray, closeTray,
+    showQuick, hideQuick, shotLanded,
+    EMOTE_SHOW_MS, SEND_BURST, SEND_WINDOW_MS, RECV_BURST, QUICK_MS, CPU_EMOTE_GAP_MS, CPU_EMOTE_ODDS,
+    NEAR_MISS, WILD_MISS,
+    get emotes() { return emotes; }, get emoteHold() { return emoteHold; },
+    get shotWatch() { return shotWatch; }, get reactionsOn() { return reactionsOn; },
+    setReactRandom(fn) { reactRandom = fn; },
+    el3: { reactCtl, reactBtn, reactTray, quickReact, reactionsSelect, cardEmotes, cardMutes },
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,

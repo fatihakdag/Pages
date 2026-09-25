@@ -153,6 +153,63 @@ and the proximity fuze follow that one only. Locked once, as before: if its
 target is shot down or leaves mid-burn it drops back into its dive rather than
 switching to the other.
 
+## Reactions
+
+Eight fixed emoji — 👏 🔥 😂 😱 😈 🙏 💀 🤝, in `EMOTES` — that a player sends
+over their own tank. Everything is in `// ---------- Reactions ----------`.
+Only this build has them. Emoji 1–3 era characters only, so they render on
+old Android too.
+
+- **Who can react** is `canReact()`: the REACTIONS setting (`#reactions-select`,
+  stored as `barrage.reactions`) is on and this screen has a seat
+  (`youSeat()`: the dealt seat in a match, player 1 against the CPU). All human
+  on one screen there is nobody to react to, so the button is hidden.
+- **Sending**: the 🙂 button in the battlefield's bottom-left corner opens a
+  tray of eight (two rows of four on a narrow screen); E opens it from the
+  keyboard and 1–8 pick. It sits over the battlefield rather than in the
+  control rail so it is in the same place in every layout and visible against
+  the CPU, and above the round-over overlay, because that is when GG is said.
+  A tap anywhere else closes it. `sendEmote(e)` shows the bubble here at once.
+- **The wire**: an `emote` message carries `e`, an **index** into `EMOTES`,
+  and `turn`. No text ever travels, so there is nothing to moderate or
+  translate, and a receiver ignores anything that is not 0–7. The seat is the
+  sender's own, looked up from the relay's `from` — a seat named in the message
+  is not believed. It skips the inbox: nothing on the board changes.
+  Old clients ignore a kind they do not know, so no `PROTOCOL` bump.
+- **Rate**: three sends in any five seconds (`SEND_BURST`, `SEND_WINDOW_MS`),
+  with the button greyed while it waits. This matters beyond manners: the relay
+  answers more than 40 messages a second with `RATE`, and the game treats that
+  as a lost connection. Receivers also drop more than `RECV_BURST` per seat in
+  the same window, so a modified client cannot bury anyone's screen.
+- **No spoilers**: a reaction sent from a later `turn` than the one on screen
+  arrives while this screen is still replaying the shot it is about. It waits
+  in `emoteHold` and is shown when `finishShot()` lands it. One sent mid-flight
+  is about the shot everyone is watching and shows at once.
+- **Drawing**: a bubble over the tank in the sender's colour (`drawEmotes()`,
+  CSS pixels like the wind gauge and YOU, stacked above YOU when that is up),
+  three per seat at most, gone after `EMOTE_SHOW_MS`; a copy on the player's
+  card; and `Sound.pop`, panned to the tank. Dead tanks' players can still
+  react — they are often the most talkative.
+- **The quick row**: every screen plays every shot and lands on the same
+  board, so each works out what a shot did by itself: `watchShot()` in
+  `beginShot()` notes the tanks, `watchBlast()` in `spawnExplosionFx()` the
+  blasts, `watchDowned()` a helicopter or jet shot down, and `shotLanded()` in
+  `finishShot()` hands them to `classifyShot()` (pure) — hits, kills, a
+  self-hit, a near miss (`NEAR_MISS`), a wild one (`WILD_MISS`), the round
+  over. `suggestFor(ev, me)` picks up to three for this player's point of view
+  — fired, hit, or watching — and the row shows along the bottom of the
+  battlefield for `QUICK_MS`. An ordinary miss offers nothing.
+- **The CPU reacts**, against the CPU only (`cpuReact()`): 💀 destroyed, 😈
+  after hitting you, 😱 when hit, 😂 at a wild miss, 🤝 at the end, and it may
+  answer your 😈, 👏 or 🤝 (`cpuAnswer()`). One per shot at most, never within
+  `CPU_EMOTE_GAP_MS`, odds in `CPU_EMOTE_ODDS`, half a second or so after the
+  fact, and a new round cancels one on its way. Its dice are `reactRandom`, not
+  `Math.random`, so reacting never shifts the AI's aim; the harness hands every
+  test a CPU that never reacts unless it sets `setReactRandom()`.
+- **Muting**: tap a player's card to hide their reactions on this screen only
+  (🔇 on the card). Online the mute is keyed by the seat's token, so it
+  survives a rematch and a reconnect; against the CPU by seat.
+
 ## What differs from the single-player build
 
 **The simulation is in world units, not canvas pixels.** This is the whole
