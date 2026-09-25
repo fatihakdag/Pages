@@ -490,6 +490,19 @@ Other things worth knowing:
 - `socketFactory` is overridable through the seam (`setSocketFactory`), which
   is how `tests/online.test.mjs` drives the whole protocol without a socket.
 - The relay URL is the page's own origin, overridable with `?relay=ws://…`.
+- **LEAVE** sits in the online pill beside the status (`netLeave()`). In a
+  match it takes two taps, like RESTART ROUND, and says goodbye first: a
+  `leaving` message, through the inbox like `timeout`, puts the seat in
+  `aiSeats` on every screen so the CPU plays it at once instead of after two
+  turns run out. The relay's `gone` follows and the seat is held as for any
+  departure, so JOIN with the same code resumes it. The leaver drops the socket
+  without waiting for it to report closing — the close handler ignores any
+  socket that is no longer `online.ws` — and, if the board on screen was a
+  match's (`online.dealt`), deals a local round on their own saved TANKS and
+  OPPONENTS. Outside a match it is one tap: leaving a lobby, or clearing an
+  error, leaves the local game on screen alone. A guest still in the lobby
+  when the host goes re-sends its `ready`, because the new host deals only to
+  players it has heard from.
 - **Restarting is the host's call.** Settings has RESTART ROUND (two taps: the
   first arms it for `RESTART_ARM_MS`). Offline it is `resetGame()`; in a match
   it is enabled only for the host, who deals the new board with
