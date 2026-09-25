@@ -1,6 +1,6 @@
 // The YOU marker over this screen's own tank. Tanks are dealt to new places
 // every round, so for the first few seconds of one each player is shown which
-// is theirs.
+// is theirs — online, and against the CPU.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { load } from './harness.mjs';
@@ -105,10 +105,23 @@ test('someone else resuming does not raise it', () => {
   assert.equal(host.g.online.round, guest.g.online.round);
 });
 
-test('not offline, and not over a wrecked tank or a finished round', () => {
+test('against the CPU it points at player 1', () => {
+  const h = load();
+  h.g.el.modeSelect.value = 'cpu';
+  h.g.el.modeSelect.dispatch('change');
+  h.g.resetGame();
+  assert.equal(h.g.youMarkAlpha(), 1);
+  assert.deepEqual(drawnLabels(h), ['YOU']);
+  h.advance(h.g.YOU_HOLD_MS + h.g.YOU_FADE_MS);
+  assert.equal(h.g.youMarkAlpha(), 0, 'and fades like the online one');
+});
+
+test('not all human on one screen, and not over a wrecked tank or a finished round', () => {
   const solo = load();
+  solo.g.el.modeSelect.value = 'human';
+  solo.g.el.modeSelect.dispatch('change');
   solo.g.resetGame();
-  assert.equal(solo.g.youMarkAlpha(), 0, 'offline every tank is yours');
+  assert.equal(solo.g.youMarkAlpha(), 0, 'every tank here is somebody\'s');
 
   const { guest } = liveMatch();
   const mine = guest.g.tanks[guest.g.online.seat];

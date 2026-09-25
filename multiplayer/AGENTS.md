@@ -393,22 +393,26 @@ Other things worth knowing:
 - **The deal is random, and so is who fires first.** In join order the host
   was always player 1, on the left, and shot first every round. Now
   `netDealSeats()` shuffles everyone the room does not already remember into
-  the free seats, and `resetGame()` asks `netFirstSeat()` who opens — rolled
-  by the host for every deal, rematches included, because the seats stay put
-  for a whole match. Where the tanks stand is shuffled every round too
-  (`netSlotOrder()`, used by `placeTanks()`): in seat order the same player
-  held the left edge all match, and with three or more the same ones sat in
-  the middle with an enemy either side. A tank keeps its seat's colour; only
-  its slot moves. Only the host rolls (`dealRandom`); the result is in the
-  `start`, so guests never roll their own. Offline, player 1 still starts,
-  from the left.
+  the free seats, and every round `resetGame()` rolls who opens
+  (`firstSeat()`) and where each tank stands (`slotOrder()`, used by
+  `placeTanks()`) — rematches included, because the seats stay put for a whole
+  match: in seat order the same player held the left edge all match, and with
+  three or more the same ones sat in the middle with an enemy either side. A
+  tank keeps its seat's colour; only its slot moves. In a match only the host
+  rolls (`dealRandom`); the result is in the `start`, so guests never roll
+  their own. **Local games roll both too** — against the CPU the human was
+  otherwise always first — which is a difference from the root build, where
+  player 1 still opens from the left.
 - **YOU marks your own tank** for the first few seconds of a round, since it
   may be anywhere (`drawYouMarker()`, in CSS pixels like the wind gauge, and
-  pinned to the edge when the camera is zoomed in elsewhere). `markYou()`
-  raises it when the host deals and when a `start` brings a new round or a
-  new seat; someone else resuming into the same round does not. Drawing only.
-  The test harness deals in join order with seat 0 first unless a test asks
-  for `load({ randomDeal: true })` or scripts it with `setDealRandom()`.
+  pinned to the edge when the camera is zoomed in elsewhere). "Yours" is the
+  dealt seat in a match and player 1 against the CPU; all human on one screen
+  it is not shown. `resetGame()` raises it (`markYou()`), and so does a
+  `start` that brings a new round or a new seat; someone else resuming into
+  the same round does not. Drawing only.
+- The test harness deals in seat order with seat 0 first — and re-deals the
+  boot round that way — unless a test asks for `load({ randomDeal: true })`
+  or scripts the dice with `setDealRandom()`.
 - **The relay knows nobody.** It issues a fresh member id per connection and
   remembers nothing across one, so identity is the game's job: each client holds
   a per-room token in `sessionStorage` (surviving the reload a waking phone

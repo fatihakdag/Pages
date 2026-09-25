@@ -395,17 +395,54 @@ test('a rematch keeps the seats but rolls the first shooter again', () => {
   assert.equal(start.state.currentPlayer, 1, 'but seat 0 does not open every round');
 });
 
-test('offline, player 1 still fires first, from the left', () => {
-  const h = load({ randomDeal: true });
-  h.g.el.countSelect.value = '4';
-  h.g.el.countSelect.dispatch('change');
-  assert.equal(h.g.currentPlayer, 0);
-  const xs = Array.from(h.g.tanks, t => t.x);
-  assert.deepEqual(xs, [...xs].sort((a, b) => a - b), 'tanks stand in seat order');
-});
-
 /** Seats in the order their tanks stand across the field, left to right. */
 const lineUp = (g) => Array.from(g.tanks, (t, i) => [t.x, i]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
+
+/** A local game, all human, of `n` tanks, dealt with these dice. */
+function localGame(n, rolls, opts = {}) {
+  const h = load(opts);
+  h.g.el.modeSelect.value = opts.mode || 'human';
+  h.g.el.modeSelect.dispatch('change');
+  if (rolls) h.g.setDealRandom(dice(rolls));
+  h.g.el.countSelect.value = String(n);
+  h.g.el.countSelect.dispatch('change');   // a new roster deals a new round
+  return h;
+}
+
+test('local games roll who fires first and where the tanks stand too', () => {
+  // 0.6 of four: seat 2 opens. Then three 0s shuffle the slots [0, 1, 2, 3]
+  // to [1, 2, 3, 0]: seat 3 on the left edge, player 1 second from the left.
+  const h = localGame(4, [0.6, 0, 0, 0]);
+  assert.equal(h.g.currentPlayer, 2);
+  assert.deepEqual(lineUp(h.g), [3, 0, 1, 2]);
+  assert.equal(h.g.tanks[3].angle, 45, 'the left-hand tank aims right');
+
+  // Play Again rolls both afresh.
+  h.g.setDealRandom(dice([0, 0.99, 0.99, 0.99]));
+  h.g.state = 'GAMEOVER';
+  h.g.el.restartBtn.dispatch('click');
+  assert.equal(h.g.currentPlayer, 0);
+  assert.deepEqual(lineUp(h.g), [0, 1, 2, 3]);
+});
+
+test('with real dice, a local game varies both too', () => {
+  const firsts = new Set(), lefts = new Set();
+  for (let seed = 1; seed <= 12; seed++) {
+    const h = localGame(3, null, { randomDeal: true, seed });
+    firsts.add(h.g.currentPlayer);
+    lefts.add(lineUp(h.g)[0]);
+  }
+  assert.equal(firsts.size, 3, 'every player has opened');
+  assert.equal(lefts.size, 3, 'and every player has stood on the left');
+});
+
+test('against the CPU, the CPU can be dealt the first shot, and takes it', () => {
+  const h = localGame(2, [0.7, 0.99], { mode: 'cpu' });
+  assert.equal(h.g.currentPlayer, 1, 'the CPU opens');
+  assert.equal(h.g.isAi(1), true);
+  assert.ok(h.advanceUntil(() => h.g.currentPlayer === 0 && h.g.state === 'AIMING'),
+    'it fires on its own and hands over');
+});
 
 test('each round the host shuffles where the tanks stand', () => {
   const { h, s } = hostFor(3);

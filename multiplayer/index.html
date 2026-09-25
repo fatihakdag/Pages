@@ -1549,7 +1549,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v72';
+  const BUILD = 'v73';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2669,15 +2669,44 @@ if ('serviceWorker' in navigator) {
     }
   }
 
+  // The dice for a round: who aims first, and where each tank stands. In seat
+  // order player 1 always stood on the left and always shot first — against
+  // the CPU, that was the human every time; online, whoever hosted. With the
+  // seats fixed for a whole match, the same player held the same edge every
+  // round too, and with three or more the same ones sat in the middle with an
+  // enemy either side. So both are rolled every round, local games included.
+  // In a match only the host rolls (it is the one that deals) and the answer
+  // travels in `start`; netDealSeats() uses the same dice to shuffle the
+  // seats themselves. null rolls nothing — seat order, seat 0 first — which
+  // is what the tests use (through the seam) so they can name seats by
+  // position.
+  let dealRandom = () => Math.random();
+
+  /** Who aims first this round. */
+  function firstSeat() {
+    if (!dealRandom || !tanks.length || (netPlaying() && !online.host)) return 0;
+    return Math.min(tanks.length - 1, Math.floor(dealRandom() * tanks.length));
+  }
+
+  /** Which slot across the field, left to right, each seat's tank starts in. */
+  function slotOrder() {
+    const order = tanks.map((_, i) => i);
+    if (!dealRandom || (netPlaying() && !online.host)) return order;
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(dealRandom() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    return order;
+  }
+
   // One slot per tank across the width, jittered inside it, so every tank starts
   // well spaced instead of piling up at the edges. The jitter narrows when the
   // slots get small, so neighbours never start closer than 2.5 tank widths.
-  // Which tank gets which slot is netSlotOrder()'s call: in a match it is
-  // shuffled every round.
+  // Which tank gets which slot is slotOrder()'s roll.
   function placeTanks() {
     const slot = W / tanks.length;
     const jitter = Math.max(0, Math.min(0.6, 1 - TANK_W * 2.5 / slot));
-    const order = netSlotOrder();
+    const order = slotOrder();
     tanks.forEach((t, seat) => {
       const i = order[seat];
       const x = (i + 0.5 + (Math.random() - 0.5) * jitter) * slot;
@@ -2759,7 +2788,7 @@ if ('serviceWorker' in navigator) {
     roundStart = performance.now();
     lastTimerText = '';
     buildTanks();
-    currentPlayer = netFirstSeat();
+    currentPlayer = firstSeat();
     turnSeq = 0;
     activeShot = null;
     lastShot = null;
@@ -2778,6 +2807,7 @@ if ('serviceWorker' in navigator) {
     setWind();
     updateHUD();
     overlay.classList.remove('show');
+    markYou();
     syncControlsFromTank();
     maybeAiTurn();
   }
@@ -5600,18 +5630,24 @@ if ('serviceWorker' in navigator) {
     ctx.closePath();
   }
 
-  // YOU over this screen's own tank for the first few seconds of a round. In a
-  // match the tanks are dealt to new places every round (netSlotOrder), so
-  // "mine is the one on the left" stops being true; the colour still says
-  // which is yours, but only once you have found your card. Only the start of
-  // a round, or of a new seat, raises it (markYou) — a resume of somebody
-  // else's seat does not. Drawing only, in CSS pixels like the wind gauge.
+  // YOU over this screen's own tank for the first few seconds of a round. The
+  // tanks are dealt to new places every round (slotOrder), so "mine is the one
+  // on the left" stops being true; the colour still says which is yours, but
+  // only once you have found your card. Only the start of a round, or of a new
+  // seat, raises it (markYou) — a resume of somebody else's seat does not.
+  // Drawing only, in CSS pixels like the wind gauge.
   const YOU_HOLD_MS = 3500, YOU_FADE_MS = 1000;
   let youMarkAt = -Infinity;
   function markYou() { youMarkAt = performance.now(); }
+  // Which tank is this screen's: the dealt seat in a match, player 1 against
+  // the CPU. All human on one screen, every tank is somebody's here — no one.
+  function youSeat() {
+    if (netPlaying()) return online.seat;
+    return cpuMode ? 0 : -1;
+  }
   function youMarkAlpha() {
-    if (!netPlaying() || state === 'GAMEOVER') return 0;
-    const t = tanks[online.seat];
+    if (state === 'GAMEOVER') return 0;
+    const t = tanks[youSeat()];
     if (!t || !t.alive) return 0;
     const age = performance.now() - youMarkAt;
     if (age < 0 || age >= YOU_HOLD_MS + YOU_FADE_MS) return 0;
@@ -5621,7 +5657,7 @@ if ('serviceWorker' in navigator) {
   function drawYouMarker() {
     const alpha = youMarkAlpha();
     if (alpha <= 0) return;
-    const t = tanks[online.seat];
+    const t = tanks[youSeat()];
     const k = viewScale * camZoom;
     // Over the top of the drawn tank, barrel included, at whatever size it is
     // drawn; bobbing a little so it reads as a pointer rather than a label.
@@ -6268,14 +6304,6 @@ if ('serviceWorker' in navigator) {
     return made;
   }
 
-  // The host's dice for a deal: which seat each player gets, and which seat
-  // fires first each round. Dealt in join order, the host was always player 1
-  // on the left and always shot first — every round. Only the host rolls; the
-  // answer travels in `start`, so every screen agrees without rolling itself.
-  // null deals in join order with seat 0 first, which is what the tests use
-  // (through the seam) so they can name seats by who joined when.
-  let dealRandom = () => Math.random();
-
   /**
    * Lay members out in seats, keeping anyone this room already remembers where
    * they were. Dealing purely in join order meant that if everyone dropped and
@@ -6302,35 +6330,6 @@ if ('serviceWorker' in navigator) {
       if (seats[i] === null) seats[i] = spare.shift();
     }
     return seats;
-  }
-
-  /**
-   * Who aims first this round. Offline it is player 1, as it always was; in a
-   * match the host rolls it for every deal, a rematch included, since the
-   * seats stay put for the whole match and seat 0 would otherwise open every
-   * round. Guests never roll: currentPlayer comes to them in the snapshot.
-   */
-  function netFirstSeat() {
-    if (!dealRandom || !online.host || !netPlaying() || !tanks.length) return 0;
-    return Math.min(tanks.length - 1, Math.floor(dealRandom() * tanks.length));
-  }
-
-  /**
-   * Which slot across the field each seat's tank starts in, left to right.
-   * Offline it is seat order, as it always was. In a match the host shuffles
-   * it every round: seats stay put for the whole match, so in seat order the
-   * same player held the left edge every round — and with three or more, the
-   * same players sat in the middle with an enemy on each side. The positions
-   * travel in the snapshot, so guests never shuffle.
-   */
-  function netSlotOrder() {
-    const order = tanks.map((_, i) => i);
-    if (!dealRandom || !online.host || !netPlaying()) return order;
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(dealRandom() * (i + 1));
-      [order[i], order[j]] = [order[j], order[i]];
-    }
-    return order;
   }
 
   /** Which seat this token belongs to, if any of the empty ones remember it. */
@@ -6871,7 +6870,6 @@ if ('serviceWorker' in navigator) {
     online.round++;
     refreshOpponentUi();
     resetGame();
-    markYou();
     netSend('start', netStartPayload(netSnapshot()));
     refreshOnlineUi();
     syncControlsFromTank();
@@ -6902,7 +6900,6 @@ if ('serviceWorker' in navigator) {
     online.inbox = [];
     refreshOpponentUi();
     resetGame();
-    markYou();
     netResetTurnClock();
     netSend('start', netStartPayload(netSnapshot()));
     refreshOnlineUi();
@@ -7268,7 +7265,7 @@ if ('serviceWorker' in navigator) {
     canRestartRound, onRoundRestartClicked, RESTART_ARM_MS,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock, netPublishState,
     netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
-    netFirstSeat, netSlotOrder, setDealRandom(fn) { dealRandom = fn; },
+    firstSeat, slotOrder, setDealRandom(fn) { dealRandom = fn; },
     youMarkAlpha, drawYouMarker, YOU_HOLD_MS, YOU_FADE_MS,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
