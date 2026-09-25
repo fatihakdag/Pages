@@ -576,6 +576,22 @@
       noiseBurst({ dur: 0.035, freq: 3200, gain: 0.16, q: 2, type: 'bandpass' });
     },
 
+    // A reaction arriving: a soft bubble pop, placed where the sender's tank
+    // is. Dry and quiet on purpose — it sits under the game, not on top of it,
+    // so it skips the blast bus and its reverb.
+    pop(x01) {
+      const ctx = audioCtx();
+      if (!ctx || !soundOn) return;
+      let dest = master;
+      if (ctx.createStereoPanner && Number.isFinite(x01)) {
+        dest = ctx.createStereoPanner();
+        dest.pan.value = panOf(Math.max(0, Math.min(1, x01)));
+        dest.connect(master);
+      }
+      toneHit({ dur: 0.09, f0: 480, f1: 1100, gain: 0.12, attack: 0.004, dest });
+      noiseBurst({ dur: 0.03, freq: 2600, q: 3, type: 'bandpass', gain: 0.05, attack: 0.001, dest });
+    },
+
     // Rotor chop: a noise bed whose gain is swung by a low-frequency
     // oscillator. Pitch drops and the chop slows as the wreck falls.
     rotor(on, falling, x01) {

@@ -313,6 +313,10 @@ export function load(opts = {}) {
     g.setDealRandom(null);
     g.resetGame();
   }
+  // The CPU's reactions roll their own dice, seeded from the wall clock, so
+  // left alone a CPU would sometimes answer and sometimes not. Every test gets
+  // a CPU that never reacts; the reaction tests set the dice they want.
+  g.setReactRandom(() => 0.99);
 
   const api = {
     g,
