@@ -146,7 +146,7 @@ function noopCanvasContext() {
  * Boot a fresh game. Every call is fully isolated: its own vm context, its own
  * clock, its own PRNG.
  *
- * @param {{width?: number, height?: number, seed?: number}} opts
+ * @param {{width?: number, height?: number, seed?: number, randomDeal?: boolean}} opts
  */
 export function load(opts = {}) {
   const width = opts.width ?? 900;
@@ -301,6 +301,10 @@ export function load(opts = {}) {
 
   const g = ctx.window.__BARRAGE_TEST__;
   if (!g) throw new Error('__BARRAGE_TEST__ seam missing — did the seam block in index.html move?');
+  // A match deals seats and the first shooter at random. Most tests are about
+  // what happens after the deal and name seats by who joined when, so they get
+  // join order with seat 0 first; `randomDeal: true` keeps the real dice.
+  if (!opts.randomDeal) g.setDealRandom(null);
 
   const api = {
     g,

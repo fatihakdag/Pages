@@ -1549,7 +1549,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v70';
+  const BUILD = 'v71';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2755,7 +2755,7 @@ if ('serviceWorker' in navigator) {
     roundStart = performance.now();
     lastTimerText = '';
     buildTanks();
-    currentPlayer = 0;
+    currentPlayer = netFirstSeat();
     turnSeq = 0;
     activeShot = null;
     lastShot = null;
@@ -6192,11 +6192,19 @@ if ('serviceWorker' in navigator) {
     return made;
   }
 
+  // The host's dice for a deal: which seat each player gets, and which seat
+  // fires first each round. Dealt in join order, the host was always player 1
+  // on the left and always shot first — every round. Only the host rolls; the
+  // answer travels in `start`, so every screen agrees without rolling itself.
+  // null deals in join order with seat 0 first, which is what the tests use
+  // (through the seam) so they can name seats by who joined when.
+  let dealRandom = () => Math.random();
+
   /**
    * Lay members out in seats, keeping anyone this room already remembers where
    * they were. Dealing purely in join order meant that if everyone dropped and
    * came back in a different order, players swapped tanks and colours for no
-   * reason they could see.
+   * reason they could see. Everyone else is shuffled into the free seats.
    */
   function netDealSeats(ids) {
     const n = ids.length;
@@ -6208,10 +6216,27 @@ if ('serviceWorker' in navigator) {
       if (was >= 0 && was < n && seats[was] === null) seats[was] = id;
       else spare.push(id);
     }
+    if (dealRandom) {
+      for (let i = spare.length - 1; i > 0; i--) {
+        const j = Math.floor(dealRandom() * (i + 1));
+        [spare[i], spare[j]] = [spare[j], spare[i]];
+      }
+    }
     for (let i = 0; i < n && spare.length; i++) {
       if (seats[i] === null) seats[i] = spare.shift();
     }
     return seats;
+  }
+
+  /**
+   * Who aims first this round. Offline it is player 1, as it always was; in a
+   * match the host rolls it for every deal, a rematch included, since the
+   * seats stay put for the whole match and seat 0 would otherwise open every
+   * round. Guests never roll: currentPlayer comes to them in the snapshot.
+   */
+  function netFirstSeat() {
+    if (!dealRandom || !online.host || !netPlaying() || !tanks.length) return 0;
+    return Math.min(tanks.length - 1, Math.floor(dealRandom() * tanks.length));
   }
 
   /** Which seat this token belongs to, if any of the empty ones remember it. */
@@ -6365,7 +6390,10 @@ if ('serviceWorker' in navigator) {
     if (online.status === 'waiting') {
       // How many are here out of how many this room is waiting for, so the host
       // can see a 4-player game filling up.
-      return txt('netWaiting', { code: online.room, n: netPeerIds.length + 1, total: netSeatCount() });
+      // The host counts players who have said hello, since those are the ones
+      // it can deal; a guest only sees the sockets.
+      const here = online.host ? netReadyIds().length : netPeerIds.length;
+      return txt('netWaiting', { code: online.room, n: here + 1, total: netSeatCount() });
     }
     if (online.status === 'playing') {
       // Who left, not just that somebody did: with four seats "opponent left"
@@ -6723,13 +6751,16 @@ if ('serviceWorker' in navigator) {
     if (!online.host || netPlaying()) return;
     const seats = netSeatCount();
     // Wait for the whole table. Dealing at the first arrival is what limited
-    // this to two players.
-    if (netPeerIds.length + 1 < seats) { refreshOnlineUi(); return; }
+    // this to two players. And wait for their `ready`, not just their socket:
+    // one that had arrived but not yet said hello was dealt a seat with no
+    // token, and then refused as a stranger when its hello landed.
+    if (netReadyIds().length + 1 < seats) { refreshOnlineUi(); return; }
     cpuMode = false;
     playerCount = seats;
     countSelect.value = String(seats);
-    // Seat order follows join order, so the host is player 1. Set before the UI
-    // is refreshed: refreshOpponentUi asks whether a match is on.
+    // Seats are shuffled (netDealSeats), so the host is not always player 1.
+    // Set before the UI is refreshed: refreshOpponentUi asks whether a match
+    // is on.
     online.seats = netDealSeats([online.id, ...netOtherIds()]);
     online.seatTokens = online.seats.map(
       id => (id === online.id ? online.token : (netTokensById[id] || null)));
@@ -6844,7 +6875,9 @@ if ('serviceWorker' in navigator) {
     const n = parseInt(countSelect.value, 10);
     return Math.min(MAX_PLAYERS, Math.max(2, isFinite(n) ? n : 2));
   }
-  function netOtherIds() { return netPeerIds.slice(0, netSeatCount() - 1); }
+  function netOtherIds() { return netReadyIds().slice(0, netSeatCount() - 1); }
+  /** Members who have sent their `ready`, in join order. A `peer` is only a socket. */
+  function netReadyIds() { return netPeerIds.filter(id => id in netTokensById); }
 
   // Infinity is not JSON, and the standard shell's ammo is Infinity.
   const AMMO_INFINITE = -1;
@@ -7136,6 +7169,7 @@ if ('serviceWorker' in navigator) {
     canRestartRound, onRoundRestartClicked, RESTART_ARM_MS,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock, netPublishState,
     netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
+    netFirstSeat, setDealRandom(fn) { dealRandom = fn; },
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,

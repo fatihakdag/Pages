@@ -388,8 +388,17 @@ Other things worth knowing:
 
 - `netRemoteSeat(i)` is the counterpart to `isAi(i)`: a seat somebody else
   drives locks the turn controls exactly like a CPU seat does.
-- The host deals seats in join order and hands out the world in the `start`
-  message, so nothing depends on the clients generating the same terrain.
+- The host deals the seats and hands out the world in the `start` message, so
+  nothing depends on the clients generating the same terrain.
+- **The deal is random, and so is who fires first.** In join order the host
+  was always player 1, on the left, and shot first every round. Now
+  `netDealSeats()` shuffles everyone the room does not already remember into
+  the free seats, and `resetGame()` asks `netFirstSeat()` who opens — rolled
+  by the host for every deal, rematches included, because the seats stay put
+  for a whole match. Only the host rolls (`dealRandom`); the result is in the
+  `start`, so guests never roll their own. Offline, player 1 still starts.
+  The test harness deals in join order with seat 0 first unless a test asks
+  for `load({ randomDeal: true })` or scripts it with `setDealRandom()`.
 - **The relay knows nobody.** It issues a fresh member id per connection and
   remembers nothing across one, so identity is the game's job: each client holds
   a per-room token in `sessionStorage` (surviving the reload a waking phone
@@ -428,7 +437,10 @@ Other things worth knowing:
 - **Table size is the host's TANKS selector.** The room waits until that many
   players are present before dealing — the lobby counts up, `code AB12 — 3/4` —
   and anyone left over when it fills is told rather than parked in a lobby that
-  never starts. During a match the roster controls lock and the opponents select
+  never starts. "Present" means they have sent their `ready`
+  (`netReadyIds()`), not just that their socket opened: a player dealt in
+  between had no token on record, and was refused as a stranger when their
+  `ready` arrived. During a match the roster controls lock and the opponents select
   reads Online, because the seats were dealt when it began.
 - **Every turn has a minute.** One miss is simply skipped — being away from the
   keyboard for a minute is not a crime. A second miss in a row hands the seat to
