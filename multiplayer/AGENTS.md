@@ -402,6 +402,11 @@ Other things worth knowing:
   its slot moves. Only the host rolls (`dealRandom`); the result is in the
   `start`, so guests never roll their own. Offline, player 1 still starts,
   from the left.
+- **YOU marks your own tank** for the first few seconds of a round, since it
+  may be anywhere (`drawYouMarker()`, in CSS pixels like the wind gauge, and
+  pinned to the edge when the camera is zoomed in elsewhere). `markYou()`
+  raises it when the host deals and when a `start` brings a new round or a
+  new seat; someone else resuming into the same round does not. Drawing only.
   The test harness deals in join order with seat 0 first unless a test asks
   for `load({ randomDeal: true })` or scripts it with `setDealRandom()`.
 - **The relay knows nobody.** It issues a fresh member id per connection and

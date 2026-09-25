@@ -1549,7 +1549,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v71';
+  const BUILD = 'v72';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1637,7 +1637,7 @@ if ('serviceWorker' in navigator) {
       closeSettings: 'Close settings',
       fire: 'FIRE', playAgain: 'Play Again', time: 'TIME',
       timerMs: '{m}m {s}s', timerS: '{s}s',
-      cpuBadge: 'CPU', cpuBadgeShort: 'CPU',
+      cpuBadge: 'CPU', cpuBadgeShort: 'CPU', you: 'YOU',
       keysHint: '← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire',
       playerFull: 'PLAYER {n}', playerAbbr: 'P{n}',
       playerName: 'Player {n}', cpuName: 'CPU {n}',
@@ -1681,7 +1681,7 @@ if ('serviceWorker' in navigator) {
       closeSettings: 'Ayarları kapat',
       fire: 'ATEŞ', playAgain: 'Tekrar Oyna', time: 'SÜRE',
       timerMs: '{m}d {s}sn', timerS: '{s}sn',
-      cpuBadge: 'BİLGİSAYAR', cpuBadgeShort: 'BİL',
+      cpuBadge: 'BİLGİSAYAR', cpuBadgeShort: 'BİL', you: 'SEN',
       keysHint: '← → nişan &nbsp;|&nbsp; ↑ ↓ güç &nbsp;|&nbsp; BOŞLUK ateş',
       playerFull: 'OYUNCU {n}', playerAbbr: 'O{n}',
       playerName: 'Oyuncu {n}', cpuName: 'Bilgisayar {n}',
@@ -5600,6 +5600,77 @@ if ('serviceWorker' in navigator) {
     ctx.closePath();
   }
 
+  // YOU over this screen's own tank for the first few seconds of a round. In a
+  // match the tanks are dealt to new places every round (netSlotOrder), so
+  // "mine is the one on the left" stops being true; the colour still says
+  // which is yours, but only once you have found your card. Only the start of
+  // a round, or of a new seat, raises it (markYou) — a resume of somebody
+  // else's seat does not. Drawing only, in CSS pixels like the wind gauge.
+  const YOU_HOLD_MS = 3500, YOU_FADE_MS = 1000;
+  let youMarkAt = -Infinity;
+  function markYou() { youMarkAt = performance.now(); }
+  function youMarkAlpha() {
+    if (!netPlaying() || state === 'GAMEOVER') return 0;
+    const t = tanks[online.seat];
+    if (!t || !t.alive) return 0;
+    const age = performance.now() - youMarkAt;
+    if (age < 0 || age >= YOU_HOLD_MS + YOU_FADE_MS) return 0;
+    return age < YOU_HOLD_MS ? 1 : 1 - (age - YOU_HOLD_MS) / YOU_FADE_MS;
+  }
+
+  function drawYouMarker() {
+    const alpha = youMarkAlpha();
+    if (alpha <= 0) return;
+    const t = tanks[online.seat];
+    const k = viewScale * camZoom;
+    // Over the top of the drawn tank, barrel included, at whatever size it is
+    // drawn; bobbing a little so it reads as a pointer rather than a label.
+    const top = groundHeightAt(t.x) - (TANK_H + BARREL_LEN) * spriteBoost();
+    const bob = Math.sin(performance.now() / 180) * 2;
+    const ARROW = 7, PH = 20, GAP = 4;
+    let sx = (t.x - camX) * k;
+    const tipY = Math.max(PH + ARROW + 4, Math.min(viewH - 2, (top - camY) * k - GAP + bob));
+    // Zoomed in elsewhere: pin it to the near edge, pointing out towards it.
+    const off = sx < 0 ? -1 : sx > viewW ? 1 : 0;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 12px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = txt('you');
+    const PW = Math.ceil(ctx.measureText(label).width) + 14;
+    let px, py;
+    ctx.fillStyle = t.color;
+    ctx.beginPath();
+    if (off) {
+      sx = off < 0 ? 4 : viewW - 4;
+      py = tipY - PH / 2;
+      px = off < 0 ? sx + ARROW : sx - ARROW - PW;
+      ctx.moveTo(sx, py + PH / 2);
+      ctx.lineTo(sx + (off < 0 ? ARROW : -ARROW), py + 3);
+      ctx.lineTo(sx + (off < 0 ? ARROW : -ARROW), py + PH - 3);
+    } else {
+      px = Math.max(2, Math.min(viewW - PW - 2, sx - PW / 2));
+      py = tipY - ARROW - PH;
+      ctx.moveTo(sx, tipY);
+      ctx.lineTo(sx - ARROW, tipY - ARROW - 1);
+      ctx.lineTo(sx + ARROW, tipY - ARROW - 1);
+    }
+    ctx.closePath();
+    ctx.fill();
+    // The same dark pill as the wind gauge, so it reads on any sky.
+    pillPath(px, py, PW, PH, 6);
+    ctx.fillStyle = 'rgba(12,11,16,0.72)';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = t.color;
+    ctx.stroke();
+    ctx.fillStyle = t.color;
+    ctx.fillText(label, px + PW / 2, py + PH / 2 + 1);
+    ctx.restore();
+  }
+
   // A dark pill keeps the gauge legible over both the bright and dark skies.
   // In CSS pixels, not world units: see drawWindGauge.
   function windGaugeRect() {
@@ -6048,6 +6119,7 @@ if ('serviceWorker' in navigator) {
     // otherwise; the slingshot is wherever the finger has it.
     screenTransform();
     if (!hudWindVisible) drawWindGauge();
+    drawYouMarker();
     drawAimDrag();
     worldTransform();
   }
@@ -6629,6 +6701,9 @@ if ('serviceWorker' in navigator) {
       }
       online.peerAway = false;
       online.missed = [];
+      // A new round, or a seat this screen has not held: point at the tank.
+      // Someone else resuming into the same round is neither.
+      if (d.round !== online.round || d.seats.indexOf(online.id) !== online.seat) markYou();
       // The host's word on which seats are empty and which the CPU is playing:
       // a restart keeps a missing player's chair for them, and every screen
       // has to agree on who covers it.
@@ -6796,6 +6871,7 @@ if ('serviceWorker' in navigator) {
     online.round++;
     refreshOpponentUi();
     resetGame();
+    markYou();
     netSend('start', netStartPayload(netSnapshot()));
     refreshOnlineUi();
     syncControlsFromTank();
@@ -6826,6 +6902,7 @@ if ('serviceWorker' in navigator) {
     online.inbox = [];
     refreshOpponentUi();
     resetGame();
+    markYou();
     netResetTurnClock();
     netSend('start', netStartPayload(netSnapshot()));
     refreshOnlineUi();
@@ -7192,6 +7269,7 @@ if ('serviceWorker' in navigator) {
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock, netPublishState,
     netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
     netFirstSeat, netSlotOrder, setDealRandom(fn) { dealRandom = fn; },
+    youMarkAlpha, drawYouMarker, YOU_HOLD_MS, YOU_FADE_MS,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,
