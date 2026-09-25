@@ -395,8 +395,13 @@ Other things worth knowing:
   `netDealSeats()` shuffles everyone the room does not already remember into
   the free seats, and `resetGame()` asks `netFirstSeat()` who opens — rolled
   by the host for every deal, rematches included, because the seats stay put
-  for a whole match. Only the host rolls (`dealRandom`); the result is in the
-  `start`, so guests never roll their own. Offline, player 1 still starts.
+  for a whole match. Where the tanks stand is shuffled every round too
+  (`netSlotOrder()`, used by `placeTanks()`): in seat order the same player
+  held the left edge all match, and with three or more the same ones sat in
+  the middle with an enemy either side. A tank keeps its seat's colour; only
+  its slot moves. Only the host rolls (`dealRandom`); the result is in the
+  `start`, so guests never roll their own. Offline, player 1 still starts,
+  from the left.
   The test harness deals in join order with seat 0 first unless a test asks
   for `load({ randomDeal: true })` or scripts it with `setDealRandom()`.
 - **The relay knows nobody.** It issues a fresh member id per connection and

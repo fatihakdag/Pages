@@ -2672,10 +2672,14 @@ if ('serviceWorker' in navigator) {
   // One slot per tank across the width, jittered inside it, so every tank starts
   // well spaced instead of piling up at the edges. The jitter narrows when the
   // slots get small, so neighbours never start closer than 2.5 tank widths.
+  // Which tank gets which slot is netSlotOrder()'s call: in a match it is
+  // shuffled every round.
   function placeTanks() {
     const slot = W / tanks.length;
     const jitter = Math.max(0, Math.min(0.6, 1 - TANK_W * 2.5 / slot));
-    tanks.forEach((t, i) => {
+    const order = netSlotOrder();
+    tanks.forEach((t, seat) => {
+      const i = order[seat];
       const x = (i + 0.5 + (Math.random() - 0.5) * jitter) * slot;
       t.x = Math.max(24, Math.min(W - 24, x));
       t.angle = t.x < W / 2 ? 45 : 135; // start aimed toward the middle of the map
@@ -6239,6 +6243,24 @@ if ('serviceWorker' in navigator) {
     return Math.min(tanks.length - 1, Math.floor(dealRandom() * tanks.length));
   }
 
+  /**
+   * Which slot across the field each seat's tank starts in, left to right.
+   * Offline it is seat order, as it always was. In a match the host shuffles
+   * it every round: seats stay put for the whole match, so in seat order the
+   * same player held the left edge every round — and with three or more, the
+   * same players sat in the middle with an enemy on each side. The positions
+   * travel in the snapshot, so guests never shuffle.
+   */
+  function netSlotOrder() {
+    const order = tanks.map((_, i) => i);
+    if (!dealRandom || !online.host || !netPlaying()) return order;
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(dealRandom() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    return order;
+  }
+
   /** Which seat this token belongs to, if any of the empty ones remember it. */
   function netSeatForToken(token) {
     if (!token) return -1;
@@ -7169,7 +7191,7 @@ if ('serviceWorker' in navigator) {
     canRestartRound, onRoundRestartClicked, RESTART_ARM_MS,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock, netPublishState,
     netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
-    netFirstSeat, setDealRandom(fn) { dealRandom = fn; },
+    netFirstSeat, netSlotOrder, setDealRandom(fn) { dealRandom = fn; },
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,
