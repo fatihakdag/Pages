@@ -146,7 +146,7 @@ function noopCanvasContext() {
  * Boot a fresh game. Every call is fully isolated: its own vm context, its own
  * clock, its own PRNG.
  *
- * @param {{width?: number, height?: number, seed?: number}} opts
+ * @param {{width?: number, height?: number, seed?: number, randomDeal?: boolean}} opts
  */
 export function load(opts = {}) {
   const width = opts.width ?? 900;
@@ -301,6 +301,18 @@ export function load(opts = {}) {
 
   const g = ctx.window.__BARRAGE_TEST__;
   if (!g) throw new Error('__BARRAGE_TEST__ seam missing — did the seam block in index.html move?');
+  // Every round rolls who fires first and where the tanks stand, and a match
+  // also deals the seats at random. Most tests are about what happens after
+  // the deal and name seats by position — player 1 on the left, first to
+  // fire, the host in seat 0 — so they get seat order; `randomDeal: true`
+  // keeps the real dice. The boot round was already rolled by the time the
+  // seam is reachable, so it is dealt again in order, before any time passes
+  // (a CPU the dice put first has not had its think yet, and a new round
+  // cancels it).
+  if (!opts.randomDeal) {
+    g.setDealRandom(null);
+    g.resetGame();
+  }
 
   const api = {
     g,

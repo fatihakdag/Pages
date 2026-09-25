@@ -319,3 +319,214 @@ test('everyone dropping and returning in another order keeps their seats', () =>
   assert.equal(A.g.online.seat, 0, 'A is still player 1');
   assert.equal(B.g.online.seat, 1, 'and B is still player 2');
 });
+
+/** Dice that give these values in order, for a deal the test can predict. */
+function dice(values) {
+  const queue = [...values];
+  return () => {
+    assert.ok(queue.length, 'the deal rolled more often than the test expected');
+    return queue.shift();
+  };
+}
+
+test('the host deals seats at random, not in join order', () => {
+  const { h, s } = hostFor(3);
+  // Fisher-Yates over [1, 2, 3]: 0 swaps the last with the first -> [3, 2, 1],
+  // 0 again swaps the middle with the first -> [2, 3, 1]. Then 0.99 picks who
+  // fires first: seat 2. The last two leave the positions in seat order.
+  h.g.setDealRandom(dice([0, 0, 0.99, 0.99, 0.99]));
+  arrive(s, 2);
+  arrive(s, 3);
+  const [start] = s.payloads('start');
+  assert.deepEqual(start.seats, [2, 3, 1], 'shuffled');
+  assert.equal(h.g.online.seat, 2, 'the host is not always player 1');
+  assert.equal(start.state.currentPlayer, 2, 'and the rolled seat fires first');
+  assert.equal(h.g.currentPlayer, 2);
+});
+
+test('with real dice, both who sits where and who fires first vary', () => {
+  const hostSeats = new Set(), firsts = new Set();
+  for (let seed = 1; seed <= 12; seed++) {
+    const h = load({ randomDeal: true, seed });
+    h.g.el.countSelect.value = '3';
+    const s = connect(h);
+    s.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+    arrive(s, 2);
+    arrive(s, 3);
+    const [start] = s.payloads('start');
+    assert.deepEqual([...start.seats].sort(), [1, 2, 3], 'everyone is dealt exactly one seat');
+    hostSeats.add(h.g.online.seat);
+    firsts.add(start.state.currentPlayer);
+  }
+  assert.equal(hostSeats.size, 3, 'the host has turned up in every seat');
+  assert.equal(firsts.size, 3, 'and every seat has opened a round');
+});
+
+test('every screen agrees on who fires first', () => {
+  const { h, s } = hostFor(2);
+  h.g.setDealRandom(dice([0.2, 0.7, 0.2]));   // seats [2, 1], seat 1 first, slots swapped
+  arrive(s, 2);
+  const [start] = s.payloads('start');
+
+  const guest = load();
+  const gs = connect(guest, 'ABCD');
+  gs.deliver({ t: 'joined', room: 'ABCD', id: 2, host: 1, peers: [{ id: 1, name: '' }] });
+  gs.deliver({ t: 'msg', from: 1, d: start });
+  assert.equal(guest.g.online.seat, 0, 'the guest was dealt seat 0');
+  assert.equal(guest.g.currentPlayer, 1, 'and sees the host, in seat 1, go first');
+  assert.equal(guest.g.currentPlayer, h.g.currentPlayer);
+  assert.deepEqual(Array.from(guest.g.tanks, t => t.x), Array.from(h.g.tanks, t => t.x),
+    'and on where every tank stands');
+  assert.ok(guest.g.tanks[0].x > guest.g.tanks[1].x, 'seat 0 on the right, as rolled');
+});
+
+test('a rematch keeps the seats but rolls the first shooter again', () => {
+  const { h, s } = hostFor(3);
+  h.g.setDealRandom(dice([0.9, 0.9, 0, 0.9, 0.9]));   // seats [1, 2, 3], seat 0 first, slots in order
+  arrive(s, 2);
+  arrive(s, 3);
+  assert.equal(h.g.currentPlayer, 0);
+  const seats = Array.from(h.g.online.seats);
+
+  h.g.setDealRandom(dice([0.5, 0.9, 0.9]));           // the rematch: seat 1 first
+  h.g.el.restartBtn.dispatch('click');
+  const start = s.payloads('start').slice(-1)[0];
+  assert.deepEqual(start.seats, seats, 'nobody changes chair mid-match');
+  assert.equal(start.state.currentPlayer, 1, 'but seat 0 does not open every round');
+});
+
+/** Seats in the order their tanks stand across the field, left to right. */
+const lineUp = (g) => Array.from(g.tanks, (t, i) => [t.x, i]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
+
+/** A local game, all human, of `n` tanks, dealt with these dice. */
+function localGame(n, rolls, opts = {}) {
+  const h = load(opts);
+  h.g.el.modeSelect.value = opts.mode || 'human';
+  h.g.el.modeSelect.dispatch('change');
+  if (rolls) h.g.setDealRandom(dice(rolls));
+  h.g.el.countSelect.value = String(n);
+  h.g.el.countSelect.dispatch('change');   // a new roster deals a new round
+  return h;
+}
+
+test('local games roll who fires first and where the tanks stand too', () => {
+  // 0.6 of four: seat 2 opens. Then three 0s shuffle the slots [0, 1, 2, 3]
+  // to [1, 2, 3, 0]: seat 3 on the left edge, player 1 second from the left.
+  const h = localGame(4, [0.6, 0, 0, 0]);
+  assert.equal(h.g.currentPlayer, 2);
+  assert.deepEqual(lineUp(h.g), [3, 0, 1, 2]);
+  assert.equal(h.g.tanks[3].angle, 45, 'the left-hand tank aims right');
+
+  // Play Again rolls both afresh.
+  h.g.setDealRandom(dice([0, 0.99, 0.99, 0.99]));
+  h.g.state = 'GAMEOVER';
+  h.g.el.restartBtn.dispatch('click');
+  assert.equal(h.g.currentPlayer, 0);
+  assert.deepEqual(lineUp(h.g), [0, 1, 2, 3]);
+});
+
+test('with real dice, a local game varies both too', () => {
+  const firsts = new Set(), lefts = new Set();
+  for (let seed = 1; seed <= 12; seed++) {
+    const h = localGame(3, null, { randomDeal: true, seed });
+    firsts.add(h.g.currentPlayer);
+    lefts.add(lineUp(h.g)[0]);
+  }
+  assert.equal(firsts.size, 3, 'every player has opened');
+  assert.equal(lefts.size, 3, 'and every player has stood on the left');
+});
+
+test('against the CPU, the CPU can be dealt the first shot, and takes it', () => {
+  const h = localGame(2, [0.7, 0.99], { mode: 'cpu' });
+  assert.equal(h.g.currentPlayer, 1, 'the CPU opens');
+  assert.equal(h.g.isAi(1), true);
+  assert.ok(h.advanceUntil(() => h.g.currentPlayer === 0 && h.g.state === 'AIMING'),
+    'it fires on its own and hands over');
+});
+
+test('each round the host shuffles where the tanks stand', () => {
+  const { h, s } = hostFor(3);
+  // Seats in join order, seat 0 first, then slots: 0 swaps the last with the
+  // first -> [2, 1, 0], 0.99 leaves the middle. Seat 0 takes the right edge.
+  h.g.setDealRandom(dice([0.9, 0.9, 0, 0, 0.99]));
+  arrive(s, 2);
+  arrive(s, 3);
+  assert.deepEqual(lineUp(h.g), [2, 1, 0]);
+  const start = s.payloads('start')[0];
+  assert.deepEqual(start.state.tanks.map(t => t.x), Array.from(h.g.tanks, t => t.x),
+    'the positions go out with the board');
+  // Aimed at the middle of the field from wherever it now stands.
+  assert.equal(h.g.tanks[0].angle, 135, 'seat 0 on the right aims left');
+  assert.equal(h.g.tanks[2].angle, 45, 'seat 2 on the left aims right');
+
+  // The rematch: seat 0 first, then 0.5 swaps the last with the middle -> [0, 2, 1].
+  h.g.setDealRandom(dice([0, 0.5, 0.99]));
+  h.g.el.restartBtn.dispatch('click');
+  assert.deepEqual(lineUp(h.g), [0, 2, 1], 'a new line-up for the new round');
+  assert.deepEqual(Array.from(h.g.online.seats), [1, 2, 3], 'with everyone in the same seat');
+});
+
+test('with real dice, every seat ends up on the left edge', () => {
+  const lefts = new Set();
+  for (let seed = 1; seed <= 12; seed++) {
+    const h = load({ randomDeal: true, seed });
+    h.g.el.countSelect.value = '3';
+    const s = connect(h);
+    s.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+    arrive(s, 2);
+    arrive(s, 3);
+    const order = lineUp(h.g);
+    assert.deepEqual([...order].sort(), [0, 1, 2], 'one tank per slot');
+    const xs = h.g.tanks.map(t => t.x).sort((a, b) => a - b);
+    for (let i = 1; i < xs.length; i++) {
+      assert.ok(xs[i] - xs[i - 1] >= h.g.TANK_W * 2.5 - 1e-6, 'still well spaced');
+    }
+    lefts.add(order[0]);
+  }
+  assert.equal(lefts.size, 3);
+});
+
+test('seats a room remembers are kept, whatever the shuffle', () => {
+  const A = load({ randomDeal: true }), B = load({ randomDeal: true });
+  const as_ = connect(A), bs = connect(B, 'ABCD');
+  as_.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
+  bs.deliver({ t: 'joined', room: 'ABCD', id: 2, host: 1, peers: [{ id: 1, name: '' }] });
+  as_.deliver({ t: 'peer', id: 2, name: '' });
+  as_.deliver({ t: 'msg', from: 2, d: { k: 'ready', token: B.g.online.token } });
+  bs.deliver({ t: 'msg', from: 1, d: as_.payloads('start')[0] });
+  const seatA = A.g.online.seat, seatB = B.g.online.seat;
+  as_.close();
+  bs.close();
+
+  // Both back, the other way round, and B now hosts. Dice that would swap
+  // them must not.
+  const bs2 = connect(B, 'ABCD');
+  bs2.deliver({ t: 'joined', room: 'ABCD', id: 7, host: 7, peers: [] });
+  B.g.setDealRandom(() => 0);
+  const as2 = connect(A, 'ABCD');
+  as2.deliver({ t: 'joined', room: 'ABCD', id: 8, host: 7, peers: [{ id: 7, name: '' }] });
+  bs2.deliver({ t: 'peer', id: 8, name: '' });
+  bs2.deliver({ t: 'msg', from: 8, d: { k: 'ready', token: A.g.online.token } });
+  as2.deliver({ t: 'msg', from: 7, d: bs2.payloads('start').slice(-1)[0] });
+  assert.equal(A.g.online.seat, seatA, 'A keeps its seat');
+  assert.equal(B.g.online.seat, seatB, 'and so does B');
+});
+
+test('the deal waits for every player to say hello, not just to connect', () => {
+  // Two sockets arrive, but only the second has sent its `ready`. Counting
+  // sockets dealt a seat to the first with no token, and its hello, landing
+  // a moment later, was then refused as a stranger's.
+  const { h, s } = hostFor(3);
+  s.deliver({ t: 'peer', id: 2, name: '' });
+  s.deliver({ t: 'peer', id: 3, name: '' });
+  s.deliver({ t: 'msg', from: 3, d: { k: 'ready', token: 'tok3' } });
+  assert.deepEqual(s.payloads('start'), [], 'not dealt while one of them is silent');
+  assert.match(h.g.el2.onlineStatus.textContent, /2\/3/, 'the lobby counts players, not sockets');
+
+  s.deliver({ t: 'msg', from: 2, d: { k: 'ready', token: 'tok2' } });
+  const [start] = s.payloads('start');
+  assert.ok(start, 'dealt once everyone has said hello');
+  assert.deepEqual(start.seats, [1, 2, 3]);
+  assert.deepEqual(start.tokens, [h.g.online.token, 'tok2', 'tok3'], 'every seat has its owner');
+  assert.deepEqual(s.payloads('denied'), [], 'and nobody is turned away');
+});

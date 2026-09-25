@@ -1549,7 +1549,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v70';
+  const BUILD = 'v73';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1637,7 +1637,7 @@ if ('serviceWorker' in navigator) {
       closeSettings: 'Close settings',
       fire: 'FIRE', playAgain: 'Play Again', time: 'TIME',
       timerMs: '{m}m {s}s', timerS: '{s}s',
-      cpuBadge: 'CPU', cpuBadgeShort: 'CPU',
+      cpuBadge: 'CPU', cpuBadgeShort: 'CPU', you: 'YOU',
       keysHint: '← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire',
       playerFull: 'PLAYER {n}', playerAbbr: 'P{n}',
       playerName: 'Player {n}', cpuName: 'CPU {n}',
@@ -1681,7 +1681,7 @@ if ('serviceWorker' in navigator) {
       closeSettings: 'Ayarları kapat',
       fire: 'ATEŞ', playAgain: 'Tekrar Oyna', time: 'SÜRE',
       timerMs: '{m}d {s}sn', timerS: '{s}sn',
-      cpuBadge: 'BİLGİSAYAR', cpuBadgeShort: 'BİL',
+      cpuBadge: 'BİLGİSAYAR', cpuBadgeShort: 'BİL', you: 'SEN',
       keysHint: '← → nişan &nbsp;|&nbsp; ↑ ↓ güç &nbsp;|&nbsp; BOŞLUK ateş',
       playerFull: 'OYUNCU {n}', playerAbbr: 'O{n}',
       playerName: 'Oyuncu {n}', cpuName: 'Bilgisayar {n}',
@@ -2669,13 +2669,46 @@ if ('serviceWorker' in navigator) {
     }
   }
 
+  // The dice for a round: who aims first, and where each tank stands. In seat
+  // order player 1 always stood on the left and always shot first — against
+  // the CPU, that was the human every time; online, whoever hosted. With the
+  // seats fixed for a whole match, the same player held the same edge every
+  // round too, and with three or more the same ones sat in the middle with an
+  // enemy either side. So both are rolled every round, local games included.
+  // In a match only the host rolls (it is the one that deals) and the answer
+  // travels in `start`; netDealSeats() uses the same dice to shuffle the
+  // seats themselves. null rolls nothing — seat order, seat 0 first — which
+  // is what the tests use (through the seam) so they can name seats by
+  // position.
+  let dealRandom = () => Math.random();
+
+  /** Who aims first this round. */
+  function firstSeat() {
+    if (!dealRandom || !tanks.length || (netPlaying() && !online.host)) return 0;
+    return Math.min(tanks.length - 1, Math.floor(dealRandom() * tanks.length));
+  }
+
+  /** Which slot across the field, left to right, each seat's tank starts in. */
+  function slotOrder() {
+    const order = tanks.map((_, i) => i);
+    if (!dealRandom || (netPlaying() && !online.host)) return order;
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(dealRandom() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    return order;
+  }
+
   // One slot per tank across the width, jittered inside it, so every tank starts
   // well spaced instead of piling up at the edges. The jitter narrows when the
   // slots get small, so neighbours never start closer than 2.5 tank widths.
+  // Which tank gets which slot is slotOrder()'s roll.
   function placeTanks() {
     const slot = W / tanks.length;
     const jitter = Math.max(0, Math.min(0.6, 1 - TANK_W * 2.5 / slot));
-    tanks.forEach((t, i) => {
+    const order = slotOrder();
+    tanks.forEach((t, seat) => {
+      const i = order[seat];
       const x = (i + 0.5 + (Math.random() - 0.5) * jitter) * slot;
       t.x = Math.max(24, Math.min(W - 24, x));
       t.angle = t.x < W / 2 ? 45 : 135; // start aimed toward the middle of the map
@@ -2755,7 +2788,7 @@ if ('serviceWorker' in navigator) {
     roundStart = performance.now();
     lastTimerText = '';
     buildTanks();
-    currentPlayer = 0;
+    currentPlayer = firstSeat();
     turnSeq = 0;
     activeShot = null;
     lastShot = null;
@@ -2774,6 +2807,7 @@ if ('serviceWorker' in navigator) {
     setWind();
     updateHUD();
     overlay.classList.remove('show');
+    markYou();
     syncControlsFromTank();
     maybeAiTurn();
   }
@@ -5596,6 +5630,83 @@ if ('serviceWorker' in navigator) {
     ctx.closePath();
   }
 
+  // YOU over this screen's own tank for the first few seconds of a round. The
+  // tanks are dealt to new places every round (slotOrder), so "mine is the one
+  // on the left" stops being true; the colour still says which is yours, but
+  // only once you have found your card. Only the start of a round, or of a new
+  // seat, raises it (markYou) — a resume of somebody else's seat does not.
+  // Drawing only, in CSS pixels like the wind gauge.
+  const YOU_HOLD_MS = 3500, YOU_FADE_MS = 1000;
+  let youMarkAt = -Infinity;
+  function markYou() { youMarkAt = performance.now(); }
+  // Which tank is this screen's: the dealt seat in a match, player 1 against
+  // the CPU. All human on one screen, every tank is somebody's here — no one.
+  function youSeat() {
+    if (netPlaying()) return online.seat;
+    return cpuMode ? 0 : -1;
+  }
+  function youMarkAlpha() {
+    if (state === 'GAMEOVER') return 0;
+    const t = tanks[youSeat()];
+    if (!t || !t.alive) return 0;
+    const age = performance.now() - youMarkAt;
+    if (age < 0 || age >= YOU_HOLD_MS + YOU_FADE_MS) return 0;
+    return age < YOU_HOLD_MS ? 1 : 1 - (age - YOU_HOLD_MS) / YOU_FADE_MS;
+  }
+
+  function drawYouMarker() {
+    const alpha = youMarkAlpha();
+    if (alpha <= 0) return;
+    const t = tanks[youSeat()];
+    const k = viewScale * camZoom;
+    // Over the top of the drawn tank, barrel included, at whatever size it is
+    // drawn; bobbing a little so it reads as a pointer rather than a label.
+    const top = groundHeightAt(t.x) - (TANK_H + BARREL_LEN) * spriteBoost();
+    const bob = Math.sin(performance.now() / 180) * 2;
+    const ARROW = 7, PH = 20, GAP = 4;
+    let sx = (t.x - camX) * k;
+    const tipY = Math.max(PH + ARROW + 4, Math.min(viewH - 2, (top - camY) * k - GAP + bob));
+    // Zoomed in elsewhere: pin it to the near edge, pointing out towards it.
+    const off = sx < 0 ? -1 : sx > viewW ? 1 : 0;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 12px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = txt('you');
+    const PW = Math.ceil(ctx.measureText(label).width) + 14;
+    let px, py;
+    ctx.fillStyle = t.color;
+    ctx.beginPath();
+    if (off) {
+      sx = off < 0 ? 4 : viewW - 4;
+      py = tipY - PH / 2;
+      px = off < 0 ? sx + ARROW : sx - ARROW - PW;
+      ctx.moveTo(sx, py + PH / 2);
+      ctx.lineTo(sx + (off < 0 ? ARROW : -ARROW), py + 3);
+      ctx.lineTo(sx + (off < 0 ? ARROW : -ARROW), py + PH - 3);
+    } else {
+      px = Math.max(2, Math.min(viewW - PW - 2, sx - PW / 2));
+      py = tipY - ARROW - PH;
+      ctx.moveTo(sx, tipY);
+      ctx.lineTo(sx - ARROW, tipY - ARROW - 1);
+      ctx.lineTo(sx + ARROW, tipY - ARROW - 1);
+    }
+    ctx.closePath();
+    ctx.fill();
+    // The same dark pill as the wind gauge, so it reads on any sky.
+    pillPath(px, py, PW, PH, 6);
+    ctx.fillStyle = 'rgba(12,11,16,0.72)';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = t.color;
+    ctx.stroke();
+    ctx.fillStyle = t.color;
+    ctx.fillText(label, px + PW / 2, py + PH / 2 + 1);
+    ctx.restore();
+  }
+
   // A dark pill keeps the gauge legible over both the bright and dark skies.
   // In CSS pixels, not world units: see drawWindGauge.
   function windGaugeRect() {
@@ -6044,6 +6155,7 @@ if ('serviceWorker' in navigator) {
     // otherwise; the slingshot is wherever the finger has it.
     screenTransform();
     if (!hudWindVisible) drawWindGauge();
+    drawYouMarker();
     drawAimDrag();
     worldTransform();
   }
@@ -6196,7 +6308,7 @@ if ('serviceWorker' in navigator) {
    * Lay members out in seats, keeping anyone this room already remembers where
    * they were. Dealing purely in join order meant that if everyone dropped and
    * came back in a different order, players swapped tanks and colours for no
-   * reason they could see.
+   * reason they could see. Everyone else is shuffled into the free seats.
    */
   function netDealSeats(ids) {
     const n = ids.length;
@@ -6207,6 +6319,12 @@ if ('serviceWorker' in navigator) {
       const was = token ? online.seatTokens.indexOf(token) : -1;
       if (was >= 0 && was < n && seats[was] === null) seats[was] = id;
       else spare.push(id);
+    }
+    if (dealRandom) {
+      for (let i = spare.length - 1; i > 0; i--) {
+        const j = Math.floor(dealRandom() * (i + 1));
+        [spare[i], spare[j]] = [spare[j], spare[i]];
+      }
     }
     for (let i = 0; i < n && spare.length; i++) {
       if (seats[i] === null) seats[i] = spare.shift();
@@ -6365,7 +6483,10 @@ if ('serviceWorker' in navigator) {
     if (online.status === 'waiting') {
       // How many are here out of how many this room is waiting for, so the host
       // can see a 4-player game filling up.
-      return txt('netWaiting', { code: online.room, n: netPeerIds.length + 1, total: netSeatCount() });
+      // The host counts players who have said hello, since those are the ones
+      // it can deal; a guest only sees the sockets.
+      const here = online.host ? netReadyIds().length : netPeerIds.length;
+      return txt('netWaiting', { code: online.room, n: here + 1, total: netSeatCount() });
     }
     if (online.status === 'playing') {
       // Who left, not just that somebody did: with four seats "opponent left"
@@ -6579,6 +6700,9 @@ if ('serviceWorker' in navigator) {
       }
       online.peerAway = false;
       online.missed = [];
+      // A new round, or a seat this screen has not held: point at the tank.
+      // Someone else resuming into the same round is neither.
+      if (d.round !== online.round || d.seats.indexOf(online.id) !== online.seat) markYou();
       // The host's word on which seats are empty and which the CPU is playing:
       // a restart keeps a missing player's chair for them, and every screen
       // has to agree on who covers it.
@@ -6723,13 +6847,16 @@ if ('serviceWorker' in navigator) {
     if (!online.host || netPlaying()) return;
     const seats = netSeatCount();
     // Wait for the whole table. Dealing at the first arrival is what limited
-    // this to two players.
-    if (netPeerIds.length + 1 < seats) { refreshOnlineUi(); return; }
+    // this to two players. And wait for their `ready`, not just their socket:
+    // one that had arrived but not yet said hello was dealt a seat with no
+    // token, and then refused as a stranger when its hello landed.
+    if (netReadyIds().length + 1 < seats) { refreshOnlineUi(); return; }
     cpuMode = false;
     playerCount = seats;
     countSelect.value = String(seats);
-    // Seat order follows join order, so the host is player 1. Set before the UI
-    // is refreshed: refreshOpponentUi asks whether a match is on.
+    // Seats are shuffled (netDealSeats), so the host is not always player 1.
+    // Set before the UI is refreshed: refreshOpponentUi asks whether a match
+    // is on.
     online.seats = netDealSeats([online.id, ...netOtherIds()]);
     online.seatTokens = online.seats.map(
       id => (id === online.id ? online.token : (netTokensById[id] || null)));
@@ -6844,7 +6971,9 @@ if ('serviceWorker' in navigator) {
     const n = parseInt(countSelect.value, 10);
     return Math.min(MAX_PLAYERS, Math.max(2, isFinite(n) ? n : 2));
   }
-  function netOtherIds() { return netPeerIds.slice(0, netSeatCount() - 1); }
+  function netOtherIds() { return netReadyIds().slice(0, netSeatCount() - 1); }
+  /** Members who have sent their `ready`, in join order. A `peer` is only a socket. */
+  function netReadyIds() { return netPeerIds.filter(id => id in netTokensById); }
 
   // Infinity is not JSON, and the standard shell's ammo is Infinity.
   const AMMO_INFINITE = -1;
@@ -7136,6 +7265,8 @@ if ('serviceWorker' in navigator) {
     canRestartRound, onRoundRestartClicked, RESTART_ARM_MS,
     netSeatCount, refreshOpponentUi, netCheckTurnClock, netResetTurnClock, netPublishState,
     netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
+    firstSeat, slotOrder, setDealRandom(fn) { dealRandom = fn; },
+    youMarkAlpha, drawYouMarker, YOU_HOLD_MS, YOU_FADE_MS,
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,

@@ -35,7 +35,10 @@ h.fireAndSettle();        // runs frames until the turn resolves
 ```
 
 - `load(opts)` boots a fresh game (`width`, `height`, `seed`); every call is
-  isolated.
+  isolated. Rounds are dealt in seat order — player 1 on the left and firing
+  first, the host in seat 0 — so tests can name seats by position; pass
+  `randomDeal: true` for the real dice, or script them with
+  `g.setDealRandom(fn)`.
 - Time only moves inside `h.advance(ms)` / `h.advanceUntil(fn)`, so nothing is
   clock-dependent.
 - `h.seedRandom(n)`, `h.queueRandom([...])` and `h.fixRandom(v)` pin the random
