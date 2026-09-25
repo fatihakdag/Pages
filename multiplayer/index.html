@@ -318,66 +318,60 @@
     #view-controls button { width: 42px; height: 42px; font-size: 18px; }
   }
 
-  /* Reactions: the button in the corner opposite the zoom, the tray it opens
-     upward, and the quick row of suggestions along the bottom. Above the
-     round-over overlay, because the end of a round is exactly when GG is said. */
-  #react-ctl {
-    position: absolute;
-    left: 8px;
-    bottom: 8px;
-    z-index: 21;
-  }
-  #react-ctl[hidden], #react-tray[hidden], #quick-react[hidden] { display: none; }
-  #react-btn, #react-tray button, #quick-react button {
-    border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 8px;
-    background: rgba(12,11,16,0.62);
-    color: var(--text);
+  /* Reactions: the button beside the online status, and the tray it opens.
+     The tray is fixed and placed in script (placeTray), above the button when
+     there is room and below when there is not, so it never has to fit into
+     whatever rail or bar the button happens to be in. */
+  #net-row { display: flex; align-items: center; gap: 6px; }
+  #net-row > #net-invite, #net-row > #net-pill { flex: 1 1 auto; }
+  #react-ctl { display: inline-flex; flex: 0 0 auto; }
+  #react-ctl[hidden], #react-tray[hidden] { display: none; }
+  #react-btn {
+    width: var(--control-height);
+    height: var(--control-height);
+    padding: 0;
+    border: 1px solid var(--panel-line);
+    border-radius: 3px;
+    background: transparent;
     font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    font-size: 16px;
     line-height: 1;
     cursor: pointer;
     touch-action: manipulation;
-    -webkit-backdrop-filter: blur(3px);
-    backdrop-filter: blur(3px);
   }
-  #react-btn { width: 36px; height: 36px; font-size: 18px; position: relative; }
+  #react-btn:hover { border-color: #55526a; }
   #react-btn[aria-expanded="true"] { border-color: var(--text-main); }
   /* Out of reactions for a moment: say so, rather than eat the tap. */
-  #react-btn.cooling, #react-tray button:disabled, #quick-react button:disabled { opacity: 0.4; cursor: default; }
+  #react-btn.cooling, #react-tray button:disabled { opacity: 0.4; cursor: default; }
   #react-tray {
-    position: absolute;
-    left: 0;
-    bottom: calc(100% + 6px);
+    position: fixed;
+    z-index: 40;
     display: grid;
-    grid-template-columns: repeat(8, 34px);
+    /* Two rows of four: narrow enough for the side rails and a phone alike. */
+    grid-template-columns: repeat(4, 34px);
     gap: 4px;
     padding: 5px;
     border: 1px solid rgba(255,255,255,0.18);
     border-radius: 10px;
-    background: rgba(12,11,16,0.82);
+    background: rgba(12,11,16,0.92);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.45);
   }
-  #react-tray button { width: 34px; height: 34px; font-size: 19px; background: transparent; border-color: transparent; }
+  #react-tray button {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    font-size: 19px;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
   #react-tray button:not(:disabled):hover { background: rgba(255,255,255,0.1); }
-  #quick-react {
-    position: absolute;
-    left: 50%;
-    bottom: 8px;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 6px;
-    z-index: 21;
-    animation: quick-in 0.18s ease-out;
-  }
-  #quick-react button { width: 40px; height: 40px; font-size: 21px; }
-  @keyframes quick-in { from { opacity: 0; transform: translate(-50%, 8px); } }
   @media (pointer: coarse) {
-    #react-btn { width: 42px; height: 42px; font-size: 21px; }
     #react-tray button { width: 38px; height: 38px; font-size: 22px; }
-    #react-tray { grid-template-columns: repeat(8, 38px); }
-    #quick-react button { width: 44px; height: 44px; font-size: 23px; }
-  }
-  /* Eight across does not fit a narrow battlefield: two rows of four. */
-  @media (max-width: 420px) {
     #react-tray { grid-template-columns: repeat(4, 38px); }
   }
 
@@ -1425,14 +1419,6 @@
       <button type="button" id="zoom-fit" aria-label="Fit the whole battlefield">⛶</button>
       <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
     </div>
-    <!-- Reactions (see "Reactions" in the script): the button, the tray of
-         eight it opens, and the few it suggests after something happens.
-         Buttons are built from EMOTES. -->
-    <div id="react-ctl" hidden>
-      <div id="react-tray" role="menu" hidden></div>
-      <button type="button" id="react-btn" aria-haspopup="menu" aria-expanded="false" aria-label="React">🙂</button>
-    </div>
-    <div id="quick-react" role="group" hidden></div>
     <div id="overlay">
       <h1 id="overlay-title">Tank 1 wins!</h1>
       <p id="overlay-sub">Round over.</p>
@@ -1478,6 +1464,10 @@
          belongs: an invitation in when nothing is going on, and what the
          connection is doing once something is. One or the other, never both. -->
     <div class="ctrl-group" id="net-group">
+      <div id="net-row">
+      <!-- Reactions (see "Reactions" in the script): off the battlefield, beside
+           the online status. The tray it opens is #react-tray, below. -->
+      <span id="react-ctl" hidden><button type="button" id="react-btn" aria-haspopup="menu" aria-expanded="false" aria-label="React">🙂</button></span>
       <button type="button" id="net-invite" data-i18n="playWithOthers">PLAY WITH OTHERS</button>
       <span id="net-pill" class="hud-pill" hidden>
         <span id="net-status">off</span>
@@ -1486,12 +1476,18 @@
              RESTART ROUND; anywhere else there is nothing to lose. -->
         <button type="button" id="net-leave"><span class="nl-idle" data-i18n="leaveGame">LEAVE</span><span class="nl-sure" data-i18n="leaveSure">SURE?</span></button>
       </span>
+      </div>
     </div>
     <button id="fire-btn" data-i18n="fire">FIRE</button>
     <div id="keys-hint">
       <span data-i18n="keysHint">← → aim &nbsp;|&nbsp; ↑ ↓ power &nbsp;|&nbsp; SPACE fire</span>
     </div>
   </div>
+
+  <!-- The reaction tray, placed over whatever is nearest the button by
+       placeTray(): fixed, so no layout has to make room for it. Buttons are
+       built from EMOTES. -->
+  <div id="react-tray" role="menu" hidden></div>
 
   <!-- Match setup. These are the same controls that used to sit in the rail,
        moved rather than rebuilt, so nothing wired to them had to change. -->
@@ -1670,7 +1666,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v75';
+  const BUILD = 'v76';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -7432,8 +7428,7 @@ if ('serviceWorker' in navigator) {
 
   // ---------- Reactions ----------
   // A fixed set of eight emoji a player can send over their own tank: from the
-  // button in the battlefield's corner, from the few suggested right after a
-  // shot (the quick row), or with E then 1-8. Online they go to everyone; against
+  // button beside the online status, or with E then 1-8. Online they go to everyone; against
   // the CPU the CPU sends its own. All human on one screen there is no one to
   // react to, so there is no button.
   //
@@ -7457,13 +7452,11 @@ if ('serviceWorker' in navigator) {
   // for clocks that disagree, and drops the rest — a modified client cannot
   // bury anyone's screen.
   const SEND_BURST = 3, SEND_WINDOW_MS = 5000, RECV_BURST = 4;
-  const QUICK_MS = 4000;        // how long the quick row stays up
   const EMOTE_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
 
   const reactCtl = document.getElementById('react-ctl');
   const reactBtn = document.getElementById('react-btn');
   const reactTray = document.getElementById('react-tray');
-  const quickReact = document.getElementById('quick-react');
   const reactionsSelect = document.getElementById('reactions-select');
 
   let reactionsOn = true;
@@ -7474,7 +7467,7 @@ if ('serviceWorker' in navigator) {
   const trayBtns = [];
   const cardEmotes = [], cardMutes = [];
   const cardEmoteUntil = [];
-  let quickTimer = null, cooldownTimer = null;
+  let cooldownTimer = null;
 
   /** Which seat this screen reacts as, or -1 if it has none (see youSeat). */
   function reactSeat() { return youSeat(); }
@@ -7508,7 +7501,6 @@ if ('serviceWorker' in navigator) {
     if (netPlaying()) netSend('emote', { e, turn: turnSeq });
     else cpuAnswer(e);
     closeTray();
-    hideQuick();
     refreshReactUi();
     return true;
   }
@@ -7563,7 +7555,6 @@ if ('serviceWorker' in navigator) {
     emoteHold = [];
     shotWatch = null;
     cpuEmoteToken++;
-    hideQuick();
   }
 
   // ---- drawing ----
@@ -7632,7 +7623,7 @@ if ('serviceWorker' in navigator) {
     }
   }
 
-  // ---- the button, the tray and the quick row ----
+  // ---- the button and the tray ----
   function buildReactUi() {
     EMOTES.forEach((em, i) => {
       const b = document.createElement('button');
@@ -7672,63 +7663,53 @@ if ('serviceWorker' in navigator) {
   function trayOpen() { return !reactTray.hidden; }
   function openTray() {
     if (!canReact()) return;
-    hideQuick();
     reactTray.hidden = false;
     reactBtn.setAttribute('aria-expanded', 'true');
+    placeTray();
   }
+
+  /**
+   * Lined up with the button's left edge and kept on screen, on whichever side
+   * of it has more room: above it on a phone, where it sits over FIRE; below it
+   * in the desktop rail, where an upward tray would cover the scores.
+   */
+  function placeTray() {
+    if (reactTray.hidden) return;
+    const r = reactBtn.getBoundingClientRect();
+    const vw = window.innerWidth || 1000, vh = window.innerHeight || 700;
+    const w = reactTray.offsetWidth || 320, h = reactTray.offsetHeight || 48;
+    const GAP = 6, EDGE = 8;
+    const left = Math.max(EDGE, Math.min(vw - w - EDGE, r.left));
+    const below = vh - r.bottom > r.top;
+    const top = below ? Math.min(vh - h - EDGE, r.bottom + GAP) : Math.max(EDGE, r.top - h - GAP);
+    reactTray.style.left = left + 'px';
+    reactTray.style.top = top + 'px';
+  }
+  window.addEventListener('resize', placeTray);
   function closeTray() {
     reactTray.hidden = true;
     reactBtn.setAttribute('aria-expanded', 'false');
   }
 
-  /** Offer these reactions for a few seconds, one tap each. */
-  function showQuick(list) {
-    if (!canReact() || !list.length || trayOpen()) return;
-    quickReact.textContent = '';
-    for (const e of list) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = EMOTES[e].ch;
-      b.setAttribute('aria-label', txt(EMOTES[e].key));
-      b.title = txt(EMOTES[e].key);
-      b.disabled = sendCooldownMs() > 0;
-      b.addEventListener('click', () => sendEmote(e));
-      quickReact.appendChild(b);
-    }
-    quickReact.dataset.emotes = list.join(',');
-    quickReact.hidden = false;
-    clearTimeout(quickTimer);
-    quickTimer = setTimeout(hideQuick, QUICK_MS);
-  }
-  function hideQuick() {
-    clearTimeout(quickTimer);
-    quickTimer = null;
-    quickReact.hidden = true;
-    quickReact.textContent = '';
-    delete quickReact.dataset.emotes;
-  }
 
   /** Show, hide and grey out to match what this screen can do right now. */
   function refreshReactUi() {
     const can = canReact();
     reactCtl.hidden = !can;
-    if (!can) { closeTray(); hideQuick(); }
+    if (!can) closeTray();
     const wait = can ? sendCooldownMs() : 0;
     reactBtn.classList.toggle('cooling', wait > 0);
     trayBtns.forEach(b => { b.disabled = wait > 0; });
-    for (const b of quickReact.children) b.disabled = wait > 0;
     clearTimeout(cooldownTimer);
     if (wait > 0) cooldownTimer = setTimeout(refreshReactUi, wait + 20);
     refreshMuteUi();
   }
 
   reactBtn.addEventListener('click', () => { trayOpen() ? closeTray() : openTray(); });
-  // A tap anywhere else puts the tray away, and the quick row with it: the row
-  // sits over the battlefield, so it must never be in the way of starting a pull.
+  // A tap anywhere else puts the tray away.
   const inside = (el, target) => !!(el.contains && target && el.contains(target));
   document.addEventListener('pointerdown', (e) => {
-    if (trayOpen() && !inside(reactCtl, e.target)) closeTray();
-    if (!quickReact.hidden && !inside(quickReact, e.target)) hideQuick();
+    if (trayOpen() && !inside(reactCtl, e.target) && !inside(reactTray, e.target)) closeTray();
   });
   // E opens the tray, 1-8 pick from it, Escape closes it. Not while typing a
   // name or a code, and not behind the settings panel.
@@ -7770,7 +7751,7 @@ if ('serviceWorker' in navigator) {
     setReactionsOn(stored !== 'off');
   }
 
-  // ---- what just happened (the quick row, and the CPU's reactions) ----
+  // ---- what just happened (for the CPU's reactions) ----
   // Every screen plays every shot out and ends on the same board, so each can
   // work out what a shot did by itself and nothing more has to be sent: tanks
   // as they were when it was fired against how it left them, the blasts it
@@ -7822,42 +7803,15 @@ if ('serviceWorker' in navigator) {
     };
   }
 
-  /**
-   * The reactions worth offering `me` after `ev`, best first, at most three:
-   * what you would say depends on whether you fired, were hit, or watched.
-   */
-  function suggestFor(ev, me) {
-    if (me < 0) return [];
-    const mine = ev.hits.find(h => h.seat === me);
-    if (ev.over) return ev.winner === me ? [EM.GG, EM.FIRE, EM.TAUNT] : [EM.GG, EM.CLAP, EM.RIP];
-    if ((mine && mine.killed) || (ev.shooter === me && ev.self && ev.self.killed)) return [EM.RIP, EM.WHOA, EM.CLAP];
-    if (mine) return [EM.WHOA, EM.PLEASE, EM.TAUNT];
-    if (ev.shooter === me) {
-      if (ev.self) return [EM.LOL, EM.WHOA];
-      if (ev.kills.length) return [EM.FIRE, EM.TAUNT];
-      if (ev.hits.length || ev.downed) return [EM.TAUNT, EM.FIRE];
-      if (ev.nearMiss) return [EM.WHOA, EM.LOL];
-      if (ev.wild) return [EM.LOL];
-      return [];
-    }
-    if (ev.kills.length) return [EM.FIRE, EM.CLAP, EM.WHOA];
-    if (ev.self) return [EM.LOL, EM.CLAP];
-    if (ev.hits.length || ev.downed) return [EM.CLAP, EM.FIRE];
-    if (ev.nearMiss) return [EM.WHOA, EM.LOL];
-    if (ev.wild) return [EM.LOL];
-    return [];
-  }
-
-  /** finishShot(): the board is final — say what happened, let held ones through. */
+  /** finishShot(): the board is final — let held ones through, and the CPU have its say. */
   function shotLanded() {
     releaseHeldEmotes();
     const w = shotWatch;
     shotWatch = null;
     if (!w) return;
     const over = state === 'GAMEOVER';
-    const ev = classifyShot(w, tanks, over, over ? lastWinner : -1);
-    if (canReact()) showQuick(suggestFor(ev, reactSeat()));
-    cpuReact(ev);
+    if (!cpuReacts()) return;
+    cpuReact(classifyShot(w, tanks, over, over ? lastWinner : -1));
   }
 
   // ---- the CPU's reactions (against the CPU only) ----
@@ -8019,15 +7973,15 @@ if ('serviceWorker' in navigator) {
     netScheduleRejoin, netLeave, netWhoLeft, REJOIN_DELAYS_MS, netToken, netSeatForToken, netDealSeats,
     firstSeat, slotOrder, setDealRandom(fn) { dealRandom = fn; },
     youMarkAlpha, drawYouMarker, YOU_HOLD_MS, YOU_FADE_MS,
-    EMOTES, EM, sendEmote, showEmote, netEmoteIn, canReact, sendCooldownMs, classifyShot, suggestFor,
+    EMOTES, EM, sendEmote, showEmote, netEmoteIn, canReact, sendCooldownMs, classifyShot,
     toggleMute, isMuted, setReactionsOn, drawEmotes, cpuReact, cpuAnswer, trayOpen, openTray, closeTray,
-    showQuick, hideQuick, shotLanded,
-    EMOTE_SHOW_MS, SEND_BURST, SEND_WINDOW_MS, RECV_BURST, QUICK_MS, CPU_EMOTE_GAP_MS, CPU_EMOTE_ODDS,
+    shotLanded, placeTray,
+    EMOTE_SHOW_MS, SEND_BURST, SEND_WINDOW_MS, RECV_BURST, CPU_EMOTE_GAP_MS, CPU_EMOTE_ODDS,
     NEAR_MISS, WILD_MISS,
     get emotes() { return emotes; }, get emoteHold() { return emoteHold; },
     get shotWatch() { return shotWatch; }, get reactionsOn() { return reactionsOn; },
     setReactRandom(fn) { reactRandom = fn; },
-    el3: { reactCtl, reactBtn, reactTray, quickReact, reactionsSelect, cardEmotes, cardMutes },
+    el3: { reactCtl, reactBtn, reactTray, reactionsSelect, cardEmotes, cardMutes },
     netTurnSecondsLeft, netActsForSeat, netWeDrive, netSeatIsAi, netTurnRanOut,
     netPlayAiTurn, netSeatResponded, TURN_LIMIT_MS, TURN_MISS_LIMIT, TURN_AI_LEVEL,
     netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,

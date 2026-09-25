@@ -1,5 +1,5 @@
-// Reactions: the eight emoji a player can send over their tank, the quick row
-// that offers a few after a shot, the CPU's own, and muting a player.
+// Reactions: the eight emoji a player can send over their tank, the CPU's own,
+// and muting a player.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { load, loadFlat } from './harness.mjs';
@@ -54,8 +54,6 @@ function mode(h, value) {
 }
 
 const shown = (h) => Array.from(h.g.emotes, m => [m.seat, m.e]);
-const quick = (h) => (h.g.el3.quickReact.hidden ? null
-  : h.g.el3.quickReact.dataset.emotes.split(',').map(Number));
 
 // ---------- phase 1: sending and showing ----------
 
@@ -221,7 +219,7 @@ test('REACTIONS off hides the button, ignores everyone, and is remembered', () =
   assert.equal(host.g.txt('reactions'), 'REACTIONS');
 });
 
-// ---------- phase 2: what a shot did, and the quick row ----------
+// ---------- what a shot did (what the CPU reacts to) ----------
 
 /** A watch over two or three tanks, as the game takes one when a shot starts. */
 function watch(g, seat, { blasts = [], downed = false } = {}) {
@@ -267,29 +265,6 @@ test('classifying a miss: near, wild, or neither', () => {
   assert.equal(offMap.wild, true, 'flew off the map');
 });
 
-test('what is offered depends on whether you fired, were hit, or watched', () => {
-  const h = load();
-  const { EM } = h.g;
-  const ev = (o) => ({ shooter: 0, hits: [], self: null, kills: [], nearMiss: false, wild: false,
-                       downed: false, over: false, winner: -1, ...o });
-  const s = (e, me) => Array.from(h.g.suggestFor(ev(e), me));
-  const hit1 = { seat: 1, dmg: 30, killed: false }, kill1 = { seat: 1, dmg: 40, killed: true };
-
-  assert.deepEqual(s({ hits: [hit1] }, 1), [EM.WHOA, EM.PLEASE, EM.TAUNT], 'you were hit');
-  assert.deepEqual(s({ hits: [kill1], kills: [1] }, 1), [EM.RIP, EM.WHOA, EM.CLAP], 'you were destroyed');
-  assert.deepEqual(s({ hits: [hit1] }, 0), [EM.TAUNT, EM.FIRE], 'you hit someone');
-  assert.deepEqual(s({ hits: [kill1], kills: [1] }, 0), [EM.FIRE, EM.TAUNT], 'you destroyed someone');
-  assert.deepEqual(s({ self: { seat: 0, dmg: 10, killed: false } }, 0), [EM.LOL, EM.WHOA], 'you hit yourself');
-  assert.deepEqual(s({ wild: true }, 0), [EM.LOL], 'you missed by a mile');
-  assert.deepEqual(s({ nearMiss: true }, 0), [EM.WHOA, EM.LOL]);
-  assert.deepEqual(s({ hits: [kill1], kills: [1] }, 2), [EM.FIRE, EM.CLAP, EM.WHOA], 'you watched a kill');
-  assert.deepEqual(s({ self: { seat: 0, dmg: 10, killed: false } }, 2), [EM.LOL, EM.CLAP]);
-  assert.deepEqual(s({ downed: true }, 2), [EM.CLAP, EM.FIRE]);
-  assert.deepEqual(s({ over: true, winner: 0 }, 0), [EM.GG, EM.FIRE, EM.TAUNT], 'you won');
-  assert.deepEqual(s({ over: true, winner: 0 }, 1), [EM.GG, EM.CLAP, EM.RIP], 'you lost');
-  assert.deepEqual(s({}, 0), [], 'an ordinary miss is not worth a word');
-  assert.deepEqual(s({ hits: [hit1] }, -1), [], 'no seat, nothing to say');
-});
 
 /** Aim `seat` at the other tank with the CPU's own solver, flat and calm. */
 function aimAtOther(h) {
@@ -300,7 +275,8 @@ function aimAtOther(h) {
   t.weapon = 'standard';
 }
 
-test('after your hit lands, the quick row offers a few, then goes', () => {
+
+test('nothing is suggested after a shot: reacting is only ever asked for', () => {
   const h = loadFlat();
   mode(h, 'cpu');
   h.flatTerrain(400);
@@ -308,53 +284,32 @@ test('after your hit lands, the quick row offers a few, then goes', () => {
   h.g.wind = 0;
   h.g.currentPlayer = 0;
   h.g.state = 'AIMING';
-  h.g.setReactRandom(() => 0.99);   // the CPU keeps quiet here
   aimAtOther(h);
   h.fireAndSettle();
   assert.ok(h.g.tanks[1].hp < 100, 'it hit');
-  assert.deepEqual(quick(h), [h.g.EM.TAUNT, h.g.EM.FIRE]);
-
-  h.advance(h.g.QUICK_MS + 50);
-  assert.equal(quick(h), null, 'gone after a few seconds');
+  assert.equal(h.g.trayOpen(), false, 'no tray opens by itself');
+  assert.deepEqual(shown(h), [], 'and nothing is sent for you');
 });
 
-test('a tap on the quick row sends it', () => {
+test('the tray opens on whichever side of the button has more room', () => {
   const h = load();
   mode(h, 'cpu');
-  h.g.showQuick([h.g.EM.LOL]);
-  assert.deepEqual(quick(h), [h.g.EM.LOL]);
-  h.g.sendEmote(h.g.EM.LOL);
-  assert.equal(quick(h), null, 'sending puts it away');
-  assert.deepEqual(shown(h), [[0, h.g.EM.LOL]]);
+  const btn = h.g.el3.reactBtn, tray = h.g.el3.reactTray;
+  const at = (top) => { btn.getBoundingClientRect = () => ({ left: 300, top, right: 336, bottom: top + 36, width: 36, height: 36 }); };
+
+  at(600);   // a phone: the button sits above FIRE
+  h.g.openTray();
+  assert.ok(parseFloat(tray.style.top) < 600, 'above the button');
+  const left = parseFloat(tray.style.left);
+  assert.ok(left >= 8, 'and on screen');
+
+  h.g.closeTray();
+  at(160);   // the desktop rail: room above, but far more below, over nothing
+  h.g.openTray();
+  assert.ok(parseFloat(tray.style.top) > 196, 'below it, clear of the scores');
 });
 
-test('online, being hit offers the reactions of someone who was hit', () => {
-  const { host, guest, hs, gs } = liveMatch();
-  for (const h of [host, guest]) { h.flatTerrain(400); h.placeTanksAt([200, 700]); h.g.wind = 0; }
-  aimAtOther(host);
-  host.g.fire();
-  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('turn')[0] });
-  assert.ok(guest.advanceUntil(() => guest.g.state === 'AIMING' || guest.g.state === 'GAMEOVER'));
-  assert.ok(guest.g.tanks[1].hp < 100, 'the guest was hit');
-  assert.deepEqual(quick(guest), [guest.g.EM.WHOA, guest.g.EM.PLEASE, guest.g.EM.TAUNT]);
-  assert.ok(host.advanceUntil(() => host.g.state === 'AIMING'));
-  assert.deepEqual(quick(host), [host.g.EM.TAUNT, host.g.EM.FIRE], 'and the shooter, a shooter\'s');
-});
-
-test('the quick row is not offered all human on one screen', () => {
-  const h = loadFlat();
-  mode(h, 'human');
-  h.flatTerrain(400);
-  h.placeTanksAt([200, 700]);
-  h.g.wind = 0;
-  h.g.currentPlayer = 0;
-  h.g.state = 'AIMING';
-  aimAtOther(h);
-  h.fireAndSettle();
-  assert.equal(quick(h), null);
-});
-
-// ---------- phase 3: the CPU's reactions, and muting ----------
+// ---------- the CPU's reactions, and muting ----------
 
 const evOf = (o) => ({ shooter: 0, hits: [], self: null, kills: [], nearMiss: false, wild: false,
                        downed: false, over: false, winner: -1, ...o });
