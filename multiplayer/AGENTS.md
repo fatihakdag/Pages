@@ -179,7 +179,10 @@ old Android too.
   weapons three to a row with the jet pinned to the end of the first row —
   last in the list it sat right over FIRE — a button alone on the last row
   in its middle (`markLoneWeapon()`, since spent weapons leave the row), and
-  FIRE at the rail's foot with a clear gap above it. A tap anywhere else
+  FIRE at the rail's foot with a clear gap above it. Some of the height spare
+  above FIRE also goes between the angle and power arrows and their sliders,
+  and between the two groups (up to 12px and 10px, scaled with the screen's
+  height, so the shortest phones keep the tight layout). A tap anywhere else
   closes it. `sendEmote(e)` shows the bubble here at once. Nothing is ever
   suggested or offered after a shot: reacting is only ever the player's idea.
 - **The wire**: an `emote` message carries `e`, an **index** into `EMOTES`,

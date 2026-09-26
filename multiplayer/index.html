@@ -853,6 +853,21 @@
   .two-rails .weapon-pick.lone { grid-column: 2; }
   .two-rails #weapon-group { margin-bottom: 14px; }
   .two-rails #fire-btn { margin-top: auto; }
+  /* The angle and power arrows sit on the label line with the slider right
+     under them, 2px apart, and the angle slider just over the power arrows:
+     easy to hit one for the other. The rail has height to spare above FIRE, so
+     some of it goes here — up to 12px between each pair of arrows and its
+     slider, and up to 10px between the angle and power controls — scaled to
+     the screen's height, so the shortest phones, with nothing spare, keep the
+     tight layout rather than pushing FIRE off the rail. */
+  .two-rails #angle-group, .two-rails #power-group {
+    row-gap: clamp(2px, calc((100vh - 300px) / 6), 12px);
+    row-gap: clamp(2px, calc((100dvh - 300px) / 6), 12px);
+  }
+  .two-rails #power-group {
+    margin-top: clamp(0px, calc((100vh - 300px) / 7), 10px);
+    margin-top: clamp(0px, calc((100dvh - 300px) / 7), 10px);
+  }
   .weapon-ammo {
     position: absolute;
     right: 2px; bottom: 0;
@@ -1804,7 +1819,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v79';
+  const BUILD = 'v80';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
