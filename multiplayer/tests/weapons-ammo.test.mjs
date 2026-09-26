@@ -2,7 +2,7 @@
 // a weapon runs dry or is switched off.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadFlat } from './harness.mjs';
+import { load, loadFlat } from './harness.mjs';
 
 test('every enabled weapon starts with ammo and the standard shell is unlimited', () => {
   const { g } = loadFlat();
@@ -212,4 +212,33 @@ test('each button shows its ammo in the corner, and the label names the pick', (
 
   g.weaponButtons.get('big').dispatch('click');
   assert.equal(h.el('weapon-name').textContent, g.txt('w_big'));
+});
+
+// The landscape right rail sits the buttons three to a row with the jet pinned
+// to the end of the first; a button left alone on the last row is marked to go
+// in its middle.
+test('the button alone on the last row of three is marked for the middle', () => {
+  const h = load();
+  const g = h.g;
+  const lone = () => [...g.weaponButtons].filter(([, b]) => b.classList.contains('lone')).map(([k]) => k);
+  const t = g.tanks[g.currentPlayer];
+  const shownCount = () => [...g.weaponButtons].filter(([, b]) => !b.hidden).length;
+
+  g.syncWeaponOptions(t);
+  assert.equal(shownCount(), 7, 'the full set, jet included');
+  assert.deepEqual(lone(), ['missile'], 'seven: the last one before the jet sits alone, in the middle');
+
+  t.ammo.big = 0;
+  g.syncWeaponOptions(t);
+  assert.deepEqual(lone(), [], 'six fill two rows exactly');
+
+  t.ammo.cluster = 0; t.ammo.roller = 0;
+  g.syncWeaponOptions(t);
+  assert.equal(shownCount(), 4);
+  assert.deepEqual(lone(), ['missile'], 'four: the jet up top, and the last of the rest alone');
+
+  t.ammo.jet = 0;
+  g.syncWeaponOptions(t);
+  assert.equal(shownCount(), 3);
+  assert.deepEqual(lone(), [], 'three: one full row');
 });
