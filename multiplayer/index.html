@@ -593,7 +593,7 @@
      browser's default white control. And again when setup moved into the
      Settings dialog, which is outside #controls: those dropdowns went white
      until the rules named the dialog too. */
-  #controls select, #settings-grid select {
+  #controls select, .modal select {
     background: #12111a;
     color: var(--text-main);
     border: 1px solid var(--panel-line);
@@ -606,15 +606,15 @@
     /* also darkens the native dropdown list itself, not just the closed control */
     color-scheme: dark;
   }
-  #controls select:hover, #settings-grid select:hover { border-color: #55526a; }
-  #controls select:focus-visible, #settings-grid select:focus-visible {
+  #controls select:hover, .modal select:hover { border-color: #55526a; }
+  #controls select:focus-visible, .modal select:focus-visible {
     outline: 2px solid rgba(236,231,225,0.45);
     outline-offset: 1px;
   }
-  #controls select:disabled, #settings-grid select:disabled { opacity: 0.45; cursor: not-allowed; }
+  #controls select:disabled, .modal select:disabled { opacity: 0.45; cursor: not-allowed; }
   /* Firefox needs the options coloured explicitly */
-  #controls select option, #settings-grid select option { background: #12111a; color: var(--text-main); }
-  #controls select option:disabled, #settings-grid select option:disabled { color: var(--text-dim); }
+  #controls select option, .modal select option { background: #12111a; color: var(--text-main); }
+  #controls select option:disabled, .modal select option:disabled { color: var(--text-dim); }
   button {
     font-family: inherit;
     cursor: pointer;
@@ -709,6 +709,58 @@
 
   /* The online group needs HOST + CODE + JOIN across one line. */
   #settings-grid #online-group { grid-column: 1 / -1; }
+  /* Settings' way to the Play online dialog: online lives there now. */
+  #open-online {
+    align-self: flex-start;
+    background: var(--panel-line);
+    color: var(--text);
+    border: 0;
+    border-radius: 6px;
+    padding: 7px 12px;
+    font: inherit;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+  }
+  #open-online:hover { background: #3a3750; }
+
+  /* The Play online dialog: narrower than Settings, since it is one column. */
+  #online-modal .modal-panel { width: min(360px, 100%); }
+  #online-way-in, #online-room-view { display: flex; flex-direction: column; gap: 12px; }
+  #online-way-in[hidden], #online-room-view[hidden], #online-status[hidden], #online-share[hidden],
+  #online-players[hidden], #online-room-code[hidden] { display: none; }
+  #online-way-in #online-name { width: 100%; }
+  /* It sat in a row before; in the dialog's column a 92px basis became height. */
+  #online-modal #online-status { flex: 0 0 auto; }
+  #online-way-in .online-row > select, #online-way-in #online-code { flex: 1 1 auto; width: auto; min-width: 0; }
+  .online-row > select { height: auto; padding: 7px 8px; }
+  #online-room-code {
+    font-size: 30px;
+    font-weight: bold;
+    letter-spacing: 0.3em;
+    color: var(--text-main);
+    font-variant-numeric: tabular-nums;
+  }
+  #online-share { font-size: 11px; color: var(--text-dim); }
+  #online-players {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+  }
+  #online-players li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .op-dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; }
+  .op-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-main); }
+  .op-tag { margin-left: auto; flex: 0 0 auto; font-size: 10px; letter-spacing: 0.06em; color: var(--text-dim); }
+  #online-leave .nl-sure { display: none; }
+  #online-leave.armed { box-shadow: inset 0 0 0 1px var(--accent-p1); color: var(--text-main); }
+  #online-leave.armed .nl-idle { display: none; }
+  #online-leave.armed .nl-sure { display: inline; }
+  /* The pill opens the dialog: say it can be pressed. */
+  #net-status { cursor: pointer; }
   #settings-grid #restart-group { grid-column: 1 / -1; }
   .restart-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
   #round-restart {
@@ -865,7 +917,9 @@
     #net-leave { padding: 6px 10px; }
   }
 
-  #settings-modal {
+  /* Both dialogs, Settings and Play online, share one look (.modal). Only one
+     is open at a time (openDialog). */
+  .modal {
     position: fixed;
     inset: 0;
     background: rgba(8,7,12,0.86);
@@ -875,8 +929,8 @@
     z-index: 30;    /* above the win overlay, which sits inside #game-wrap */
     padding: 14px;
   }
-  #settings-modal.show { display: flex; }
-  #settings-panel {
+  .modal.show { display: flex; }
+  .modal-panel {
     background: var(--panel-bg);
     border: 2px solid var(--panel-line);
     border-radius: 4px;
@@ -888,14 +942,14 @@
     flex-direction: column;
     gap: 12px;
   }
-  #settings-head {
+  .modal-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
   }
-  #settings-title { font-size: 13px; letter-spacing: 1px; font-weight: bold; }
-  #settings-close {
+  .modal-title { font-size: 13px; letter-spacing: 1px; font-weight: bold; }
+  .modal-close {
     flex: 0 0 auto;
     width: 32px; height: 32px;
     background: #12111a;
@@ -907,7 +961,7 @@
     cursor: pointer;
     touch-action: manipulation;
   }
-  #settings-close:hover { background: #1e1c29; border-color: #55526a; }
+  .modal-close:hover { background: #1e1c29; border-color: #55526a; }
   /* Two columns where there is room, one where there is not — a 320px phone
      and a 390px-tall landscape both end up readable without their own rule. */
   #settings-grid {
@@ -916,7 +970,7 @@
     gap: 12px;
   }
   #settings-grid .ctrl-group { min-width: 0; }
-  #settings-grid select { width: 100%; }
+  .modal select { width: 100%; }
   /* The last row holds the two personal preferences: sound to the left, the
      language to the right. Both groups put their control in a row of the
      slider's height, so the two labels sit on one line. */
@@ -1492,7 +1546,7 @@
       <span id="react-ctl" hidden><button type="button" id="react-btn" aria-haspopup="menu" aria-expanded="false" aria-label="React">🙂</button></span>
       <button type="button" id="net-invite" data-i18n="playWithOthers">PLAY WITH OTHERS</button>
       <span id="net-pill" class="hud-pill" hidden>
-        <span id="net-status">off</span>
+        <span id="net-status" role="button" tabindex="0">off</span>
         <button type="button" id="net-rejoin" data-i18n="rejoin" hidden>REJOIN</button>
         <!-- Back to a game on this screen. In a match it takes two taps, like
              RESTART ROUND; anywhere else there is nothing to lose. -->
@@ -1513,11 +1567,11 @@
 
   <!-- Match setup. These are the same controls that used to sit in the rail,
        moved rather than rebuilt, so nothing wired to them had to change. -->
-  <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-    <div id="settings-panel">
-      <div id="settings-head">
-        <div id="settings-title" data-i18n="settings">SETTINGS</div>
-        <button type="button" id="settings-close" aria-label="Close settings">✕</button>
+  <div id="settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div id="settings-panel" class="modal-panel">
+      <div id="settings-head" class="modal-head">
+        <div id="settings-title" class="modal-title" data-i18n="settings">SETTINGS</div>
+        <button type="button" id="settings-close" class="modal-close" aria-label="Close settings">✕</button>
       </div>
       <div id="settings-grid">
         <div class="ctrl-group">
@@ -1588,22 +1642,8 @@
         </div>
         <div class="ctrl-group" id="online-group">
           <div class="ctrl-label"><span data-i18n="online">ONLINE</span></div>
-          <div class="online-row">
-            <!-- What the other players see on this tank's card. Short enough
-                 to fit a card with six across a phone (see MAX_NAME_LEN). -->
-            <input type="text" id="online-name" maxlength="10" autocomplete="nickname"
-                   spellcheck="false" placeholder="NAME" aria-label="Your name">
-            <button type="button" id="online-host" data-i18n="hostGame">HOST</button>
-            <input type="text" id="online-code" maxlength="4" autocomplete="off"
-                   autocapitalize="characters" spellcheck="false"
-                   placeholder="CODE" aria-label="Room code">
-            <button type="button" id="online-join" data-i18n="joinGame">JOIN</button>
-            <!-- Beside the buttons rather than out at the end of the label row:
-                 what the connection is doing is about these controls, and a
-                 status pinned to the opposite edge of the panel read as
-                 belonging to nothing. -->
-            <span id="online-status" role="status">off</span>
-          </div>
+          <!-- Hosting and joining have a dialog of their own (#online-modal). -->
+          <button type="button" id="open-online"><span data-i18n="playOnline">PLAY ONLINE</span> ›</button>
         </div>
         <div class="ctrl-group" id="restart-group">
           <div class="ctrl-label" data-i18n="round">ROUND</div>
@@ -1630,6 +1670,65 @@
         <span data-i18n="version">VERSION</span>
         <span id="build-info">—</span>
       </div>
+    </div>
+  </div>
+
+  <!-- Playing online, apart from Settings (see "Dialogs" and
+       refreshOnlineDialog in the script). It changes with the connection: the
+       way in when there is none, the room once there is. The controls keep the
+       ids they had when they sat in Settings. -->
+  <div id="online-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="online-title">
+    <div class="modal-panel">
+      <div class="modal-head">
+        <div id="online-title" class="modal-title" data-i18n="playOnline">PLAY ONLINE</div>
+        <button type="button" id="online-close" class="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div id="online-way-in">
+        <div class="ctrl-group">
+          <div class="ctrl-label" data-i18n="yourNameTitle">YOUR NAME</div>
+          <!-- What the other players see on this tank's card. Short enough
+               to fit a card with six across a phone (see MAX_NAME_LEN). -->
+          <input type="text" id="online-name" maxlength="10" autocomplete="nickname"
+                 spellcheck="false" placeholder="NAME" aria-label="Your name">
+        </div>
+        <div class="ctrl-group">
+          <div class="ctrl-label" data-i18n="hostTitle">HOST A GAME</div>
+          <div class="online-row">
+            <!-- The table size for a room you host. Apart from TANKS, which is
+                 the local game's: hosting a four no longer changes that. -->
+            <select id="online-seats" aria-label="Players">
+              <option value="2" selected>2 Players</option>
+              <option value="3">3 Players</option>
+              <option value="4">4 Players</option>
+              <option value="5">5 Players</option>
+              <option value="6">6 Players</option>
+            </select>
+            <button type="button" id="online-host" data-i18n="hostGame">HOST</button>
+          </div>
+        </div>
+        <div class="ctrl-group">
+          <div class="ctrl-label" data-i18n="joinTitle">JOIN A GAME</div>
+          <div class="online-row">
+            <input type="text" id="online-code" maxlength="4" autocomplete="off"
+                   autocapitalize="characters" spellcheck="false"
+                   placeholder="CODE" aria-label="Room code">
+            <button type="button" id="online-join" data-i18n="joinGame">JOIN</button>
+          </div>
+        </div>
+      </div>
+      <div id="online-room-view" hidden>
+        <div class="ctrl-group">
+          <div class="ctrl-label" data-i18n="roomTitle">ROOM</div>
+          <div id="online-room-code">—</div>
+          <div id="online-share" data-i18n="shareCode">Share this code with your friends</div>
+        </div>
+        <ul id="online-players" hidden></ul>
+        <div class="online-row">
+          <button type="button" id="online-rejoin" data-i18n="rejoin" hidden>REJOIN</button>
+          <button type="button" id="online-leave"><span class="nl-idle" data-i18n="leaveGame">LEAVE</span><span class="nl-sure" data-i18n="leaveSure">SURE?</span></button>
+        </div>
+      </div>
+      <span id="online-status" role="status">off</span>
     </div>
   </div>
 </div>
@@ -1688,7 +1787,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v77';
+  const BUILD = 'v78';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1769,6 +1868,14 @@ if ('serviceWorker' in navigator) {
   const onlineJoinBtn = document.getElementById('online-join');
   const onlineCodeInput = document.getElementById('online-code');
   const onlineNameInput = document.getElementById('online-name');
+  const onlineSeatsSelect = document.getElementById('online-seats');
+  const onlineWayIn = document.getElementById('online-way-in');
+  const onlineRoomView = document.getElementById('online-room-view');
+  const onlineRoomCode = document.getElementById('online-room-code');
+  const onlineShare = document.getElementById('online-share');
+  const onlinePlayers = document.getElementById('online-players');
+  const onlineRejoinBtn = document.getElementById('online-rejoin');
+  const onlineLeaveBtn = document.getElementById('online-leave');
 
   // ---------- Language ----------
   // Theme names are keyed by their English name so the THEMES table stays the
@@ -1807,6 +1914,9 @@ if ('serviceWorker' in navigator) {
       roomCode: 'CODE', roomCodeLabel: 'Room code', rejoin: 'REJOIN',
       yourName: 'NAME', yourNameLabel: 'Your name',
       playWithOthers: 'PLAY WITH OTHERS',
+      playOnline: 'PLAY ONLINE', yourNameTitle: 'YOUR NAME', hostTitle: 'HOST A GAME',
+      joinTitle: 'JOIN A GAME', roomTitle: 'ROOM', shareCode: 'Share this code with your friends',
+      playersLabel: 'Players', closeOnline: 'Close', tableFilling: '{n}/{total} players here — waiting for the rest', opYou: 'YOU', opLeft: 'LEFT',
       netOffline: 'off', netConnecting: 'connecting…', netRejoining: 'reconnecting…', netWaiting: 'code {code} — {n}/{total}',
       netPlaying: 'room {code}', netEnded: '{name} left',
       netTheirTurn: '{name} — THEIR TURN', netYouAre: 'you are {name}',
@@ -1855,6 +1965,9 @@ if ('serviceWorker' in navigator) {
       roomCode: 'KOD', roomCodeLabel: 'Oda kodu', rejoin: 'YENİDEN BAĞLAN',
       yourName: 'İSİM', yourNameLabel: 'Adın',
       playWithOthers: 'ÇEVRİMİÇİ OYNA',
+      playOnline: 'ÇEVRİMİÇİ OYNA', yourNameTitle: 'ADIN', hostTitle: 'OYUN KUR',
+      joinTitle: 'OYUNA KATIL', roomTitle: 'ODA', shareCode: 'Bu kodu arkadaşlarınla paylaş',
+      playersLabel: 'Oyuncular', closeOnline: 'Kapat', tableFilling: '{n}/{total} oyuncu burada — diğerleri bekleniyor', opYou: 'SEN', opLeft: 'AYRILDI',
       netOffline: 'bağlı değil', netConnecting: 'bağlanıyor…', netRejoining: 'yeniden bağlanıyor…', netWaiting: 'kod {code} — {n}/{total}',
       netPlaying: 'oda {code}', netEnded: '{name} ayrıldı',
       netTheirTurn: '{name} — SIRA ONDA', netYouAre: 'sen {name}',
@@ -1966,12 +2079,14 @@ if ('serviceWorker' in navigator) {
     relabel(difficultySelect, ['easy', 'medium', 'hard', 'brutal']);
     relabel(themeSelect, ['randomTheme', ...THEMES.map(th => th.name)]);
     relabel(sizeSelect, ['sizeLarge', 'sizeActual']);
+    relabel(onlineSeatsSelect, ['tanks2', 'tanks3', 'tanks4', 'tanks5', 'tanks6']);
     relabel(reactionsSelect, ['reactOn', 'reactOff']);
     relabelReactions();
     const aria = { 'zoom-in': 'zoomIn', 'zoom-out': 'zoomOut', 'zoom-fit': 'zoomFit',
                    'angle-left': 'aimLeft', 'angle-right': 'aimRight',
                    'power-dec': 'powerDown', 'power-inc': 'powerUp',
-                   'settings-close': 'closeSettings' };
+                   'settings-close': 'closeSettings', 'online-close': 'closeOnline',
+                   'online-seats': 'playersLabel' };
     for (const id in aria) document.getElementById(id).setAttribute('aria-label', txt(aria[id]));
     // The room code field carries its label in attributes, which the data-i18n
     // sweep above cannot see: both strings existed in Turkish but nothing ever
@@ -2978,6 +3093,7 @@ if ('serviceWorker' in navigator) {
     playersRow.dataset.count = tanks.length;
     refreshCardNames();
     refreshReactUi();
+    if (onlineIsOpen()) refreshOnlineDialog();   // who is at the table, as it changes
     for (let i = 0; i < MAX_PLAYERS; i++) {
       const t = tanks[i];
       cards[i].hidden = !t;
@@ -3304,24 +3420,58 @@ if ('serviceWorker' in navigator) {
     });
   }
 
-  // ---------- Settings dialog ----------
-  // Setup lives here rather than in the rail; the controls inside it are the
-  // originals, so opening the dialog is all this has to do.
+  // ---------- Dialogs ----------
+  // Two: Settings (the game's own setup and preferences) and Play online
+  // (hosting, joining, the room). One is open at a time; opening one closes the
+  // other. The controls inside are the originals, so opening a dialog is all
+  // this has to do, and while either is up the keyboard belongs to it.
   const settingsModal = document.getElementById('settings-modal');
   const settingsBtn = document.getElementById('settings-btn');
   const settingsCloseBtn = document.getElementById('settings-close');
-  const settingsIsOpen = () => settingsModal.classList.contains('show');
+  const onlineModal = document.getElementById('online-modal');
+  const onlineCloseBtn = document.getElementById('online-close');
+  const openOnlineBtn = document.getElementById('open-online');
+  let openModal = null, modalOpener = null;
 
-  function openSettings() {
-    settingsModal.classList.add('show');
-    settingsCloseBtn.focus();
+  function dialogOpen() { return openModal !== null; }
+  const settingsIsOpen = () => openModal === settingsModal;
+  const onlineIsOpen = () => openModal === onlineModal;
+
+  /** Open `modal`, focus `focusEl`, and remember what to hand focus back to. */
+  function openDialog(modal, focusEl, opener) {
+    if (openModal && openModal !== modal) openModal.classList.remove('show');
+    modal.classList.add('show');
+    openModal = modal;
+    modalOpener = opener || null;
+    if (focusEl && focusEl.focus) focusEl.focus();
   }
-  function closeSettings() {
-    settingsModal.classList.remove('show');
-    settingsBtn.focus();
+  function closeDialog() {
+    if (!openModal) return;
+    openModal.classList.remove('show');
+    openModal = null;
+    const back = modalOpener;
+    modalOpener = null;
+    if (back && back.focus) back.focus();
   }
+
+  function openSettings() { openDialog(settingsModal, settingsCloseBtn, settingsBtn); }
+  function closeSettings() { if (settingsIsOpen()) closeDialog(); }
+
+  /**
+   * The online dialog, from PLAY WITH OTHERS, the status pill or Settings. It
+   * starts on your name if there is none yet, on HOST otherwise.
+   */
+  function openOnline(opener) {
+    refreshOnlineDialog();
+    const idle = !onlineWayIn.hidden;
+    const first = idle ? (onlineNameInput.value ? onlineHostBtn : onlineNameInput) : onlineCloseBtn;
+    openDialog(onlineModal, first, opener && opener.focus ? opener : netInviteBtn);
+  }
+  function closeOnline() { if (onlineIsOpen()) closeDialog(); }
 
   settingsBtn.addEventListener('click', openSettings);
+  openOnlineBtn.addEventListener('click', () => { closeDialog(); openOnline(settingsBtn); });
+  onlineCloseBtn.addEventListener('click', closeOnline);
 
   // Restarting the round from Settings. It throws away a round in progress, so
   // it takes two taps: the first arms it and asks, the second — within
@@ -3363,23 +3513,23 @@ if ('serviceWorker' in navigator) {
     closeSettings();   // the point was to see the new board
   }
   roundRestartBtn.addEventListener('click', onRoundRestartClicked);
-  // The invitation is a shortcut to the same panel: hosting and joining live
-  // there, and this saves hunting for them.
-  netInviteBtn.addEventListener('click', openSettings);
+  // The invitation and the status pill both open the online dialog.
+  netInviteBtn.addEventListener('click', () => openOnline(netInviteBtn));
+  netStatusEl.addEventListener('click', () => openOnline(netStatusEl));
   settingsCloseBtn.addEventListener('click', closeSettings);
   // The dimmed backdrop closes; a click that lands inside the panel does not.
-  settingsModal.addEventListener('click', (e) => {
-    if (e.target === settingsModal) closeSettings();
+  for (const modal of [settingsModal, onlineModal]) {
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeDialog(); });
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && dialogOpen()) { closeDialog(); e.preventDefault(); }
   });
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && settingsIsOpen()) { closeSettings(); e.preventDefault(); }
-  });
-
-  window.addEventListener('keydown', (e) => {
-    // While the dialog is up, the keyboard belongs to it: SPACE would
-    // otherwise fire the gun from behind an open settings panel.
-    if (settingsIsOpen()) return;
+    // While a dialog is up, the keyboard belongs to it: SPACE would otherwise
+    // fire the gun from behind an open panel.
+    if (dialogOpen()) return;
     // The same lock as the on-screen controls (syncControlsFromTank): a seat
     // somebody else drives in a match is no more ours to aim than a CPU's.
     if (state !== 'AIMING' || isAi(currentPlayer) || netRemoteSeat(currentPlayer)) return;
@@ -6646,6 +6796,11 @@ if ('serviceWorker' in navigator) {
       .map(seat => online.seatNames[seat] || txt('playerName', { n: seat + 1 })).join(', ');
   }
 
+  /** Players in the lobby, this one included (see netStatusText). */
+  function netHereCount() {
+    return (online.host ? netReadyIds().length : netPeerIds.length) + 1;
+  }
+
   function netStatusText() {
     if (online.error) return online.error;
     if (online.status === 'connecting') {
@@ -6656,8 +6811,7 @@ if ('serviceWorker' in navigator) {
       // can see a 4-player game filling up.
       // The host counts players who have said hello, since those are the ones
       // it can deal; a guest only sees the sockets.
-      const here = online.host ? netReadyIds().length : netPeerIds.length;
-      return txt('netWaiting', { code: online.room, n: here + 1, total: netSeatCount() });
+      return txt('netWaiting', { code: online.room, n: netHereCount(), total: netSeatCount() });
     }
     if (online.status === 'playing') {
       // Who left, not just that somebody did: with four seats "opponent left"
@@ -6704,7 +6858,12 @@ if ('serviceWorker' in navigator) {
     netRejoinBtn.hidden = !netCanRejoin();
     if (!netPlaying()) disarmLeave();   // nothing left to lose: one tap again
     refreshRestartUi();
+    refreshOnlineDialog();
+    // The table has filled and been dealt: the dialog steps aside for the board.
+    if (online.status === 'playing' && lastNetStatus !== 'playing' && onlineIsOpen()) closeOnline();
+    lastNetStatus = online.status;
   }
+  let lastNetStatus = 'offline';
 
   function netSend(kind, extra) {
     if (!online.ws || online.ws.readyState !== 1) return;
@@ -7160,13 +7319,13 @@ if ('serviceWorker' in navigator) {
   });
 
   /**
-   * How many seats this match is for. The host's TANKS selector decides it, so
-   * a 3- or 4-player game is set up the same way a local one is; guests adopt
-   * whatever the `start` message dealt.
+   * How many seats this match is for. The host's PLAYERS picker in the online
+   * dialog decides it — apart from TANKS, so hosting a four does not change the
+   * local game — and guests adopt whatever the `start` message dealt.
    */
   function netSeatCount() {
     if (netPlaying() && online.seats.length) return online.seats.length;
-    const n = parseInt(countSelect.value, 10);
+    const n = parseInt(onlineSeatsSelect.value, 10);
     return Math.min(MAX_PLAYERS, Math.max(2, isFinite(n) ? n : 2));
   }
   function netOtherIds() { return netReadyIds().slice(0, netSeatCount() - 1); }
@@ -7431,20 +7590,29 @@ if ('serviceWorker' in navigator) {
   // arms it and asks, the second — within the same window — leaves. Out of a
   // match there is nothing to lose, so one tap does it.
   let leaveArmTimer = null;
+  // There are two LEAVE buttons, the pill's and the online dialog's; they arm
+  // and stand down together, so either answers the other's question.
+  const leaveBtns = [netLeaveBtn, onlineLeaveBtn];
   function disarmLeave() {
     clearTimeout(leaveArmTimer);
     leaveArmTimer = null;
-    netLeaveBtn.classList.remove('armed');
+    leaveBtns.forEach(b => b.classList.remove('armed'));
   }
   function onLeaveClicked() {
     if (netPlaying() && !leaveArmTimer) {
       leaveArmTimer = setTimeout(disarmLeave, RESTART_ARM_MS);
-      netLeaveBtn.classList.add('armed');
+      leaveBtns.forEach(b => b.classList.add('armed'));
       return;
     }
     netLeave();
   }
   netLeaveBtn.addEventListener('click', onLeaveClicked);
+  // From the dialog, leaving also closes it: LEAVE is the way back to the game
+  // on this screen, and that is what is behind the dialog.
+  onlineLeaveBtn.addEventListener('click', () => {
+    onLeaveClicked();
+    if (online.status === 'offline') closeOnline();
+  });
 
   // In the two-rail landscape layout the right rail holds the aim, the weapons
   // and FIRE, and had the online status and the reaction button squeezed in
@@ -7475,11 +7643,78 @@ if ('serviceWorker' in navigator) {
   }
 
   // Same door as JOIN, minus the typing: the room we were in is remembered.
-  netRejoinBtn.addEventListener('click', () => {
+  function onRejoinClicked() {
     if (!netCanRejoin()) return;
     online.error = null;
     netConnect(online.room);
+  }
+  netRejoinBtn.addEventListener('click', onRejoinClicked);
+  onlineRejoinBtn.addEventListener('click', onRejoinClicked);
+
+  // PLAYERS: the table size for a room you host, remembered like the name.
+  const SEATS_KEY = 'barrage.onlineSeats';
+  try {
+    const stored = localStorage.getItem(SEATS_KEY);
+    if ([...onlineSeatsSelect.options].some(o => o.value === stored)) onlineSeatsSelect.value = stored;
+  } catch { /* no storage */ }
+  onlineSeatsSelect.addEventListener('change', () => {
+    try { localStorage.setItem(SEATS_KEY, onlineSeatsSelect.value); } catch { /* not fatal */ }
+    refreshOnlineUi();
+    // A host still waiting can make the table smaller than who is already
+    // here: then it is full, and dealt.
+    if (online.host && online.status === 'waiting') netStartMatch();
   });
+  netStatusEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOnline(netStatusEl); }
+  });
+
+  /**
+   * The online dialog follows the connection. No connection: the way in —
+   * name, HOST with its table size, CODE and JOIN. Anything else: the room —
+   * its code large, "share this" while it fills, who is at the table once it is
+   * dealt, and REJOIN and LEAVE. The status line under both says what is
+   * happening, and is left out when there is nothing to say.
+   */
+  function refreshOnlineDialog() {
+    const idle = online.status === 'offline' && !online.rejoin;
+    onlineWayIn.hidden = !idle;
+    onlineRoomView.hidden = idle;
+    onlineStatus.hidden = idle && !online.error;
+    // The table size is the host's to choose, and theirs to change until it fills.
+    onlineSeatsSelect.disabled = !(idle || (online.host && online.status === 'waiting'));
+    if (idle) return;
+    onlineRoomCode.hidden = !online.room;
+    onlineRoomCode.textContent = online.room || '';
+    onlineShare.hidden = online.status !== 'waiting';
+    // The code is right above: while the table fills, say who is here instead.
+    if (online.status === 'waiting' && !online.error) {
+      onlineStatus.textContent = txt('tableFilling', { n: netHereCount(), total: netSeatCount() });
+    }
+    onlineRejoinBtn.hidden = !netCanRejoin();
+    const seated = netPlaying() && tanks.length > 0;
+    onlinePlayers.hidden = !seated;
+    onlinePlayers.textContent = '';
+    if (!seated) return;
+    tanks.forEach((t, i) => {
+      const li = document.createElement('li');
+      const dot = document.createElement('span');
+      dot.className = 'op-dot';
+      dot.style.background = t.color;
+      const name = document.createElement('span');
+      name.className = 'op-name';
+      name.textContent = playerName(i);
+      const tag = document.createElement('span');
+      tag.className = 'op-tag';
+      tag.textContent = i === online.seat ? txt('opYou')
+        : online.vacancies.includes(i) ? txt('opLeft')
+        : netSeatIsAi(i) ? txt('cpuBadge')
+        : '';
+      li.appendChild(dot);
+      li.appendChild(name);
+      li.appendChild(tag);
+      onlinePlayers.appendChild(li);
+    });
+  }
 
   onlineHostBtn.addEventListener('click', () => netConnect(null));
   onlineJoinBtn.addEventListener('click', () => {
@@ -7787,7 +8022,7 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('keydown', (e) => {
     const tag = e.target && e.target.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    if (settingsIsOpen() || !canReact()) return;
+    if (dialogOpen() || !canReact()) return;
     if (e.key === 'e' || e.key === 'E') {
       trayOpen() ? closeTray() : openTray();
       e.preventDefault();
@@ -8068,7 +8303,10 @@ if ('serviceWorker' in navigator) {
     netPlaying, NET_PROTOCOL, netNow, netReceive, netClockSample,
     setSocketFactory(fn) { socketFactory = fn; },
     el2: { onlineHostBtn, onlineJoinBtn, onlineCodeInput, onlineNameInput, onlineStatus,
-           netPill, netStatusEl, netRejoinBtn, netInviteBtn, netLeaveBtn },
+           netPill, netStatusEl, netRejoinBtn, netInviteBtn, netLeaveBtn,
+           onlineSeatsSelect, onlineModal, onlineWayIn, onlineRoomView, onlineRoomCode, onlineShare,
+           onlinePlayers, onlineRejoinBtn, onlineLeaveBtn, openOnlineBtn, onlineCloseBtn },
+    dialogOpen, settingsIsOpen, onlineIsOpen, openOnline, closeDialog, refreshOnlineDialog,
     syncControlsFromTank, updateHUD, nudge,
     aimFromPull, pullReach, canvas, get aimDrag() { return aimDrag; },
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,

@@ -204,7 +204,7 @@ test('the host restarts with a seat empty, and holds it for its player', () => {
 
 test('a guest learns which seats a restart left empty', () => {
   const host = load(), a = load();
-  host.g.el.countSelect.value = '3';
+  host.g.el2.onlineSeatsSelect.value = '3';
   const hs = connect(host);
   hs.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
   hs.deliver({ t: 'peer', id: 2, name: '' });

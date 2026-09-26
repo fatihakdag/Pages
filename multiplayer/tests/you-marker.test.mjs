@@ -32,7 +32,7 @@ const connect = (h, room) => {
 /** A live match of `seats`: the host, one guest (id 2), and the sockets. */
 function liveMatch(seats = 2) {
   const host = load(), guest = load();
-  host.g.el.countSelect.value = String(seats);
+  host.g.el2.onlineSeatsSelect.value = String(seats);
   const hs = connect(host), gs = connect(guest, 'ABCD');
   hs.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
   gs.deliver({ t: 'joined', room: 'ABCD', id: 2, host: 1, peers: [{ id: 1, name: '' }] });

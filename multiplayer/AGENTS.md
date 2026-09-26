@@ -514,7 +514,7 @@ Other things worth knowing:
 - `online.vacancies` is a list. It was a single seat, which orphaned the earlier
   one whenever two players were away at once — nobody could fill it and its tank
   sat there played by nothing.
-- **Table size is the host's TANKS selector.** The room waits until that many
+- **Table size is the host's PLAYERS picker.** The room waits until that many
   players are present before dealing — the lobby counts up, `code AB12 — 3/4` —
   and anyone left over when it fills is told rather than parked in a lobby that
   never starts. "Present" means they have sent their `ready`
@@ -569,6 +569,26 @@ Other things worth knowing:
   error, leaves the local game on screen alone. A guest still in the lobby
   when the host goes re-sends its `ready`, because the new host deals only to
   players it has heard from.
+- **Playing online has its own dialog** (`#online-modal`), apart from
+  Settings: PLAY WITH OTHERS and the status pill open it, and Settings keeps
+  only a PLAY ONLINE › button to it. Settings is the game's own setup and
+  preferences — TANKS, OPPONENTS, CPU LEVEL, THEME, TANK SIZE, REACTIONS,
+  ROUND, SOUND FX, LANGUAGE. Both dialogs share one look (`.modal`) and one
+  mechanism (`openDialog` / `closeDialog`): one open at a time, Escape and the
+  backdrop close it, focus goes back to what opened it, and while either is up
+  the keyboard belongs to it (`dialogOpen()`), so SPACE never fires from
+  behind one. `refreshOnlineDialog()` makes it follow the connection: with none
+  it is the way in — name, HOST with **PLAYERS**, CODE and JOIN — and otherwise
+  the room: its code large, "share this code" and how many are here while the
+  table fills (`tableFilling`; the pill keeps the code in its line), who is at
+  the table once it is dealt (with YOU, CPU for a stand-in, LEFT for an empty
+  chair), REJOIN and LEAVE. It closes itself when the table is dealt, and its
+  LEAVE arms together with the pill's and closes it. The controls kept the ids
+  they had in Settings.
+- **PLAYERS is the table size** for a room you host (`#online-seats`, stored as
+  `barrage.onlineSeats`), read by `netSeatCount()`. It used to be the host's
+  TANKS, so hosting a four changed the local game too. A host still waiting
+  can shrink it and the table deals if it is now full; once dealt it is fixed.
 - **Restarting is the host's call.** Settings has RESTART ROUND (two taps: the
   first arms it for `RESTART_ARM_MS`). Offline it is `resetGame()`; in a match
   it is enabled only for the host, who deals the new board with
