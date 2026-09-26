@@ -567,3 +567,16 @@ test('a second finger takes the gesture back for the camera', () => {
   release(g, 2, 500, 400);
   assert.equal(g.state, 'AIMING', 'nor does letting the pinch go');
 });
+
+test('a tank with a sliver of health left never reads 0; only a destroyed one does', () => {
+  const { g } = loadFlat();
+  g.tanks[1].hp = 0.3;       // fractional damage left it just alive
+  g.updateHUD();
+  assert.equal(g.tanks[1].alive, true);
+  assert.equal(g.el.hpText[1].textContent, `1`);
+
+  g.tanks[1].hp = 0;
+  g.tanks[1].alive = false;
+  g.updateHUD();
+  assert.equal(g.el.hpText[1].textContent, `0`);
+});
