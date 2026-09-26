@@ -392,6 +392,16 @@
   .player-card.muted .card-mute { display: inline; }
   .player-card.can-mute { cursor: pointer; }
 
+  /* The reactions' own layer (see drawEmotes): over the game and the round-over
+     overlay alike, and never in the way of a tap. */
+  canvas#emote-layer {
+    display: block;
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    z-index: 21;
+    pointer-events: none;
+  }
   canvas#game {
     /* width/height are set in resize(), to keep the world aspect; inset+margin
        centres whatever size that came out as. */
@@ -1158,6 +1168,17 @@
     }
     #settings-btn { justify-content: center; }
     #net-pill { flex-wrap: wrap; justify-content: flex-start; }
+    /* The online status and the reaction button, moved here from over FIRE
+       by placeNetGroup() when there are two rails: first in the foot of the
+       left rail, above the clock and SETTINGS. */
+    #info-row > #net-group { order: 0; margin: 0; min-width: 0; align-self: stretch; }
+    /* The rail is too narrow for the button and the status side by side: they
+       stack, the button full width like SETTINGS below it. */
+    #info-row > #net-group #net-row { flex-direction: column; align-items: stretch; gap: 4px; }
+    #info-row > #net-group #react-ctl { display: flex; }
+    #info-row > #net-group #react-ctl[hidden] { display: none; }
+    #info-row > #net-group #react-btn { width: 100%; }
+    #info-row > #net-group #net-pill, #info-row > #net-group #net-invite { min-width: 0; }
 
     /* The world keeps its shape here too. Letting the wrap fill the row left
        the canvas centred inside it with black down both sides; taking the
@@ -1424,6 +1445,7 @@
       <p id="overlay-sub">Round over.</p>
       <button id="restart-btn" data-i18n="playAgain">Play Again</button>
     </div>
+    <canvas id="emote-layer" aria-hidden="true"></canvas>
   </div>
 
   <div id="controls">
@@ -1666,7 +1688,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v76';
+  const BUILD = 'v77';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1703,6 +1725,11 @@ if ('serviceWorker' in navigator) {
   };
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  // Reactions are drawn on a layer of their own over the battlefield, above
+  // the round-over overlay: the end of a round is when GG is said, and on the
+  // game canvas the overlay covered it. Same size and place as the game canvas.
+  const emoteLayer = document.getElementById('emote-layer');
+  const emoteCtx = emoteLayer && emoteLayer.getContext ? emoteLayer.getContext('2d') : null;
   const gameWrap = document.getElementById('game-wrap');
 
   const angleSlider = document.getElementById('angle-slider');
@@ -1791,7 +1818,7 @@ if ('serviceWorker' in navigator) {
       theme: 'THEME', randomTheme: 'Random',
       tankSize: 'TANK SIZE', sizeLarge: 'Large', sizeActual: 'Actual',
       reactions: 'REACTIONS', reactOn: 'On', reactOff: 'Off', react: 'React',
-      e_clap: 'Nice shot', e_fire: 'On fire', e_lol: 'LOL', e_whoa: 'Close one!',
+      e_clap: 'Nice shot', e_mad: 'Grr', e_lol: 'LOL', e_whoa: 'Close one!',
       e_taunt: 'Watch this', e_please: 'Please miss', e_rip: 'RIP', e_gg: 'GG',
       muteName: 'Mute {name}', unmuteName: 'Unmute {name}',
     },
@@ -1839,7 +1866,7 @@ if ('serviceWorker' in navigator) {
       theme: 'TEMA', randomTheme: 'Rastgele',
       tankSize: 'TANK BOYUTU', sizeLarge: 'Büyük', sizeActual: 'Gerçek',
       reactions: 'TEPKİLER', reactOn: 'Açık', reactOff: 'Kapalı', react: 'Tepki ver',
-      e_clap: 'Güzel atış', e_fire: 'Harika', e_lol: 'Komik', e_whoa: 'Az kalsın!',
+      e_clap: 'Güzel atış', e_mad: 'Hırs', e_lol: 'Komik', e_whoa: 'Az kalsın!',
       e_taunt: 'Sıra bende', e_please: 'Ne olur ıskala', e_rip: 'Elveda', e_gg: 'İyi oyundu',
       muteName: '{name} sustur', unmuteName: '{name} sesini aç',
       'Dusk Ridge': 'Alacakaranlık Sırtı', 'Salt Flats': 'Tuz Düzlükleri',
@@ -2102,6 +2129,12 @@ if ('serviceWorker' in navigator) {
     canvas.height = Math.round(viewH * DPR);
     canvas.style.width = viewW + 'px';
     canvas.style.height = viewH + 'px';
+    if (emoteLayer) {
+      emoteLayer.width = canvas.width;
+      emoteLayer.height = canvas.height;
+      emoteLayer.style.width = canvas.style.width;
+      emoteLayer.style.height = canvas.style.height;
+    }
     // With this transform every draw call below is in world units.
     worldTransform();
 
@@ -7413,6 +7446,34 @@ if ('serviceWorker' in navigator) {
   }
   netLeaveBtn.addEventListener('click', onLeaveClicked);
 
+  // In the two-rail landscape layout the right rail holds the aim, the weapons
+  // and FIRE, and had the online status and the reaction button squeezed in
+  // over FIRE as well. There they move to the left rail, above the clock and
+  // SETTINGS, where there is room. Two rails is the first query without the
+  // second: a tall wide screen stacks everything in one right-hand panel.
+  // Moved rather than copied, so there is one of each control to keep in step.
+  const railsMq = window.matchMedia
+    ? window.matchMedia('(orientation: landscape) and (max-height: 620px), (min-aspect-ratio: 8/5)') : null;
+  const tallWideMq = window.matchMedia
+    ? window.matchMedia('(min-aspect-ratio: 8/5) and (min-height: 621px)') : null;
+  const netGroup = document.getElementById('net-group');
+  const infoRow = document.getElementById('info-row');
+  let netInRail = false;   // where the markup puts it: in #controls, before FIRE
+  function twoRails() { return !!(railsMq && railsMq.matches && !(tallWideMq && tallWideMq.matches)); }
+  function placeNetGroup() {
+    const rail = twoRails();
+    if (rail === netInRail) return;
+    netInRail = rail;
+    if (rail) infoRow.insertBefore(netGroup, infoRow.firstChild);
+    else fireBtn.parentNode.insertBefore(netGroup, fireBtn);
+    placeTray();
+  }
+  for (const mq of [railsMq, tallWideMq]) {
+    if (!mq) continue;
+    if (mq.addEventListener) mq.addEventListener('change', placeNetGroup);
+    else if (mq.addListener) mq.addListener(placeNetGroup);
+  }
+
   // Same door as JOIN, minus the typing: the room we were in is remembered.
   netRejoinBtn.addEventListener('click', () => {
     if (!netCanRejoin()) return;
@@ -7438,12 +7499,12 @@ if ('serviceWorker' in navigator) {
   // from who the relay says sent it — a message cannot speak for someone else.
   // Only the multiplayer build has this.
   const EMOTES = [
-    { ch: '👏', key: 'e_clap' },  { ch: '🔥', key: 'e_fire' },
+    { ch: '👏', key: 'e_clap' },  { ch: '😡', key: 'e_mad' },
     { ch: '😂', key: 'e_lol' },   { ch: '😱', key: 'e_whoa' },
     { ch: '😈', key: 'e_taunt' }, { ch: '🙏', key: 'e_please' },
     { ch: '💀', key: 'e_rip' },   { ch: '🤝', key: 'e_gg' }
   ];
-  const EM = { CLAP: 0, FIRE: 1, LOL: 2, WHOA: 3, TAUNT: 4, PLEASE: 5, RIP: 6, GG: 7 };
+  const EM = { CLAP: 0, MAD: 1, LOL: 2, WHOA: 3, TAUNT: 4, PLEASE: 5, RIP: 6, GG: 7 };
   const EMOTE_SHOW_MS = 2600;   // a bubble's life over its tank
   const EMOTE_STACK = 3;        // bubbles per seat at once; a fourth pushes the oldest off
   // Sending: three in any five seconds. The relay cuts a socket off at 40
@@ -7565,11 +7626,21 @@ if ('serviceWorker' in navigator) {
     return { x: (t.x - camX) * k, y: (top - camY) * k };
   }
 
+  let emoteLayerDirty = false;
   function drawEmotes() {
     const now = performance.now();
     emotes = emotes.filter(m => now - m.at < EMOTE_SHOW_MS);
+    const ctx = emoteCtx;   // the layer, not the game canvas
+    if (!ctx) return;
+    if (emoteLayerDirty) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, emoteLayer.width, emoteLayer.height);
+      emoteLayerDirty = false;
+    }
     if (!emotes.length) return;
+    emoteLayerDirty = true;
     const R = 15, STEP = 34;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.save();
     ctx.font = `20px ${EMOTE_FONT}`;
     ctx.textAlign = 'center';
@@ -7820,7 +7891,8 @@ if ('serviceWorker' in navigator) {
   // fact, the way a person would, and cancelled by a new round. Its dice are
   // its own (reactRandom), so reacting never shifts the AI's aim.
   const CPU_EMOTE_GAP_MS = 6000;
-  const CPU_EMOTE_ODDS = { taunt: 0.5, hurt: 0.35, rip: 0.7, selfHit: 0.5, laugh: 0.3, gg: 0.8, answer: 0.45 };
+  const CPU_EMOTE_ODDS = { taunt: 0.5, hurt: 0.35, rip: 0.7, selfHit: 0.5, laugh: 0.3,
+                           won: 0.8, lost: 0.7, answer: 0.45 };
   let cpuEmoteAt = -Infinity, cpuEmoteToken = 0;
   let reactRandom = seededRandom(Date.now() >>> 0);
 
@@ -7844,8 +7916,16 @@ if ('serviceWorker' in navigator) {
     const cpus = tanks.map((_, i) => i).filter(i => isAi(i));
     if (!cpus.length) return;
     if (ev.over) {
-      const who = isAi(ev.winner) ? ev.winner : cpus[0];
-      cpuEmote(who, EM.GG, CPU_EMOTE_ODDS.gg);
+      if (isAi(ev.winner)) {
+        // A CPU that wins laughs about it as often as it is gracious.
+        cpuEmote(ev.winner, reactRandom() < 0.5 ? EM.LOL : EM.GG, CPU_EMOTE_ODDS.won);
+      } else {
+        // One that loses mostly sulks — mad, or dead — and now and then takes
+        // it well. It is the CPU that shot finished off, if one was.
+        const last = ev.hits.find(h => h.killed && isAi(h.seat));
+        const r = reactRandom();
+        cpuEmote(last ? last.seat : cpus[0], r < 0.4 ? EM.MAD : r < 0.8 ? EM.RIP : EM.GG, CPU_EMOTE_ODDS.lost);
+      }
       return;
     }
     const killed = ev.hits.find(h => h.killed && isAi(h.seat));
@@ -7940,6 +8020,7 @@ if ('serviceWorker' in navigator) {
   initTheme();
   initSizePref();
   initReactions();
+  placeNetGroup();
   initSetup();
   refreshOpponentUi();
   resetGame();
