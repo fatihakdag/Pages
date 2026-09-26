@@ -119,8 +119,12 @@ turns back: past the far edge the route is over. It stays up after its drop, so
 shoot it. `firstContact()` takes a `craft` argument because a bomb must not hit
 the jet it fell from. A shot-down jet keeps most of its forward speed
 (`JET.drag`), holds the turn in `EXPLODING` like a helicopter wreck, and lands
-through `heliCrash()`, so it crushes a tank it comes down on. One jet at a time;
-the CPU never calls one in.
+through `heliCrash()`, so it crushes a tank it comes down on. One jet at a time. Hard and Brutal CPUs call one in
+now and then (`aiCallJet`, never with an aircraft already up): from their own
+side, at the weakest enemy. The route being fixed is what lets them aim it —
+`planJetDrop` tries every step of the pass through `predictBombX`, the bombs'
+own integrator, for the moment that puts the middle bomb on the target, and
+`aiJetDrop` presses FIRE up to `jetJitter` seconds either side of it.
 
 It looks and sounds like an F-22. `drawJet()` draws the side profile in units of
 the jet's length (chined nose, gold-tinted canopy, caret intake, twin canted
