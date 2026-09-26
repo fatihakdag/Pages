@@ -188,3 +188,31 @@ test('the CPU never reaches for the guided missile', () => {
   assert.ok(!picked.has('missile'), `CPU picked: ${[...picked].join(', ')}`);
   assert.ok(picked.size > 1, 'it should still vary its weapon');
 });
+
+test('brutal out-shoots hard but is not a sure thing', () => {
+  const h = cpuGame();
+  const { g } = h;
+  const R = g.WEAPONS.standard.radius;
+  const rate = (difficulty) => {
+    h.seedRandom(11);
+    let hits = 0, n = 0;
+    for (const pos of [[150, 500], [200, 700], [300, 650]]) {
+      for (let k = 0; k < 10; k++) {
+        h.placeTanksAt(pos);
+        g.currentPlayer = 1;
+        const shot = g.chooseAiShot(difficulty);
+        const a = shot.angle * Math.PI / 180;
+        const landing = g.predictLandingX(
+          g.tanks[1].x, g.groundHeightAt(g.tanks[1].x) - g.TANK_H - 20 * Math.sin(a),
+          shot.angle, shot.power, 0);
+        if (Math.abs(landing - g.tanks[0].x) < R) hits++;
+        n++;
+      }
+    }
+    return hits / n;
+  };
+  const hard = rate('hard');
+  const brutal = rate('brutal');
+  assert.ok(brutal > hard, `brutal (${brutal}) should land in range more often than hard (${hard})`);
+  assert.ok(brutal < 1, 'brutal should still miss now and then');
+});
