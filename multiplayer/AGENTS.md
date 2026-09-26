@@ -215,7 +215,9 @@ old Android too.
   helicopter or jet shot down, and `shotLanded()` in `finishShot()` hands them
   to `classifyShot()` (pure) — hits, kills, a self-hit, a near miss
   (`NEAR_MISS`), a wild one (`WILD_MISS`), the round over. It reacts with 💀
-  destroyed, 😈 after hitting you, 😱 when hit and 😂 at a wild miss. At the
+  destroyed, 😈 after hitting you, 😱 when hit lightly, 😡 most of the time
+  (`CPU_EMOTE_ODDS.mad`) when a hit takes `CPU_BIG_HIT` (25) or more off it —
+  that one ignores the gap — and 😂 at a wild miss. At the
   end of a round a CPU that won laughs (😂) as often as it says 🤝, and one
   that lost is mostly 😡 or 💀, now and then 🤝 — the CPU the last shot
   finished off, if one was. It may answer your 😈, 👏 or 🤝 (`cpuAnswer()`). One per shot at most, never within
@@ -290,6 +292,15 @@ it touches lives in `worldTransform()` and `eventToWorld()`.
   useless, because firing loses the shell immediately.
 - A deliberate pan sets `camPanned` and owns the camera until the turn changes,
   so following never yanks the view away from someone looking on purpose.
+- **Your own view comes back on your turn.** Zoomed in, following the shell
+  and then the other seats used to leave you, on your next turn, centred on
+  your own tank rather than on the view you had framed to aim. The view is
+  saved when a person at this screen fires (`camSaveView`, per seat, so
+  players sharing a screen keep their own) and eased back to when their turn
+  starts (`camTurnStarted` → `camEaseBack`, from `camFollow`): the zoom, and
+  the position too if they had panned it themselves — otherwise following
+  their tank is the view, as it was. Any zoom or pan while it eases back
+  cancels it, and a new round forgets the saved views.
 
 ### Tank size
 

@@ -1819,7 +1819,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v80';
+  const BUILD = 'v81';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2320,6 +2320,7 @@ if ('serviceWorker' in navigator) {
 
   /** Zoom to `z` while pinning the world point under (fx, fy), each 0..1 of the canvas. */
   function camZoomTo(z, fx = 0.5, fy = 0.5) {
+    camReturn = null;   // only ever called for the player's own zooming
     const worldX = camX + fx * camViewW();
     const worldY = camY + fy * camViewH();
     camZoom = Math.min(CAM_MAX, Math.max(CAM_MIN, z));
@@ -2336,8 +2337,62 @@ if ('serviceWorker' in navigator) {
     camClamp();
   }
 
+  // Each human's own view, put back when their turn comes round. Zoomed in,
+  // the camera follows the shell and then whoever is aiming, so you used to
+  // come back to a view centred on your own tank rather than the one you had
+  // framed to aim — usually with the target in it. It is saved when you fire
+  // (camSaveView), per seat so players sharing a screen each keep theirs, and
+  // eased back to at the start of your next turn (camTurnStarted, camFollow).
+  // Touching the camera while it eases back leaves the view where you put it,
+  // and a new round forgets them all: its terrain is not the one they framed.
+  const seatViews = new Map();   // seat -> { zoom, x, y, panned }
+  let camReturn = null;          // the view being eased back to
+
+  /** A seat played by a person at this screen. */
+  function localHumanSeat(seat) { return netPlaying() ? seat === online.seat : !isAi(seat); }
+  function camSaveView(seat) { seatViews.set(seat, { zoom: camZoom, x: camX, y: camY, panned: camPanned }); }
+  function camTurnStarted() {
+    camReturn = null;
+    const v = seatViews.get(currentPlayer);
+    if (v && state === 'AIMING' && localHumanSeat(currentPlayer)) camReturn = v;
+  }
+  function camForgetViews() { seatViews.clear(); camReturn = null; }
+
+  /**
+   * One frame of easing back to a saved view (camFollow calls it first). The
+   * zoom eases about the middle of the view; the position follows only if you
+   * had framed it yourself — otherwise following your tank, as you had it, is
+   * the view. True when following should sit this frame out.
+   */
+  function camEaseBack(dt) {
+    const r = camReturn;
+    if (!r) return false;
+    const k = Math.min(1, dt * 5);
+    const cx = camX + camViewW() / 2, cy = camY + camViewH() / 2;
+    camZoom += (r.zoom - camZoom) * k;
+    camX = cx - camViewW() / 2;
+    camY = cy - camViewH() / 2;
+    if (r.panned) {
+      camX += (r.x - camX) * k;
+      camY += (r.y - camY) * k;
+    }
+    const done = Math.abs(r.zoom - camZoom) < 0.005 &&
+      (!r.panned || (Math.abs(r.x - camX) < 0.5 && Math.abs(r.y - camY) < 0.5));
+    if (done) {
+      camZoom = r.zoom;
+      if (r.panned) { camX = r.x; camY = r.y; camPanned = true; }
+      camReturn = null;
+    }
+    camClamp();
+    refreshViewUi();
+    // A framed view owns the camera; otherwise following the tank goes on
+    // alongside the zoom.
+    return r.panned;
+  }
+
   /** Back to the whole battlefield. */
   function camFit() {
+    camReturn = null;
     camZoom = CAM_MIN; camX = 0; camY = 0; camPanned = false;
     camClamp();
     refreshViewUi();
@@ -2345,6 +2400,7 @@ if ('serviceWorker' in navigator) {
 
   /** Move the view by a screen-pixel delta. */
   function camPanByPixels(dxPx, dyPx) {
+    camReturn = null;   // the player moving the view themselves
     if (!viewW || !viewH) return;
     camX -= dxPx / viewW * camViewW();
     camY -= dyPx / viewH * camViewH();
@@ -3117,6 +3173,7 @@ if ('serviceWorker' in navigator) {
     overlay.classList.remove('show');
     markYou();
     reactionsNewRound();
+    camForgetViews();
     syncControlsFromTank();
     maybeAiTurn();
   }
@@ -3749,6 +3806,8 @@ if ('serviceWorker' in navigator) {
       heli: heliOut(),
       jet: jetOut()
     };
+    // The view this player aimed with, to come back to on their next turn.
+    if (!byAi && localHumanSeat(currentPlayer)) camSaveView(currentPlayer);
     let result = null;
     if (netWeDrive(currentPlayer)) {
       shot.ai = byAi;   // so nobody mistakes the CPU playing for the player returning
@@ -3933,6 +3992,7 @@ if ('serviceWorker' in navigator) {
     turnToken++;
     if (rollWind) showWind();
     camPanned = false; // a new turn releases the camera back to whoever is aiming
+    camTurnStarted();
     netResetTurnClock();
     updateHUD();
     syncControlsFromTank();
@@ -4050,6 +4110,7 @@ if ('serviceWorker' in navigator) {
       netApplyState(done.result, { force: true });
       turnToken++;
       camPanned = false; // a new turn releases the camera back to whoever is aiming
+      camTurnStarted();
       heliAnnounced = heliSignature();   // the result told everyone where it is
       netPlayAiTurn();
     } else {
@@ -5571,6 +5632,7 @@ if ('serviceWorker' in navigator) {
    * takes precedence until the turn changes — see camPanned.
    */
   function camFollow(dt) {
+    if (camEaseBack(dt)) return;
     if (camZoom <= CAM_MIN) return;
     let target = null;
     if (projectiles.length) {
@@ -7092,7 +7154,7 @@ if ('serviceWorker' in navigator) {
       // A new round, or a seat this screen has not held: point at the tank.
       // Someone else resuming into the same round is neither.
       if (d.round !== online.round || d.seats.indexOf(online.id) !== online.seat) markYou();
-      if (d.round !== online.round) reactionsNewRound();
+      if (d.round !== online.round) { reactionsNewRound(); camForgetViews(); }
       // The host's word on which seats are empty and which the CPU is playing:
       // a restart keeps a missing player's chair for them, and every screen
       // has to agree on who covers it.
@@ -8179,17 +8241,23 @@ if ('serviceWorker' in navigator) {
   // its own (reactRandom), so reacting never shifts the AI's aim.
   const CPU_EMOTE_GAP_MS = 6000;
   const CPU_EMOTE_ODDS = { taunt: 0.5, hurt: 0.35, rip: 0.7, selfHit: 0.5, laugh: 0.3,
-                           won: 0.8, lost: 0.7, answer: 0.45 };
+                           won: 0.8, lost: 0.7, answer: 0.45, mad: 0.85 };
+  // A hit that takes this much off a CPU (a quarter of its health) makes it
+  // angry most of the time, gap or no gap — a heavy hit is always news.
+  const CPU_BIG_HIT = 25;
   let cpuEmoteAt = -Infinity, cpuEmoteToken = 0;
   let reactRandom = seededRandom(Date.now() >>> 0);
 
   function cpuReacts() { return reactionsOn && cpuMode && !netPlaying(); }
 
-  /** Maybe have CPU `seat` react with `e`, with probability `odds`. */
-  function cpuEmote(seat, e, odds) {
+  /**
+   * Maybe have CPU `seat` react with `e`, with probability `odds`. `urgent`
+   * skips the gap since its last reaction, for what it would never let pass.
+   */
+  function cpuEmote(seat, e, odds, urgent = false) {
     if (!cpuReacts() || !isAi(seat) || !tanks[seat]) return false;
     const now = performance.now();
-    if (now - cpuEmoteAt < CPU_EMOTE_GAP_MS) return false;
+    if (!urgent && now - cpuEmoteAt < CPU_EMOTE_GAP_MS) return false;
     if (reactRandom() >= odds) return false;
     cpuEmoteAt = now;
     const token = cpuEmoteToken;
@@ -8217,6 +8285,9 @@ if ('serviceWorker' in navigator) {
     }
     const killed = ev.hits.find(h => h.killed && isAi(h.seat));
     if (killed) { cpuEmote(killed.seat, EM.RIP, CPU_EMOTE_ODDS.rip); return; }
+    // Hit hard by someone else and still standing: angry, most of the time.
+    const heavy = ev.hits.find(h => isAi(h.seat) && h.dmg >= CPU_BIG_HIT);
+    if (heavy) { cpuEmote(heavy.seat, EM.MAD, CPU_EMOTE_ODDS.mad, true); return; }
     if (isAi(ev.shooter)) {
       if (ev.self) { cpuEmote(ev.shooter, EM.WHOA, CPU_EMOTE_ODDS.selfHit); return; }
       if (ev.hits.some(h => !isAi(h.seat))) { cpuEmote(ev.shooter, EM.TAUNT, CPU_EMOTE_ODDS.taunt); return; }
@@ -8344,7 +8415,7 @@ if ('serviceWorker' in navigator) {
     EMOTES, EM, sendEmote, showEmote, netEmoteIn, canReact, sendCooldownMs, classifyShot,
     toggleMute, isMuted, setReactionsOn, drawEmotes, cpuReact, cpuAnswer, trayOpen, openTray, closeTray,
     shotLanded, placeTray,
-    EMOTE_SHOW_MS, SEND_BURST, SEND_WINDOW_MS, RECV_BURST, CPU_EMOTE_GAP_MS, CPU_EMOTE_ODDS,
+    EMOTE_SHOW_MS, SEND_BURST, SEND_WINDOW_MS, RECV_BURST, CPU_EMOTE_GAP_MS, CPU_EMOTE_ODDS, CPU_BIG_HIT,
     NEAR_MISS, WILD_MISS,
     get emotes() { return emotes; }, get emoteHold() { return emoteHold; },
     get shotWatch() { return shotWatch; }, get reactionsOn() { return reactionsOn; },
@@ -8402,6 +8473,7 @@ if ('serviceWorker' in navigator) {
     eventToWorld, CAM_MIN, CAM_MAX,
     get camZoom() { return camZoom; }, get camX() { return camX; }, get camY() { return camY; },
     get camPanned() { return camPanned; }, set camPanned(v) { camPanned = v; },
+    get camReturn() { return camReturn; }, seatViews, camSaveView, camTurnStarted, localHumanSeat,
     get turnToken() { return turnToken; }, get lastWinner() { return lastWinner; },
     get turnSeq() { return turnSeq; },
     get activeShot() { return activeShot; },

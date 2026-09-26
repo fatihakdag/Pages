@@ -333,16 +333,40 @@ test('it taunts when it hits you, and flinches when you hit it', () => {
   assert.deepEqual(shown(h), [[1, h.g.EM.TAUNT]]);
 
   h.advance(h.g.CPU_EMOTE_GAP_MS);
-  h.g.cpuReact(evOf({ shooter: 0, hits: [{ seat: 1, dmg: 30, killed: false }] }));
+  h.g.cpuReact(evOf({ shooter: 0, hits: [{ seat: 1, dmg: 12, killed: false }] }));
   h.advance(1200);
-  assert.deepEqual(shown(h).slice(-1), [[1, h.g.EM.WHOA]]);
+  assert.deepEqual(shown(h).slice(-1), [[1, h.g.EM.WHOA]], 'a light hit: 😱');
+});
+
+test('a heavy hit makes it angry most of the time, even straight after another reaction', () => {
+  const heavy = evOf({ shooter: 0, hits: [{ seat: 1, dmg: 40, killed: false }] });
+  let mad = 0;
+  for (let i = 0; i < 20; i++) {
+    const h = load();
+    mode(h, 'cpu');
+    h.g.setReactRandom(dice([i / 20]));   // the odds roll, spread over 0..1
+    h.g.cpuReact(heavy);
+    h.advance(1200);
+    if (shown(h).some(([seat, e]) => seat === 1 && e === h.g.EM.MAD)) mad++;
+  }
+  assert.equal(mad, 17, '85 times in 100');
+
+  const h = load();
+  mode(h, 'cpu');
+  h.g.setReactRandom(() => 0);
+  h.g.cpuReact(evOf({ shooter: 1, hits: [{ seat: 0, dmg: 30, killed: false }] }));   // it taunts you
+  h.advance(1200);
+  h.g.cpuReact(heavy);   // and you hit it back at once, well inside the usual gap
+  h.advance(1200);
+  assert.deepEqual(shown(h).slice(-1), [[1, h.g.EM.MAD]]);
+  assert.equal(h.g.CPU_BIG_HIT, 25, 'a quarter of its health');
 });
 
 test('now and then, not every shot', () => {
   const h = load();
   mode(h, 'cpu');
   h.g.setReactRandom(() => 0);
-  const hurt = evOf({ shooter: 0, hits: [{ seat: 1, dmg: 30, killed: false }] });
+  const hurt = evOf({ shooter: 0, hits: [{ seat: 1, dmg: 12, killed: false }] });
   h.g.cpuReact(hurt);
   h.g.cpuReact(hurt);
   h.advance(1200);

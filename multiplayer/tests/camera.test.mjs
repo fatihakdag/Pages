@@ -308,3 +308,109 @@ test('the view holds on the impact instead of swinging back to the shooter', () 
   assert.ok(Math.abs(centre - g.tanks[1].x) < 60,
     `and settles on the next player: ${centre.toFixed(0)} vs ${g.tanks[1].x}`);
 });
+
+// ---------- your own view back on your turn ----------
+
+/** Two humans on one screen, flat and calm, tanks well apart. */
+function hotSeat() {
+  const h = loadFlat();
+  h.placeTanksAt([200, 700]);
+  h.g.wind = 0;
+  h.g.currentPlayer = 0;
+  h.g.state = 'AIMING';
+  h.g.tanks.forEach(t => { t.angle = 90; t.power = 30; });   // straight up: nobody is hit
+  return h;
+}
+const near = (a, b, eps = 0.6) => Math.abs(a - b) < eps;
+
+test('your framed view comes back when your turn does', () => {
+  const h = hotSeat();
+  const { g } = h;
+  g.camZoomTo(3);
+  g.camCenterOn(450, 380);
+  g.camPanned = true;            // framed by hand
+  const mine = { zoom: g.camZoom, x: g.camX, y: g.camY };
+
+  h.fireAndSettle();
+  assert.equal(g.currentPlayer, 1);
+  assert.ok(g.seatViews.has(0), 'saved when you fired');
+  h.advance(1500);               // the camera goes off after the other player
+  assert.ok(!near(g.camX, mine.x), 'and the view moved on');
+
+  h.fireAndSettle();             // their shot, and back to you
+  assert.equal(g.currentPlayer, 0);
+  h.advance(1500);
+  assert.equal(g.camZoom, mine.zoom);
+  assert.ok(near(g.camX, mine.x) && near(g.camY, mine.y), `back to ${mine.x},${mine.y}, got ${g.camX},${g.camY}`);
+  assert.equal(g.camPanned, true, 'still yours: following does not pull it away');
+});
+
+test('each player sharing the screen gets their own view back', () => {
+  const h = hotSeat();
+  const { g } = h;
+  g.camZoomTo(3); g.camCenterOn(200, 380); g.camPanned = true;
+  const first = { x: g.camX, y: g.camY };
+  h.fireAndSettle();
+  g.camZoomTo(2); g.camCenterOn(700, 380); g.camPanned = true;
+  const second = { zoom: g.camZoom, x: g.camX, y: g.camY };
+  h.fireAndSettle();
+  h.advance(1500);
+  assert.equal(g.camZoom, 3);
+  assert.ok(near(g.camX, first.x), 'player 1 is back on player 1\'s view');
+  h.fireAndSettle();
+  h.advance(1500);
+  assert.equal(g.camZoom, second.zoom);
+  assert.ok(near(g.camX, second.x), 'and player 2 on theirs');
+});
+
+test('not framed by hand: your zoom comes back, centred on your tank as it was', () => {
+  const h = hotSeat();
+  const { g } = h;
+  g.camZoomTo(3);                // zoomed with the buttons: the camera follows you
+  h.fireAndSettle();
+  g.camZoomTo(1);                // the other player zooms all the way out
+  h.fireAndSettle();
+  h.advance(1500);
+  assert.equal(g.camZoom, 3, 'your zoom');
+  const t = g.tanks[0];
+  const cx = g.camX + g.camViewW() / 2;
+  assert.ok(Math.abs(cx - t.x) < 5, `centred on your tank (${cx} vs ${t.x})`);
+  assert.equal(g.camPanned, false);
+});
+
+test('touching the camera while it eases back leaves it where you put it', () => {
+  const h = hotSeat();
+  const { g } = h;
+  g.camZoomTo(3); g.camCenterOn(450, 380); g.camPanned = true;
+  h.fireAndSettle();
+  g.camZoomTo(1);
+  h.fireAndSettle();
+  assert.ok(g.camReturn, 'easing back');
+  g.camZoomTo(2);                // the player zooms themselves
+  assert.equal(g.camReturn, null);
+  h.advance(1500);
+  assert.equal(g.camZoom, 2);
+});
+
+test('against the CPU, your view is back after its turn; a new round forgets it', () => {
+  const h = load();
+  const { g } = h;
+  g.el.modeSelect.value = 'cpu';
+  g.el.modeSelect.dispatch('change');
+  g.resetGame();
+  h.flatTerrain(400);
+  h.placeTanksAt([200, 700]);
+  g.wind = 0;
+  g.tanks[0].angle = 90; g.tanks[0].power = 30;
+  g.camZoomTo(3); g.camCenterOn(450, 380); g.camPanned = true;
+  const mine = { x: g.camX, y: g.camY };
+  h.fireAndSettle();
+  assert.equal(g.seatViews.has(1), false, 'the CPU keeps no view');
+  assert.ok(h.advanceUntil(() => g.currentPlayer === 0 && g.state === 'AIMING'), 'the CPU has played');
+  h.advance(1500);
+  assert.equal(g.camZoom, 3);
+  assert.ok(near(g.camX, mine.x));
+
+  g.resetGame();
+  assert.equal(g.seatViews.size, 0, 'a new board: the old framing does not fit it');
+});
