@@ -628,7 +628,10 @@ Other things worth knowing:
   behind one. A panel taller than the screen scrolls inside itself, and since
   phones hide scrollbars until you scroll, it shows a fade with a ▼ at its
   foot while there is more below (`.more`, from `refreshMoreHint()` on open,
-  scroll, resize and when the online dialog changes). `refreshOnlineDialog()` makes it follow the connection: with none
+  scroll, resize and when the online dialog changes). In Settings, ONLINE and
+  ROUND share a row of their own (`#actions-row`, the same two columns as the
+  grid), so they pair with each other wherever the grid has two columns and
+  stack where it has one. `refreshOnlineDialog()` makes it follow the connection: with none
   it is the way in — name, HOST with **PLAYERS**, CODE and JOIN — and otherwise
   the room: its code large, "share this code" and how many are here while the
   table fills (`tableFilling`; the pill keeps the code in its line), who is at

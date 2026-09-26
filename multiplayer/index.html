@@ -708,7 +708,17 @@
   #settings-btn:active { background: #2a2739; }
 
   /* The online group needs HOST + CODE + JOIN across one line. */
-  #settings-grid #online-group { grid-column: 1 / -1; }
+  /* ONLINE and ROUND share a row of their own: the same two columns as the
+     grid above, so they pair exactly where it does and stack where it does,
+     and they always pair with each other — as grid cells they would fall in
+     next to whatever came before, which depends on whether TANK SIZE shows. */
+  #settings-grid #actions-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  #actions-row .ctrl-group { min-width: 0; }
   /* Settings' way to the Play online dialog: online lives there now. */
   #open-online {
     align-self: flex-start;
@@ -761,7 +771,8 @@
   #online-leave.armed .nl-sure { display: inline; }
   /* The pill opens the dialog: say it can be pressed. */
   #net-status { cursor: pointer; }
-  #settings-grid #restart-group { grid-column: 1 / -1; }
+  /* Half a row now: the armed label ("TAP AGAIN TO RESTART") may wrap. */
+  #round-restart { white-space: normal; text-align: left; }
   .restart-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
   #round-restart {
     background: var(--panel-line);
@@ -1702,6 +1713,10 @@
             <option value="off">Off</option>
           </select>
         </div>
+        <!-- The two buttons that open something rather than set it, side by
+             side wherever the grid has two columns and stacked where it has
+             one: each used to fill a whole row to hold one small button. -->
+        <div id="actions-row">
         <div class="ctrl-group" id="online-group">
           <div class="ctrl-label"><span data-i18n="online">ONLINE</span></div>
           <!-- Hosting and joining have a dialog of their own (#online-modal). -->
@@ -1715,6 +1730,7 @@
             <button type="button" id="round-restart"><span aria-hidden="true">↻</span><span class="rr-idle" data-i18n="restartRound">RESTART ROUND</span><span class="rr-sure" data-i18n="restartSure">TAP AGAIN TO RESTART</span></button>
             <span id="restart-note"></span>
           </div>
+        </div>
         </div>
         <div class="ctrl-group" id="prefs-row">
           <div id="sfx-group">
@@ -1849,7 +1865,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v84';
+  const BUILD = 'v85';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
