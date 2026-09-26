@@ -1865,8 +1865,18 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v85';
+  const BUILD = 'v86';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
+
+  // ---------- Tank size: one switch for the option ----------
+  // TANK SIZE in Settings could draw tanks and shells larger than they are
+  // where the world is drawn small (spriteBoost). It is switched off for now:
+  // a shell drawn touching a grown tank could still miss the real, smaller one
+  // it is aimed at, and a hit that did no damage was confusing. Off, every tank
+  // is drawn at its true size, the setting is hidden, and a choice a player
+  // stored is left alone for when it comes back. Set option to true to bring
+  // it back exactly as it was.
+  const TANK_SIZE = { option: false };
 
   // ---------- Guided missile: one switch for the whole weapon ----------
   // Set enabled to false and the missile leaves the dropdown, every tank's
@@ -2337,7 +2347,7 @@ if ('serviceWorker' in navigator) {
     // floor. Zoom only ever draws it larger, so fitted is the smallest it gets:
     // at or above the floor here, Large and Actual look the same, and the
     // choice is hidden rather than offered to do nothing.
-    sizeGroup.style.display = viewScale < SPRITE_MIN_PX ? '' : 'none';
+    sizeGroup.style.display = TANK_SIZE.option && viewScale < SPRITE_MIN_PX ? '' : 'none';
   }
 
   // ---------- Camera ----------
@@ -2534,20 +2544,24 @@ if ('serviceWorker' in navigator) {
   // It is a preference (TANK SIZE in Settings, stored as barrage.tankSize):
   // 'large' is this, 'actual' keeps everything to the world's scale. Nothing
   // about it travels in a match — it only changes how this screen draws.
+  // While TANK_SIZE.option is off (see the top of the script) it is always
+  // 'actual' and the setting is hidden.
   const SPRITE_MIN_PX = 0.8, SPRITE_MAX_BOOST = 2.2;
   let sizePref = 'large';
   sizeSelect.addEventListener('change', () => {
+    if (!TANK_SIZE.option) return;
     sizePref = sizeSelect.value === 'actual' ? 'actual' : 'large';
     try { localStorage.setItem('barrage.tankSize', sizePref); } catch (e) { /* private mode */ }
   });
   function initSizePref() {
     let stored = null;
     try { stored = localStorage.getItem('barrage.tankSize'); } catch (e) { /* private mode */ }
-    sizePref = stored === 'actual' ? 'actual' : 'large';
+    // Switched off, true size, whatever was stored; the stored choice stays.
+    sizePref = !TANK_SIZE.option || stored === 'actual' ? 'actual' : 'large';
     sizeSelect.value = sizePref;
   }
   function spriteBoost() {
-    if (sizePref === 'actual') return 1;
+    if (!TANK_SIZE.option || sizePref === 'actual') return 1;
     const px = viewScale * camZoom;
     return px > 0 ? Math.min(SPRITE_MAX_BOOST, Math.max(1, SPRITE_MIN_PX / px)) : 1;
   }
@@ -8661,7 +8675,7 @@ if ('serviceWorker' in navigator) {
       nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider, themeSelect, sizeSelect, sizeGroup
     },
     initTheme, nextTheme, generateTerrainShape,
-    spriteBoost, initSizePref, SPRITE_MIN_PX, SPRITE_MAX_BOOST, render,
+    spriteBoost, initSizePref, SPRITE_MIN_PX, SPRITE_MAX_BOOST, render, TANK_SIZE,
     get sizePref() { return sizePref; },
     get theme() { return theme; },
     get themePref() { return themePref; },
