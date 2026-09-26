@@ -882,7 +882,7 @@
 </script>
 <script>
 (() => {
-  const BUILD = 'v56';
+  const BUILD = 'v57';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2463,6 +2463,14 @@
     maybeAiTurn();
   }
 
+  // The health a card shows. Damage is fractional and a tank is only destroyed
+  // at zero or below, so one left with 0.3 is alive — and rounding showed it
+  // as 0, a tank at "0" still sitting there. Rounded as before, but a living
+  // tank never reads less than 1, and only a destroyed one reads 0.
+  function hpShown(t) {
+    return t.alive ? Math.max(1, Math.round(t.hp)) : 0;
+  }
+
   function updateHUD() {
     playersRow.dataset.count = tanks.length;
     for (let i = 0; i < MAX_PLAYERS; i++) {
@@ -2471,7 +2479,7 @@
       if (!t) continue;
       const pct = Math.max(0, t.hp / MAX_HP * 100);
       hpFill[i].style.width = pct + '%';
-      hpText[i].textContent = `${Math.max(0, Math.round(t.hp))} / ${MAX_HP}`;
+      hpText[i].textContent = `${hpShown(t)} / ${MAX_HP}`;
       cards[i].classList.toggle('active', currentPlayer === i && state === 'AIMING');
       cards[i].classList.toggle('dead', !t.alive);
       aiBadges[i].style.display = isAi(i) ? 'inline-block' : 'none';
