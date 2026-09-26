@@ -229,6 +229,22 @@ old Android too.
   (🔇 on the card). Online the mute is keyed by the seat's token, so it
   survives a rematch and a reconnect; against the CPU by seat.
 
+## Feeling a hit
+
+When **your own** tank is hit (`youSeat()`: your seat in a match, player 1
+against the CPU; nobody when everyone shares one screen) the phone buzzes —
+30/60/110 ms by the size of the hit, a double thump when destroyed
+(`hitPattern`) — and the battlefield shakes for `SHAKE_MS`, up to 10 CSS px,
+fading. `feelHits()` runs once a frame and watches that tank's health, rather
+than hooking every kind of damage (shells, bomblets, a wreck, a board from the
+network), so nothing is missed and a new board or seat is never mistaken for a
+hit. The buzz is `navigator.vibrate` (Android has it; no web page can buzz an
+iPhone); the shake is an offset in `worldTransform()` only — a sway from sines,
+never `Math.random` — so the UI, the pointer mapping and the simulation are
+untouched. SHAKE in Settings (`barrage.shake`) turns off both, and the
+slingshot's tick (`buzz`), and the shake also stays off under
+`prefers-reduced-motion`.
+
 ## What differs from the single-player build
 
 **The simulation is in world units, not canvas pixels.** This is the whole
