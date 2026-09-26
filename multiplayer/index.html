@@ -1865,7 +1865,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v89';
+  const BUILD = 'v90';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Tank size: one switch for the option ----------
@@ -4381,7 +4381,15 @@ if ('serviceWorker' in navigator) {
   function aiFireDelayMs() { return aimPreviewOn() ? 900 : 350; }
   function aiFireDelaySec() { return aiFireDelayMs() / 1000; }
 
-  function chooseAiShot(difficulty) {
+  // The guided missile flies to where a shell of the same angle and power would
+  // land, then takes any enemy tank within MISSILE.lockRadius of that spot as
+  // its target — about twice a shell's blast radius. Aimed as tightly as a
+  // shell, it almost never missed (95% for Brutal against 77% for a shell), so
+  // the CPU aims it this much more loosely, which brings it back to about a
+  // shell's hit rate at every level.
+  const AI_MISSILE_JITTER = 1.9;
+
+  function chooseAiShot(difficulty, weapon = 'standard') {
     const cfg = DIFFICULTY_SETTINGS[difficulty] || DIFFICULTY_SETTINGS.medium;
     const shooter = tanks[currentPlayer];
     const targets = tanks.filter((t, i) => t.alive && i !== currentPlayer);
@@ -4422,8 +4430,9 @@ if ('serviceWorker' in navigator) {
     }
 
     // Difficulty-scaled human-like imprecision on top of the solved shot.
-    let jitterAngle = cfg.angleJitter;
-    let jitterPower = cfg.powerJitter;
+    const loose = WEAPONS[weapon] && WEAPONS[weapon].guides ? AI_MISSILE_JITTER : 1;
+    let jitterAngle = cfg.angleJitter * loose;
+    let jitterPower = cfg.powerJitter * loose;
 
     // Sometimes go for the helicopter instead, and go for it badly: a much
     // wider aim error than any tank shot, and at the lower levels it will take
@@ -4492,31 +4501,31 @@ if ('serviceWorker' in navigator) {
     setTimeout(() => {
       if (!stillOurTurn()) return;
       if (dialogOpen()) { aiHold(); return; }
-      const shot = chooseAiShot(aiDifficulty);
       const shooter = tanks[seat];
-      shooter.angle = shot.angle;
-      shooter.power = shot.power;
       // Stronger CPU levels lean on the bigger/smarter weapons more often,
-      // but only when it actually still has ammo for them.
+      // but only when it actually still has ammo for them. Picked before the
+      // shot is solved, since the missile is aimed more loosely.
       const r = Math.random();
       let preferred;
       // Thresholds are cumulative: each level leans further from the plain
       // shell toward the specials, and a MIRV forgives a rough solution, so
       // the weaker levels get proportionally more use out of it.
-      // The guided missile is deliberately absent: chooseAiShot solves on
-      // predictLandingX, which integrates a plain parabola, and a missile
-      // stops travelling at apex — so the CPU would undershoot every one of
-      // them. Teaching the predictor about the burn is what it would take.
-      // The jet is absent for a different reason: it is not aimed at all but
-      // timed, by pressing FIRE at the right moment of a pass.
+      // The missile is left in its rack while an aircraft is up: it would
+      // chase that rather than the tank the CPU aimed at.
+      // The jet is absent: it is not aimed at all but timed, by pressing FIRE
+      // at the right moment of a pass.
       if (aiDifficulty === 'easy') {
-        preferred = pick(r, [[0.80, 'standard'], [0.86, 'big'], [0.91, 'cluster'], [0.95, 'roller']], 'mirv');
+        preferred = pick(r, [[0.77, 'standard'], [0.83, 'big'], [0.88, 'cluster'], [0.92, 'roller'], [0.97, 'mirv']], 'missile');
       } else if (aiDifficulty === 'medium') {
-        preferred = pick(r, [[0.58, 'standard'], [0.72, 'big'], [0.83, 'cluster'], [0.92, 'roller']], 'mirv');
+        preferred = pick(r, [[0.52, 'standard'], [0.66, 'big'], [0.77, 'cluster'], [0.86, 'roller'], [0.94, 'mirv']], 'missile');
       } else {
-        preferred = pick(r, [[0.38, 'standard'], [0.56, 'big'], [0.72, 'cluster'], [0.88, 'roller']], 'mirv');
+        preferred = pick(r, [[0.28, 'standard'], [0.46, 'big'], [0.62, 'cluster'], [0.78, 'roller'], [0.90, 'mirv']], 'missile');
       }
+      if (WEAPONS[preferred].guides && ((heli && !heli.falling) || (jet && !jet.falling))) preferred = 'standard';
       shooter.weapon = weaponAvailable(shooter, preferred) ? preferred : 'standard';
+      const shot = chooseAiShot(aiDifficulty, shooter.weapon);
+      shooter.angle = shot.angle;
+      shooter.power = shot.power;
       syncControlsFromTank(); // pushes the seat's choice into the shared select
       cpuAimReady = true;
       // hold a beat longer when the arc is on screen, so it can be read
@@ -7038,11 +7047,11 @@ if ('serviceWorker' in navigator) {
       turnToken === token && state === 'AIMING' && currentPlayer === seat;
     setTimeout(() => {
       if (!stillTheirTurn()) return;
-      const shot = chooseAiShot(TURN_AI_LEVEL);
       const t = tanks[seat];
+      if (!weaponAvailable(t, t.weapon)) t.weapon = 'standard';
+      const shot = chooseAiShot(TURN_AI_LEVEL, t.weapon);
       t.angle = shot.angle;
       t.power = shot.power;
-      if (!weaponAvailable(t, t.weapon)) t.weapon = 'standard';
       updateHUD();
       setTimeout(() => { if (stillTheirTurn()) fire({ byAi: true }); }, aiFireDelayMs());
     }, 500);
@@ -8695,7 +8704,7 @@ if ('serviceWorker' in navigator) {
   // page), so tests/ reaches in through here to drive the physics, the AI and
   // the turn machinery directly. Nothing in the game itself reads this object.
   window.__BARRAGE_TEST__ = {
-    BUILD, WEAPONS, MISSILE, DIFFICULTY_SETTINGS, GRAVITY, TANK_W, TANK_H, MAX_HP,
+    BUILD, WEAPONS, MISSILE, DIFFICULTY_SETTINGS, AI_MISSILE_JITTER, GRAVITY, TANK_W, TANK_H, MAX_HP,
     WIND_MAX, MAX_PLAYERS, THEMES, SIM_W, SIM_H,
     groundHeightAt, craterAt, bedrockY, newTerrain, buildTerrainFromShape, arcPart, arcShare,
     placeTanks, levelTankPads, groundGradientAt, buildTanks,

@@ -165,16 +165,14 @@ test('the CPU only picks weapons it can actually fire', () => {
   }
 });
 
-test('the CPU never reaches for the guided missile', () => {
+test('the CPU reaches for the guided missile now and then', () => {
   const h = cpuGame({ difficulty: 'hard' });
   const { g } = h;
   h.placeTanksAt([200, 700]);
   const cpu = g.tanks[1];
 
-  // Its aim comes from a ballistic predictor that knows nothing about the
-  // missile's burn, so picking one would mean undershooting every time.
   const picked = new Set();
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 30 && !picked.has('missile'); i++) {
     g.currentPlayer = 1;
     g.state = 'AIMING';
     Object.keys(cpu.ammo).forEach(k => { cpu.ammo[k] = cpu.ammo[k] === Infinity ? Infinity : 5; });
@@ -185,8 +183,42 @@ test('the CPU never reaches for the guided missile', () => {
     g.state = 'AIMING';
   }
 
-  assert.ok(!picked.has('missile'), `CPU picked: ${[...picked].join(', ')}`);
+  assert.ok(picked.has('missile'), `CPU picked: ${[...picked].join(', ')}`);
   assert.ok(picked.size > 1, 'it should still vary its weapon');
+});
+
+test('the CPU leaves the missile in its rack while an aircraft is up', () => {
+  const h = cpuGame({ difficulty: 'hard' });
+  const { g } = h;
+  h.placeTanksAt([200, 700]);
+  const cpu = g.tanks[1];
+  // Every roll lands on the missile's slice of the table.
+  h.fixRandom(0.99);
+  g.spawnHeli();
+
+  g.currentPlayer = 1;
+  g.state = 'AIMING';
+  cpu.weapon = 'standard';
+  g.maybeAiTurn();
+  h.advance(1000);
+  assert.equal(cpu.weapon, 'standard', 'a missile fired now would chase the helicopter');
+});
+
+test('the missile is aimed more loosely than a shell', () => {
+  const h = cpuGame({ difficulty: 'hard' });
+  const { g } = h;
+  h.placeTanksAt([200, 700]);
+  g.currentPlayer = 1;
+  // At the top of every jitter roll, and clear of the wide-miss branch.
+  h.fixRandom(0.99);
+  const shell = g.chooseAiShot('hard', 'standard');
+  const missile = g.chooseAiShot('hard', 'missile');
+  h.fixRandom(0.5);
+  const solved = g.chooseAiShot('hard', 'standard');   // no jitter at all
+
+  const off = (shot) => Math.abs(shot.angle - solved.angle) + Math.abs(shot.power - solved.power);
+  assert.ok(off(missile) > off(shell) * 1.4,
+    `missile off by ${off(missile)}, shell by ${off(shell)}`);
 });
 
 test('brutal out-shoots hard but is not a sure thing', () => {
