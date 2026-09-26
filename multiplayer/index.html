@@ -836,6 +836,23 @@
   }
   .weapon-pick:disabled { opacity: 0.4; cursor: not-allowed; }
   .weapon-pick.is-selected:disabled { opacity: 0.6; }
+
+  /* The landscape right rail, once the online status has moved out of it
+     (placeNetGroup sets .two-rails): only the aim, the weapons and FIRE.
+     The weapons sit three to a row with the jet pinned to the end of the first
+     row, as far from FIRE as the rail allows — last in the list, it sat right
+     over FIRE and was the easiest button to call in by mistake. One left alone
+     on the last row goes in its middle (markLoneWeapon). FIRE goes to the foot
+     of the rail, with at least a clear gap above it however full the rail is. */
+  .two-rails #weapon-picker {
+    display: grid;
+    grid-template-columns: repeat(3, 34px);
+    justify-content: start;
+  }
+  .two-rails .weapon-pick[data-weapon="jet"] { grid-row: 1; grid-column: 3; }
+  .two-rails .weapon-pick.lone { grid-column: 2; }
+  .two-rails #weapon-group { margin-bottom: 14px; }
+  .two-rails #fire-btn { margin-top: auto; }
   .weapon-ammo {
     position: absolute;
     right: 2px; bottom: 0;
@@ -1787,7 +1804,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v78';
+  const BUILD = 'v79';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -3251,6 +3268,23 @@ if ('serviceWorker' in navigator) {
       b.setAttribute('aria-label', name);
       b.title = name;
     }
+    markLoneWeapon();
+  }
+
+  /**
+   * In the landscape right rail the buttons sit three to a row, with the jet
+   * pinned to the end of the first (CSS, under .two-rails). A button left on
+   * its own in the last row goes in the middle of it rather than hugging the
+   * left. Which one that is depends on what is showing — a spent weapon leaves
+   * the row — so it is worked out here: with the jet pinned up top, the last
+   * row holds one button exactly when a third of the showing count leaves one
+   * over, and it is the last showing button that is not the jet.
+   */
+  function markLoneWeapon() {
+    const shown = [...weaponButtons].filter(([, b]) => !b.hidden);
+    const lone = shown.length > 1 && shown.length % 3 === 1
+      ? shown.filter(([key]) => key !== 'jet').pop() : null;
+    for (const [, b] of weaponButtons) b.classList.toggle('lone', !!lone && b === lone[1]);
   }
 
   angleSlider.addEventListener('input', () => {
@@ -7632,6 +7666,9 @@ if ('serviceWorker' in navigator) {
     const rail = twoRails();
     if (rail === netInRail) return;
     netInRail = rail;
+    // The right rail's own layout (the weapon grid, FIRE at its foot) hangs off
+    // this class, since it is the same moment the online status leaves it.
+    document.documentElement.classList.toggle('two-rails', rail);
     if (rail) infoRow.insertBefore(netGroup, infoRow.firstChild);
     else fireBtn.parentNode.insertBefore(netGroup, fireBtn);
     placeTray();

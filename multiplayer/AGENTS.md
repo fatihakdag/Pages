@@ -174,7 +174,12 @@ old Android too.
   make room for it. In the two-rail landscape layout the right rail is full,
   so `placeNetGroup()` moves the whole `#net-group` — status and button — into
   the left rail's `#info-row`, above the clock and SETTINGS, and back again
-  when the layout changes (two media queries, listened to). A tap anywhere else
+  when the layout changes (two media queries, listened to). It also sets
+  `.two-rails` on the root, which the right rail's own layout hangs off: the
+  weapons three to a row with the jet pinned to the end of the first row —
+  last in the list it sat right over FIRE — a button alone on the last row
+  in its middle (`markLoneWeapon()`, since spent weapons leave the row), and
+  FIRE at the rail's foot with a clear gap above it. A tap anywhere else
   closes it. `sendEmote(e)` shows the bubble here at once. Nothing is ever
   suggested or offered after a shot: reacting is only ever the player's idea.
 - **The wire**: an `emote` message carries `e`, an **index** into `EMOTES`,
