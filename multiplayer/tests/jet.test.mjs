@@ -122,7 +122,7 @@ test('only one jet at a time', () => {
   assert.equal(g.weaponButtons.get('jet').disabled, false, 'free again once it has left the sky');
 });
 
-test('a CPU seat does not call one in', () => {
+test('the picker cannot call one in on a CPU seat’s turn', () => {
   const h = loadFlat();
   const { g } = h;
   g.cpuMode = true;
