@@ -1865,7 +1865,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v88';
+  const BUILD = 'v89';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Tank size: one switch for the option ----------
@@ -4276,7 +4276,10 @@ if ('serviceWorker' in navigator) {
                heliChance: 0.30, heliPatience: 0.40, heliAngleJitter: 10, heliPowerJitter: 13 },
     hard:    { angleStep: 1.5, powerStep: 1.5, angleJitter: 3,  powerJitter: 4,  missChance: 0.04, thinkMs: 600,
                heliChance: 0.30, heliPatience: 0.65, heliAngleJitter: 7,  heliPowerJitter: 9 },
-    brutal:  { angleStep: 1, powerStep: 1,  angleJitter: 0.5, powerJitter: 1,  missChance: 0,    thinkMs: 450,
+    // Brutal solves as finely as it can, then misses a little anyway: about four
+    // shots in five land close enough to hurt, where Hard manages about half.
+    // Never missing at all made it a wall rather than an opponent.
+    brutal:  { angleStep: 1, powerStep: 1,  angleJitter: 1.5, powerJitter: 2, missChance: 0.10, thinkMs: 450,
                heliChance: 0.30, heliPatience: 0.85, heliAngleJitter: 3,  heliPowerJitter: 4 }
   };
 
@@ -4338,7 +4341,7 @@ if ('serviceWorker' in navigator) {
   }
 
   // Brutal is very hard to out-shoot, so at that level both sides get to see
-  // the arc before it is fired. This traces with the same integrator step()
+  // the first half of the arc before it is fired. This traces with the same integrator step()
   // uses — sub-stepped at a 60fps dt rather than predictLandingX's coarser
   // single step — so the drawn line matches where the shell actually goes.
   function traceShot(x0, y0, angleDeg, power, windAccel) {
@@ -6378,8 +6381,32 @@ if ('serviceWorker' in navigator) {
     ctx.restore();
   }
 
-  // Dashed arc from the active tank's barrel, in that player's colour, ending
-  // in a ring at the predicted impact point.
+  // The front half of a traced path, measured along it. The cut falls between
+  // two points, so the last one is placed on the segment rather than dropped.
+  function firstHalf(pts) {
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) {
+      total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    }
+    const half = total / 2;
+    const out = [pts[0]];
+    let walked = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      if (walked + d >= half) {
+        const f = d ? (half - walked) / d : 0;
+        out.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f,
+                  pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f]);
+        break;
+      }
+      walked += d;
+      out.push(pts[i]);
+    }
+    return out;
+  }
+
+  // Dashed arc from the active tank's barrel, in that player's colour, over
+  // the first half of the shell's flight.
   function drawAimPreview() {
     if (state !== 'AIMING') return;
     const t = tanks[currentPlayer];
@@ -6387,7 +6414,7 @@ if ('serviceWorker' in navigator) {
     if (t.weapon === 'jet') return;   // the barrel is not what fires this turn
     const full = aimPreviewOn();
     // Everyone gets the short hint on their own turn; only Brutal shows the
-    // whole arc, and only Brutal telegraphs a CPU shot.
+    // long arc, and only Brutal telegraphs a CPU shot.
     if (!full && isAi(currentPlayer)) return;
     if (isAi(currentPlayer) && !cpuAimReady) return;
 
@@ -6397,6 +6424,9 @@ if ('serviceWorker' in navigator) {
     const y0 = groundHeightAt(t.x) - TANK_H - barrelLen * Math.sin(a);
     let pts = traceShot(x0, y0, t.angle, t.power, wind);
     if (pts.length < 2) return;
+    // Brutal draws the first half of the flight, by length, and no impact
+    // ring: enough to read the shape of the shot, not a spot to drop it on.
+    if (full) pts = firstHalf(pts);
     // traceShot integrates a plain parabola. A guided shell leaves that path at
     // apex, so the preview stops there rather than promising a landing spot it
     // has no intention of using.
@@ -6450,20 +6480,6 @@ if ('serviceWorker' in navigator) {
       ctx.lineWidth = 1.7 * boost;
       ctx.stroke();
       ctx.setLineDash([]);
-
-      if (!guided) {
-        const end = pts[pts.length - 1];
-        ctx.beginPath();
-        ctx.arc(end[0], end[1], 5 * boost, 0, Math.PI * 2);
-        ctx.globalAlpha = 0.45;
-        ctx.strokeStyle = halo;
-        ctx.lineWidth = 4.5 * boost;
-        ctx.stroke();
-        ctx.globalAlpha = 0.95;
-        ctx.strokeStyle = t.color;
-        ctx.lineWidth = 2 * boost;
-        ctx.stroke();
-      }
     } else {
       // Two rules, and they pull in different directions on purpose.
       //
@@ -8673,7 +8689,7 @@ if ('serviceWorker' in navigator) {
   window.__BARRAGE_TEST__ = {
     BUILD, WEAPONS, MISSILE, DIFFICULTY_SETTINGS, GRAVITY, TANK_W, TANK_H, MAX_HP,
     WIND_MAX, MAX_PLAYERS, THEMES, SIM_W, SIM_H,
-    groundHeightAt, craterAt, bedrockY, newTerrain, buildTerrainFromShape,
+    groundHeightAt, craterAt, bedrockY, newTerrain, buildTerrainFromShape, firstHalf,
     placeTanks, levelTankPads, groundGradientAt, buildTanks,
     get hudWindVisible() { return hudWindVisible; },
     freshAmmo, weaponEnabled, lockOnTank, weaponAvailable, syncWeaponOptions, pruneWeaponOptions,

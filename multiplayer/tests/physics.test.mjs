@@ -161,3 +161,20 @@ test('a shot that flies off the map ends the turn without an explosion', () => {
   // a deepStrictEqual prototype check.
   assert.deepEqual(Array.from(g.tanks, t => t.hp), [100, 100]);
 });
+
+test('the Brutal preview is the first half of the arc, stopping short of the landing', () => {
+  const h = loadFlat();
+  const { g } = h;
+  const pts = g.traceShot(200, 400, 45, 60, 0);
+  const half = g.firstHalf(pts);
+  const len = (p) => {
+    let s = 0;
+    for (let i = 1; i < p.length; i++) s += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
+    return s;
+  };
+  assert.ok(Math.abs(len(half) - len(pts) / 2) < 0.5, `half is ${len(half).toFixed(1)} of ${len(pts).toFixed(1)}`);
+  assert.deepEqual(Array.from(half[0]), Array.from(pts[0]), 'starts at the muzzle');
+  const end = half[half.length - 1];
+  const landing = pts[pts.length - 1];
+  assert.ok(Math.abs(end[0] - landing[0]) > 100, 'ends well short of where the shell lands');
+});
