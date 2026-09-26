@@ -1672,6 +1672,15 @@
             <option value="off">Off</option>
           </select>
         </div>
+        <div class="ctrl-group" id="shake-group">
+          <div class="ctrl-label" data-i18n="shake">SHAKE</div>
+          <!-- When your tank is hit: the phone buzzes (where it can) and the
+               battlefield shakes. Off stills both, and the aiming tick too. -->
+          <select id="shake-select">
+            <option value="on" selected>On</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
         <div class="ctrl-group" id="online-group">
           <div class="ctrl-label"><span data-i18n="online">ONLINE</span></div>
           <!-- Hosting and joining have a dialog of their own (#online-modal). -->
@@ -1819,7 +1828,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v82';
+  const BUILD = 'v83';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -1959,7 +1968,7 @@ if ('serviceWorker' in navigator) {
       netVersion: 'update the page', netLost: 'connection lost',
       theme: 'THEME', randomTheme: 'Random',
       tankSize: 'TANK SIZE', sizeLarge: 'Large', sizeActual: 'Actual',
-      reactions: 'REACTIONS', reactOn: 'On', reactOff: 'Off', react: 'React',
+      reactions: 'REACTIONS', reactOn: 'On', reactOff: 'Off', react: 'React', shake: 'SHAKE',
       e_clap: 'Nice shot', e_mad: 'Grr', e_lol: 'LOL', e_whoa: 'Close one!',
       e_taunt: 'Watch this', e_please: 'Please miss', e_rip: 'RIP', e_gg: 'GG',
       muteName: 'Mute {name}', unmuteName: 'Unmute {name}',
@@ -2010,7 +2019,7 @@ if ('serviceWorker' in navigator) {
       netVersion: 'sayfayı yenileyin', netLost: 'bağlantı koptu',
       theme: 'TEMA', randomTheme: 'Rastgele',
       tankSize: 'TANK BOYUTU', sizeLarge: 'Büyük', sizeActual: 'Gerçek',
-      reactions: 'TEPKİLER', reactOn: 'Açık', reactOff: 'Kapalı', react: 'Tepki ver',
+      reactions: 'TEPKİLER', reactOn: 'Açık', reactOff: 'Kapalı', react: 'Tepki ver', shake: 'SARSINTI',
       e_clap: 'Güzel atış', e_mad: 'Hırs', e_lol: 'Komik', e_whoa: 'Az kalsın!',
       e_taunt: 'Sıra bende', e_please: 'Ne olur ıskala', e_rip: 'Elveda', e_gg: 'İyi oyundu',
       muteName: '{name} sustur', unmuteName: '{name} sesini aç',
@@ -2113,6 +2122,7 @@ if ('serviceWorker' in navigator) {
     relabel(sizeSelect, ['sizeLarge', 'sizeActual']);
     relabel(onlineSeatsSelect, ['tanks2', 'tanks3', 'tanks4', 'tanks5', 'tanks6']);
     relabel(reactionsSelect, ['reactOn', 'reactOff']);
+    relabel(shakeSelect, ['reactOn', 'reactOff']);
     relabelReactions();
     const aria = { 'zoom-in': 'zoomIn', 'zoom-out': 'zoomOut', 'zoom-fit': 'zoomFit',
                    'angle-left': 'aimLeft', 'angle-right': 'aimRight',
@@ -2457,7 +2467,8 @@ if ('serviceWorker' in navigator) {
   /** Draw in world units (the default for everything on the battlefield). */
   function worldTransform() {
     const k = DPR * viewScale * camZoom;
-    ctx.setTransform(k, 0, 0, k, -camX * k, -camY * k);
+    const sh = shakeOffset();
+    ctx.setTransform(k, 0, 0, k, -camX * k + sh.x * DPR, -camY * k + sh.y * DPR);
   }
 
   /** Draw in CSS pixels — for on-canvas UI that must stay legible at any size. */
@@ -3721,9 +3732,7 @@ if ('serviceWorker' in navigator) {
   // A tick as the pull crosses the ring, either way: the finger is on top of
   // the ring, so this is how you feel that you are back in it. Where there is
   // no vibrate (iOS, desktop) it is simply silent.
-  function pullTick() {
-    try { if (navigator.vibrate) navigator.vibrate(8); } catch (_) { /* not allowed */ }
-  }
+  function pullTick() { buzz(8); }
 
   function pullReach() {
     // Pull length for full power. Kept short so a full pull fits even on a
@@ -4920,6 +4929,7 @@ if ('serviceWorker' in navigator) {
     });
     particles = particles.filter(p => p.age < p.life);
     windPulse = Math.max(0, windPulse - dt * 1.6);
+    feelHits();
     camFollow(dt);
     netCheckTurnClock();
     rotorAngle += dt * 26;
@@ -8415,6 +8425,80 @@ if ('serviceWorker' in navigator) {
     });
   }
 
+  // ---------- Feeling a hit ----------
+  // When your own tank is hit the phone buzzes, harder for a bigger hit and
+  // twice when it is destroyed, and the battlefield shakes for a moment. The
+  // buzz is the vibration API, which Android browsers have and iPhones do not
+  // (no web page can buzz one); the shake is drawing only, so everyone feels
+  // it. "Your own" is youSeat(): your seat in a match, player 1 against the
+  // CPU, and nobody when everyone shares the screen and a phone cannot tell
+  // whose hit it is. It watches that tank's health once a frame rather than
+  // hooking every kind of damage — shells, bomblets, a wreck coming down,
+  // a board from the network — so none can be missed, and a new board or
+  // seat (health up, or someone else's tank) is never mistaken for a hit.
+  // SHAKE in Settings (barrage.shake) turns off both, and the aiming tick;
+  // the shake also stays off for anyone who asks for reduced motion.
+  const shakeSelect = document.getElementById('shake-select');
+  const SHAKE_MS = 380;          // how long the battlefield shakes
+  let shakeOn = true;
+  let feltSeat = -1, feltHp = null;
+  let shakeAt = -Infinity, shakeAmp = 0;
+  const reduceMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+
+  /** Vibrate, if this device can and SHAKE is on. */
+  function buzz(pattern) {
+    if (!shakeOn) return false;
+    try { if (navigator.vibrate) return navigator.vibrate(pattern); } catch (_) { /* not allowed */ }
+    return false;
+  }
+
+  /** The buzz for a hit of `dmg`, or for being destroyed. */
+  function hitPattern(dmg, killed) {
+    if (killed) return [120, 70, 180];
+    return dmg >= 30 ? 110 : dmg >= 15 ? 60 : 30;
+  }
+
+  /** Once a frame: has your tank lost health since the last one? */
+  function feelHits() {
+    const seat = youSeat();
+    const t = tanks[seat];
+    if (seat !== feltSeat || !t) { feltSeat = seat; feltHp = t ? t.hp : null; return; }
+    if (feltHp !== null && t.hp < feltHp - 0.5) {
+      const dmg = feltHp - t.hp;
+      buzz(hitPattern(dmg, !t.alive));
+      if (shakeOn && !(reduceMotion && reduceMotion.matches)) {
+        shakeAt = performance.now();
+        // In CSS pixels: 3 for a scratch, up to 10 for a heavy hit or a kill.
+        shakeAmp = !t.alive ? 10 : Math.min(10, 3 + dmg / 5);
+      }
+    }
+    feltHp = t.hp;
+  }
+
+  /** Where the battlefield is drawn this frame, shaken; a sway, never random. */
+  function shakeOffset() {
+    const age = performance.now() - shakeAt;
+    if (age < 0 || age >= SHAKE_MS) return { x: 0, y: 0 };
+    const fade = 1 - age / SHAKE_MS;
+    const a = shakeAmp * fade * fade;
+    return { x: Math.sin(age * 0.11) * a, y: Math.cos(age * 0.083) * a * 0.6 };
+  }
+
+  function setShakeOn(on) {
+    shakeOn = !!on;
+    shakeSelect.value = shakeOn ? 'on' : 'off';
+    if (!shakeOn) shakeAt = -Infinity;
+  }
+  shakeSelect.addEventListener('change', () => {
+    setShakeOn(shakeSelect.value !== 'off');
+    try { localStorage.setItem('barrage.shake', shakeOn ? 'on' : 'off'); } catch (e) { /* private mode */ }
+  });
+  function initShake() {
+    let stored = null;
+    try { stored = localStorage.getItem('barrage.shake'); } catch (e) { /* private mode */ }
+    setShakeOn(stored !== 'off');
+  }
+
   // ---------- Boot ----------
   // The canvas is sized entirely in resize() now, so missing a size change
   // leaves the playfield visibly wrong rather than merely blurry — the old
@@ -8444,6 +8528,7 @@ if ('serviceWorker' in navigator) {
   initTheme();
   initSizePref();
   initReactions();
+  initShake();
   placeNetGroup();
   initSetup();
   refreshOpponentUi();
@@ -8539,6 +8624,7 @@ if ('serviceWorker' in navigator) {
     eventToWorld, CAM_MIN, CAM_MAX,
     get camZoom() { return camZoom; }, get camX() { return camX; }, get camY() { return camY; },
     get camPanned() { return camPanned; }, set camPanned(v) { camPanned = v; },
+    buzz, hitPattern, feelHits, shakeOffset, setShakeOn, SHAKE_MS, get shakeOn() { return shakeOn; },
     get camReturn() { return camReturn; }, seatViews, camSaveView, camTurnStarted, localHumanSeat,
     camNewBoard, camWatchSky, CAM_MARGIN, CAM_LEAD, get skyHandsOff() { return skyHandsOff; },
     get turnToken() { return turnToken; }, get lastWinner() { return lastWinner; },
