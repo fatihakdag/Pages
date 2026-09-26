@@ -994,6 +994,27 @@
     touch-action: manipulation;
   }
   .modal-close:hover { background: #1e1c29; border-color: #55526a; }
+  /* More below: a fade over the panel's foot with a ▼, while there is more to
+     scroll to (refreshMoreHint). Phones hide scrollbars until you scroll, so
+     a panel cut off by a small screen looked finished. It overlays the
+     content rather than taking room (the margins cancel its height and the
+     gap), spans the padding, and is never in the way of a tap. */
+  .modal-panel.more::after {
+    content: '▼';
+    position: sticky;
+    bottom: -14px;
+    flex: 0 0 auto;
+    margin: -52px -14px 0;
+    height: 40px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 5px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0), var(--panel-bg) 72%);
+    color: var(--text-main);
+    font-size: 12px;
+    pointer-events: none;
+  }
   /* Two columns where there is room, one where there is not — a 320px phone
      and a 390px-tall landscape both end up readable without their own rule. */
   #settings-grid {
@@ -1719,7 +1740,7 @@
        way in when there is none, the room once there is. The controls keep the
        ids they had when they sat in Settings. -->
   <div id="online-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="online-title">
-    <div class="modal-panel">
+    <div id="online-panel" class="modal-panel">
       <div class="modal-head">
         <div id="online-title" class="modal-title" data-i18n="playOnline">PLAY ONLINE</div>
         <button type="button" id="online-close" class="modal-close" aria-label="Close">✕</button>
@@ -1828,7 +1849,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v83';
+  const BUILD = 'v84';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -3608,11 +3629,30 @@ if ('serviceWorker' in navigator) {
     openModal = modal;
     modalOpener = opener || null;
     if (focusEl && focusEl.focus) focusEl.focus();
+    refreshMoreHint();
   }
+
+  // Whether the open dialog has more below than fits: its panel shows a ▼
+  // over a fade at its foot until you scroll to the end (CSS .more). Checked
+  // on opening, on scrolling, on resizing, and when the online dialog changes
+  // what it shows.
+  const modalPanels = [
+    [settingsModal, document.getElementById('settings-panel')],
+    [onlineModal, document.getElementById('online-panel')]
+  ];
+  function refreshMoreHint() {
+    for (const [modal, panel] of modalPanels) {
+      const below = panel.scrollHeight - panel.scrollTop - panel.clientHeight;
+      panel.classList.toggle('more', openModal === modal && below > 8);
+    }
+  }
+  for (const [, panel] of modalPanels) panel.addEventListener('scroll', refreshMoreHint);
+  window.addEventListener('resize', refreshMoreHint);
   function closeDialog() {
     if (!openModal) return;
     openModal.classList.remove('show');
     openModal = null;
+    refreshMoreHint();
     const back = modalOpener;
     modalOpener = null;
     if (back && back.focus) back.focus();
@@ -7866,6 +7906,9 @@ if ('serviceWorker' in navigator) {
    * happening, and is left out when there is nothing to say.
    */
   function refreshOnlineDialog() {
+    try { fillOnlineDialog(); } finally { refreshMoreHint(); }
+  }
+  function fillOnlineDialog() {
     const idle = online.status === 'offline' && !online.rejoin;
     onlineWayIn.hidden = !idle;
     onlineRoomView.hidden = idle;
@@ -8580,7 +8623,7 @@ if ('serviceWorker' in navigator) {
            netPill, netStatusEl, netRejoinBtn, netInviteBtn, netLeaveBtn,
            onlineSeatsSelect, onlineModal, onlineWayIn, onlineRoomView, onlineRoomCode, onlineShare,
            onlinePlayers, onlineRejoinBtn, onlineLeaveBtn, openOnlineBtn, onlineCloseBtn },
-    dialogOpen, settingsIsOpen, onlineIsOpen, openOnline, closeDialog, refreshOnlineDialog,
+    dialogOpen, settingsIsOpen, onlineIsOpen, openOnline, closeDialog, refreshOnlineDialog, refreshMoreHint,
     syncControlsFromTank, updateHUD, nudge,
     aimFromPull, pullReach, canvas, get aimDrag() { return aimDrag; },
     heliSize, spawnHeli, heliHitBy, heliCrash, updateHeli, summonHeli,
