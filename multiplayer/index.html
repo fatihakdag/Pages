@@ -1865,7 +1865,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v90';
+  const BUILD = 'v92';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Tank size: one switch for the option ----------
@@ -1987,7 +1987,7 @@ if ('serviceWorker' in navigator) {
       playAgainHint: 'Tap Play Again for a new terrain and rematch.',
       w_standard: 'Standard Shell', w_big: 'Big Bomb', w_cluster: 'Cluster Bomb',
       w_roller: 'Roller Mine', w_mirv: 'MIRV', w_missile: 'Guided Missile',
-      w_jet: 'Jet Strike', jetDrop: '{name}: FIRE TO DROP',
+      w_jet: 'Jet Strike', jetDrop: '{name}: FIRE TO DROP', jetInbound: '{name}: JET INBOUND',
       unlimited: 'unlimited', nLeft: '{n} left',
       tanks2: '2 Players', tanks3: '3 Players', tanks4: '4 Players',
       tanks5: '5 Players', tanks6: '6 Players',
@@ -2038,7 +2038,7 @@ if ('serviceWorker' in navigator) {
       playAgainHint: 'Yeni arazi ve rövanş için Tekrar Oyna\'ya dokun.',
       w_standard: 'Standart Mermi', w_big: 'Büyük Bomba', w_cluster: 'Misket Bombası',
       w_roller: 'Yuvarlanan Mayın', w_mirv: 'MIRV', w_missile: 'Güdümlü Füze',
-      w_jet: 'Jet Saldırısı', jetDrop: '{name}: BIRAKMAK İÇİN ATEŞ',
+      w_jet: 'Jet Saldırısı', jetDrop: '{name}: BIRAKMAK İÇİN ATEŞ', jetInbound: '{name}: JET GELİYOR',
       unlimited: 'sınırsız', nLeft: '{n} kaldı',
       tanks2: '2 Oyuncu', tanks3: '3 Oyuncu', tanks4: '4 Oyuncu',
       tanks5: '5 Oyuncu', tanks6: '6 Oyuncu',
@@ -3327,7 +3327,7 @@ if ('serviceWorker' in navigator) {
       // surprise — to the player thinking, or to the one waiting.
       else if (netSeatIsAi(currentPlayer)) turnBanner.textContent = txt('netAiTook', { name: who });
       else if (left !== null && left <= 20) turnBanner.textContent = txt('netTurnLeft', { name: who, s: left });
-      else if (jetArmed(currentPlayer)) turnBanner.textContent = txt('jetDrop', { name: who });
+      else if (jetArmed(currentPlayer)) turnBanner.textContent = txt(isAi(currentPlayer) ? 'jetInbound' : 'jetDrop', { name: who });
       else turnBanner.textContent = txt(isAi(currentPlayer) ? 'thinking' : 'aimFire', { name: who });
     }
   }
@@ -4269,18 +4269,22 @@ if ('serviceWorker' in navigator) {
   // heli*Jitter  - absolute aim error for that shot, deliberately far wider than
   //                the tank jitter above, so even Brutal mostly misses a target
   //                this small and moving
+  // jetJitter    - seconds either side of the right moment that it lets a jet's
+  //                bombs go; only the levels that call a jet in have one
   const DIFFICULTY_SETTINGS = {
     easy:    { angleStep: 6, powerStep: 6,  angleJitter: 16, powerJitter: 22, missChance: 0.30, thinkMs: 900,
                heliChance: 0.30, heliPatience: 0.15, heliAngleJitter: 14, heliPowerJitter: 18 },
     medium:  { angleStep: 3, powerStep: 3,  angleJitter: 7,  powerJitter: 10, missChance: 0.12, thinkMs: 750,
                heliChance: 0.30, heliPatience: 0.40, heliAngleJitter: 10, heliPowerJitter: 13 },
     hard:    { angleStep: 1.5, powerStep: 1.5, angleJitter: 3,  powerJitter: 4,  missChance: 0.04, thinkMs: 600,
-               heliChance: 0.30, heliPatience: 0.65, heliAngleJitter: 7,  heliPowerJitter: 9 },
+               heliChance: 0.30, heliPatience: 0.65, heliAngleJitter: 7,  heliPowerJitter: 9,
+               jetJitter: 0.44 },
     // Brutal solves as finely as it can, then misses a little anyway: about three
     // shots in four land close enough to hurt, where Hard manages about half.
     // Never missing at all made it a wall rather than an opponent.
     brutal:  { angleStep: 1, powerStep: 1,  angleJitter: 1.7, powerJitter: 2.2, missChance: 0.10, thinkMs: 450,
-               heliChance: 0.30, heliPatience: 0.85, heliAngleJitter: 3,  heliPowerJitter: 4 }
+               heliChance: 0.30, heliPatience: 0.85, heliAngleJitter: 3,  heliPowerJitter: 4,
+               jetJitter: 0.29 }
   };
 
   // Simulates a shot with the same physics as the real game and returns
@@ -4498,6 +4502,9 @@ if ('serviceWorker' in navigator) {
     const token = turnToken;
     const stillOurTurn = () =>
       turnToken === token && state === 'AIMING' && currentPlayer === seat;
+    // Its jet is already on the way (it was held behind a dialog): back to
+    // waiting for the moment to drop.
+    if (jetArmed(seat)) { aiJetDrop(seat, stillOurTurn); return; }
     setTimeout(() => {
       if (!stillOurTurn()) return;
       if (dialogOpen()) { aiHold(); return; }
@@ -4511,17 +4518,19 @@ if ('serviceWorker' in navigator) {
       // shell toward the specials, and a MIRV forgives a rough solution, so
       // the weaker levels get proportionally more use out of it.
       // The missile is left in its rack while an aircraft is up: it would
-      // chase that rather than the tank the CPU aimed at.
-      // The jet is absent: it is not aimed at all but timed, by pressing FIRE
-      // at the right moment of a pass.
+      // chase that rather than the tank the CPU aimed at. So is the jet —
+      // there is only ever one, and it could fly into the helicopter. Only
+      // Hard and Brutal call a jet in at all.
       if (aiDifficulty === 'easy') {
         preferred = pick(r, [[0.77, 'standard'], [0.83, 'big'], [0.88, 'cluster'], [0.92, 'roller'], [0.97, 'mirv']], 'missile');
       } else if (aiDifficulty === 'medium') {
         preferred = pick(r, [[0.52, 'standard'], [0.66, 'big'], [0.77, 'cluster'], [0.86, 'roller'], [0.94, 'mirv']], 'missile');
       } else {
-        preferred = pick(r, [[0.28, 'standard'], [0.46, 'big'], [0.62, 'cluster'], [0.78, 'roller'], [0.90, 'mirv']], 'missile');
+        preferred = pick(r, [[0.22, 'standard'], [0.40, 'big'], [0.56, 'cluster'], [0.72, 'roller'], [0.84, 'mirv'], [0.92, 'missile']], 'jet');
       }
-      if (WEAPONS[preferred].guides && ((heli && !heli.falling) || (jet && !jet.falling))) preferred = 'standard';
+      const airborne = (heli && !heli.falling) || jet;
+      if ((WEAPONS[preferred].guides || preferred === 'jet') && airborne) preferred = 'standard';
+      if (preferred === 'jet' && aiCallJet(seat)) { aiJetDrop(seat, stillOurTurn); return; }
       shooter.weapon = weaponAvailable(shooter, preferred) ? preferred : 'standard';
       const shot = chooseAiShot(aiDifficulty, shooter.weapon);
       shooter.angle = shot.angle;
@@ -4535,6 +4544,110 @@ if ('serviceWorker' in navigator) {
         fire();
       }, aiFireDelayMs());
     }, cfg.thinkMs);
+  }
+
+  // The enemy a CPU's jet goes for: the weakest, then the nearest.
+  function aiJetTarget(seat) {
+    const me = tanks[seat];
+    let best = null;
+    tanks.forEach((t, i) => {
+      if (!t.alive || i === seat) return;
+      if (!best || t.hp < best.hp ||
+          (t.hp === best.hp && Math.abs(t.x - me.x) < Math.abs(best.x - me.x))) best = t;
+    });
+    return best;
+  }
+
+  /** Call a jet in for a CPU seat, flying from its own side toward its target. */
+  function aiCallJet(seat) {
+    const t = tanks[seat];
+    const target = aiJetTarget(seat);
+    if (!target || !weaponAvailable(t, 'jet')) return false;
+    t.angle = target.x >= t.x ? 60 : 120;   // jetFromLeft reads the barrel
+    return callInJet(seat);
+  }
+
+  /**
+   * Where a bomb let go at (x, y) with speed vx comes down, by the same
+   * integrator stepProjectile uses. Stops at the ground; the tank standing on
+   * it is the target, so there is no need to test hulls on the way.
+   */
+  function predictBombX(x, y, vx, windAccel) {
+    let vy = 0;
+    const sdt = SIM_DT / 2;
+    for (let i = 0; i < 2400; i++) {
+      vx += windAccel * physScale * sdt;
+      vy += GRAVITY * physScale * sdt;
+      x += vx * sdt;
+      y += vy * sdt;
+      if (x < -20 || x > W + 20) break;
+      if (y >= groundHeightAt(x)) break;
+    }
+    return x;
+  }
+
+  /**
+   * The match time at which pressing FIRE puts the middle bomb of the stick
+   * on `target`, or null if the jet is gone. The route is fixed, so this just
+   * tries every step of what is left of the pass.
+   */
+  function planJetDrop(target) {
+    if (!jet || jet.falling) return null;
+    const dir = jet.fromLeft ? 1 : -1;
+    const vx = dir * jet.speed;
+    const y = jet.y + jetSize() * 0.12;
+    const held = Math.floor(JET.bombs / 2) * JET.bombGapSteps * SIM_DT;
+    let bestT = null, bestErr = Infinity;
+    for (let T = Math.max(netNow() + 0.1, jet.t0); ; T += SIM_DT) {
+      const at = jetRouteAt(jet, T);
+      if (!at) break;
+      if (at.x < 0 || at.x > W) continue;
+      const err = Math.abs(predictBombX(at.x + vx * held, y, vx, wind) - target.x);
+      if (err < bestErr) { bestErr = err; bestT = T; }
+    }
+    return bestT;
+  }
+
+  /** The stretch of the pass, in match time, with the jet over the field. */
+  function jetOverFieldSpan() {
+    const w = jetSize();
+    const toEdge = w / jet.speed;
+    return [jet.t0 + toEdge, jet.t0 + toEdge + W / jet.speed];
+  }
+
+  /**
+   * A CPU seat's jet is on its way: wait for the moment to let the bombs go,
+   * and miss it by a little, the way it misses with a shell. If the pass is
+   * lost (a dialog was up through it) the turn is played over without it.
+   */
+  function aiJetDrop(seat, stillOurTurn) {
+    const cfg = DIFFICULTY_SETTINGS[aiDifficulty] || DIFFICULTY_SETTINGS.medium;
+    const target = aiJetTarget(seat);
+    const T = target ? planJetDrop(target) : null;
+    syncControlsFromTank();
+    cpuAimReady = true;
+    updateHUD();
+    if (T === null) {
+      // Too late in the pass to reach anyone: let the jet leave, then play
+      // the turn over without it.
+      setTimeout(() => {
+        if (!stillOurTurn()) return;
+        jetFlyTo(netNow());
+        maybeAiTurn();
+      }, 250);
+      return;
+    }
+    let off = (Math.random() * 2 - 1) * (cfg.jetJitter ?? 0.3);
+    if (Math.random() < cfg.missChance) off *= 2.5;
+    const [enter, leave] = jetOverFieldSpan();
+    const at = Math.max(enter + 0.05, Math.min(leave - 0.05, T + off));
+    setTimeout(() => {
+      if (!stillOurTurn()) return;
+      if (dialogOpen()) { aiHold(); return; }
+      jetFlyTo(netNow());
+      if (jetArmed(seat) && jetOverField()) fire();
+      else maybeAiTurn();   // the pass is over, or not quite begun: think again
+    }, Math.max(0, (at - netNow()) * 1000));
   }
 
   // ---------- Roller mine ----------
@@ -5441,9 +5554,15 @@ if ('serviceWorker' in navigator) {
    */
   function summonJet() {
     const seat = currentPlayer;
+    if (isAi(seat) || netRemoteSeat(seat)) return false;
+    return callInJet(seat);
+  }
+
+  /** summonJet without the check that a person is the one calling: the CPU calls its own. */
+  function callInJet(seat) {
     const t = tanks[seat];
-    if (!t || !t.alive || state !== 'AIMING' || jet || !terrain.length) return false;
-    if (isAi(seat) || netRemoteSeat(seat) || !weaponAvailable(t, 'jet')) return false;
+    if (!t || !t.alive || state !== 'AIMING' || seat !== currentPlayer || jet || !terrain.length) return false;
+    if (!weaponAvailable(t, 'jet')) return false;
     spawnJet(seat, jetFromLeft(t));
     t.ammo.jet -= 1;
     t.weapon = 'jet';
@@ -5595,9 +5714,16 @@ if ('serviceWorker' in navigator) {
   // near one), the far wing seen from a little below, and the flat vectoring
   // nozzle with an afterburner and its shock diamonds. Drawn in units of the
   // jet's length, so the whole airframe sits inside jetHitBy's box.
+  /** The colour of the seat that called the jet in: its tail and its bombs. */
+  function jetColor(seat = jet && jet.seat) {
+    const t = tanks[seat];
+    return t ? t.color : WEAPONS.jet.color;
+  }
+
   function drawJet() {
     if (!jet) return;
     const w = jetSize();
+    const mark = jetColor();
     const at = jetDrawPos();
     const dead = jet.falling;
     const skin = dead ? '#6b4a34' : '#a4adb6';
@@ -5643,6 +5769,14 @@ if ('serviceWorker' in navigator) {
     poly([-0.30, 0.035, -0.47, 0.075, -0.57, 0.075, -0.49, 0.03]);
     poly([-0.18, -0.062, -0.30, -0.245, -0.37, -0.245, -0.40, -0.062]);
     poly([0.10, 0.035, -0.19, 0.13, -0.28, 0.13, -0.33, 0.045]);
+    // The caller's colour on the tail, the way a squadron marks its jets; the
+    // far fin carries it too, in shadow. Burnt off a wreck.
+    if (!dead) {
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = mark;
+      poly([-0.18, -0.062, -0.30, -0.245, -0.37, -0.245, -0.40, -0.062]);
+      ctx.globalAlpha = 1;
+    }
 
     // Fuselage: the chined nose, the spine running back to the fins, the belly.
     ctx.fillStyle = skin;
@@ -5675,9 +5809,15 @@ if ('serviceWorker' in navigator) {
     poly([-0.44, -0.045, -0.505, -0.038, -0.505, 0.038, -0.44, 0.045]);
 
     // The near fin, canted, and the near tailplane.
-    ctx.fillStyle = shade;
+    ctx.fillStyle = dead ? shade : mark;
     poly([-0.24, -0.062, -0.37, -0.25, -0.44, -0.25, -0.465, -0.055]);
+    ctx.fillStyle = shade;
     poly([-0.33, 0.03, -0.49, 0.08, -0.58, 0.08, -0.50, 0.025]);
+    // A cheatline along the chine, nose to tail, in the same colour.
+    if (!dead) {
+      ctx.fillStyle = mark;
+      poly([0.40, 0.012, 0.28, 0.006, -0.42, 0.012, -0.42, 0.026, 0.28, 0.02]);
+    }
 
     // Bubble canopy, with the gold tint of its coating and a glint.
     const glass = ctx.createLinearGradient(0, -0.115, 0, -0.04);
@@ -5701,11 +5841,14 @@ if ('serviceWorker' in navigator) {
 
     // The stick still aboard, hanging under the bay.
     if (!dead && !jet.bombed) {
-      ctx.fillStyle = WEAPONS.jet.color;
+      ctx.fillStyle = mark;
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = 0.008;
       for (let i = 0; i < JET.bombs; i++) {
         ctx.beginPath();
         ctx.ellipse(0.0 - i * 0.11, 0.095, 0.04, 0.017, 0, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
       }
     }
     ctx.restore();
@@ -6752,15 +6895,22 @@ if ('serviceWorker' in navigator) {
         ctx.fill();
         ctx.restore();
       } else if (pw.jet) {
-        // A finned bomb, nose along its path, so the forward throw reads.
+        // A finned bomb, nose along its path, so the forward throw reads. In
+        // the colour of whoever called the jet in, with a dark rim so a pale
+        // one still shows against a pale sky.
         ctx.save();
         ctx.translate(hx, hy);
         ctx.rotate(Math.atan2(p.vy, p.vx));
         ctx.scale(boost, boost);
+        ctx.fillStyle = jetColor(p.firedBy);
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        ctx.lineWidth = 0.8;
         ctx.beginPath();
         ctx.ellipse(0, 0, 5, 2.4, 0, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
         ctx.fillRect(-7, -2.6, 2.4, 5.2);
+        ctx.strokeRect(-7, -2.6, 2.4, 5.2);
         ctx.restore();
       } else {
         // An unsplit MIRV is drawn fatter than the warheads it carries, and a
@@ -8747,8 +8897,8 @@ if ('serviceWorker' in navigator) {
     heliOut, heliIn, moveHeli, heliFollowClock, netAnnounceHeli, heliAuthority, heliSignature,
     heliDrawPos, heliRouteAt, heliLegAt, heliFlyTo, HELI_MIN_LEGS, HELI_MAX_LEGS,
     isShipTheme, drawHeli,
-    JET, jetSize, spawnJet, jetFromLeft, summonJet, jetRouteAt, jetFlyTo, jetHitBy, jetArmed, jetOverField,
-    launchJetBombs, jetShotDown, jetMeetsHeliAt, jetHeliCollide, moveJet, jetFollowClock, jetDrawPos, jetIn, jetOut, drawJet,
+    JET, jetSize, spawnJet, jetFromLeft, summonJet, callInJet, aiCallJet, aiJetTarget, planJetDrop, predictBombX, jetOverFieldSpan, jetRouteAt, jetFlyTo, jetHitBy, jetArmed, jetOverField,
+    launchJetBombs, jetColor, jetShotDown, jetMeetsHeliAt, jetHeliCollide, moveJet, jetFollowClock, jetDrawPos, jetIn, jetOut, drawJet,
     get jet() { return jet; }, set jet(v) { jet = v; },
     SHOT_SKIP_S, SHOT_SKIP_TO_S, SHOT_CATCHUP_FULL_S, CLOCK_RESYNC_MS, netRebaseClock,
     get simClock() { return simClock; },

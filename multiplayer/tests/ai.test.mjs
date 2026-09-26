@@ -176,6 +176,7 @@ test('the CPU reaches for the guided missile now and then', () => {
     g.currentPlayer = 1;
     g.state = 'AIMING';
     Object.keys(cpu.ammo).forEach(k => { cpu.ammo[k] = cpu.ammo[k] === Infinity ? Infinity : 5; });
+    cpu.ammo.jet = 0;   // a jet left in the sky would keep the missile racked
     g.maybeAiTurn();
     h.advance(2000);
     picked.add(cpu.weapon);
@@ -247,4 +248,92 @@ test('brutal out-shoots hard but is not a sure thing', () => {
   const brutal = rate('brutal');
   assert.ok(brutal > hard, `brutal (${brutal}) should land in range more often than hard (${hard})`);
   assert.ok(brutal < 1, 'brutal should still miss now and then');
+});
+
+// ---------- The jet ----------
+
+/** A Hard or Brutal CPU (seat 1) on flat ground, about to pick its weapon. */
+function jetGame(difficulty = 'brutal') {
+  const h = cpuGame({ difficulty });
+  const { g } = h;
+  h.placeTanksAt([700, 200]);
+  g.heliDue = g.netNow() + 1e6;
+  g.currentPlayer = 1;
+  g.state = 'AIMING';
+  return h;
+}
+
+test('Hard and Brutal call a jet in and drop its bombs on their target', () => {
+  for (const difficulty of ['hard', 'brutal']) {
+    const h = jetGame(difficulty);
+    const { g } = h;
+    g.DIFFICULTY_SETTINGS[difficulty].jetJitter = 0;   // the moment it aims for
+    h.queueRandom([0.99]);                             // the jet's slice of the table
+    g.maybeAiTurn();
+    h.advanceUntil(() => g.jet, { maxMs: 3000 });
+    assert.ok(g.jet, `${difficulty} called a jet in`);
+    assert.equal(g.jet.seat, 1);
+    assert.equal(g.jet.fromLeft, true, 'it flies from its own side (x 200) toward the target (x 700)');
+    assert.equal(g.tanks[1].ammo.jet, g.WEAPONS.jet.startAmmo - 1, 'the round is spent');
+
+    h.advanceUntil(() => g.state !== 'AIMING', { maxMs: 15000 });
+    assert.equal(g.projectiles.length, g.JET.bombs, 'it let the stick go');
+    h.advanceUntil(() => g.state === 'AIMING' || g.state === 'GAMEOVER', { maxMs: 20000 });
+    assert.ok(g.tanks[0].hp < 100 - g.WEAPONS.jet.damageMax, `${difficulty} did ${100 - g.tanks[0].hp}`);
+    assert.equal(g.tanks[1].hp, 100);
+  }
+});
+
+test('the drop it plans puts the middle bomb on the target', () => {
+  const h = jetGame();
+  const { g } = h;
+  g.wind = g.WIND_MAX * 0.6;
+  g.tanks[1].angle = 120;
+  g.callInJet(1);
+  const T = g.planJetDrop(g.tanks[0]);
+  const at = g.jetRouteAt(g.jet, T);
+  const vx = at.dir * g.jet.speed;
+  const held = Math.floor(g.JET.bombs / 2) * g.JET.bombGapSteps * g.SIM_DT;
+  const land = g.predictBombX(at.x + vx * held, g.jet.y + g.jetSize() * 0.12, vx, g.wind);
+  assert.ok(Math.abs(land - g.tanks[0].x) < 4, `lands at ${land.toFixed(1)}`);
+});
+
+test('Easy and Medium never call a jet in', () => {
+  for (const difficulty of ['easy', 'medium']) {
+    const h = jetGame(difficulty);
+    const { g } = h;
+    h.fixRandom(0.99);   // the far end of every table
+    g.maybeAiTurn();
+    h.advance(2000);
+    assert.equal(g.jet, null, difficulty);
+    assert.equal(g.tanks[1].ammo.jet, g.WEAPONS.jet.startAmmo);
+  }
+});
+
+test('no jet while the helicopter is up', () => {
+  const h = jetGame('hard');
+  const { g } = h;
+  g.spawnHeli();
+  h.fixRandom(0.99);
+  g.maybeAiTurn();
+  h.advance(1000);
+  assert.equal(g.jet, null);
+  assert.equal(g.tanks[1].weapon, 'standard');
+});
+
+test('a CPU jet held behind a dialog through its pass: the turn is played without it', () => {
+  const h = jetGame();
+  const { g } = h;
+  h.queueRandom([0.99]);
+  g.maybeAiTurn();
+  h.advanceUntil(() => g.jet, { maxMs: 3000 });
+  g.el.settingsBtn.dispatch('click');
+  h.advanceUntil(() => !g.jet, { maxMs: 15000 });
+  assert.equal(g.state, 'AIMING', 'nothing dropped behind the panel');
+  assert.equal(g.currentPlayer, 1);
+
+  g.closeDialog();
+  h.advanceUntil(() => g.state !== 'AIMING', { maxMs: 15000 });
+  assert.notEqual(g.projectiles.length, 0, 'it fires something else instead');
+  assert.ok(g.projectiles.every(p => p.weapon !== 'jet'));
 });

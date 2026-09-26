@@ -122,7 +122,7 @@ test('only one jet at a time', () => {
   assert.equal(g.weaponButtons.get('jet').disabled, false, 'free again once it has left the sky');
 });
 
-test('a CPU seat does not call one in', () => {
+test('the picker cannot call one in on a CPU seat’s turn', () => {
   const h = loadFlat();
   const { g } = h;
   g.cpuMode = true;
@@ -680,4 +680,17 @@ test('a missile chasing a jet ends the same on both screens', (t) => {
   assert.equal(guest.g.jet, null);
   assert.deepEqual(Array.from(guest.g.terrain), Array.from(host.g.terrain), 'the same craters');
   assert.deepEqual(Array.from(guest.g.tanks, t => t.hp), Array.from(host.g.tanks, t => t.hp));
+});
+
+test('the jet and its bombs wear the colour of the seat that called it in', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.heliDue = g.netNow() + 1e6;
+  // The stub DOM has no stylesheet to read the seat colours from.
+  g.tanks[0].color = '#ff7a45';
+  g.tanks[1].color = '#4dc0ff';
+  g.jet = g.jetIn(routeJet(g, { x: 400, seat: 1 }));
+  assert.equal(g.jetColor(), '#4dc0ff');
+  assert.equal(g.jetColor(0), '#ff7a45', 'a bomb is coloured by its own firedBy');
+  assert.equal(g.jetColor(9), g.WEAPONS.jet.color, 'no such seat: the weapon colour');
 });
