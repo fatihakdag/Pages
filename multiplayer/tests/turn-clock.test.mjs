@@ -32,7 +32,7 @@ const connect = (h, room) => {
 /** A match of `seats` players, seen from the seat at `asSeat`. */
 function matchOf(seats, asSeat = 1) {
   const host = loadFlat(), me = loadFlat();
-  host.g.el.countSelect.value = String(seats);
+  host.g.el2.onlineSeatsSelect.value = String(seats);
   const hs = connect(host), ms = connect(me, 'ABCD');
   const ids = Array.from({ length: seats }, (_, i) => i + 1);
   hs.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });

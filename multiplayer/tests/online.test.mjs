@@ -61,7 +61,7 @@ test('hosting asks the relay for a new room', () => {
   assert.equal(h.g.online.status, 'waiting');
   assert.equal(h.g.online.room, 'ABCD');
   assert.equal(h.g.online.host, true);
-  assert.match(h.g.el2.onlineStatus.textContent, /ABCD/, 'the code is shown so it can be shared');
+  assert.equal(h.g.el2.onlineRoomCode.textContent, 'ABCD', 'the code is shown so it can be shared');
 });
 
 test('joining names the room and announces us to the host', () => {
@@ -425,9 +425,8 @@ test('the main screen mirrors the online status, and hides when offline', () => 
   sock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
 
   assert.equal(h.g.el2.netPill.hidden, false, 'once online it is on screen');
-  assert.equal(h.g.el2.netStatusEl.textContent, h.g.el2.onlineStatus.textContent,
-    'and says the same thing as the panel inside Settings');
-  assert.match(h.g.el2.netStatusEl.textContent, /ABCD/);
+  assert.match(h.g.el2.netStatusEl.textContent, /ABCD/, 'with the room code');
+  assert.match(h.g.el2.netStatusEl.textContent, /1\/2/, 'and how full it is');
 });
 
 test('the main screen offers a way in when there is no connection to report', () => {
@@ -447,11 +446,11 @@ test('the main screen offers a way in when there is no connection to report', ()
   assert.equal(h.g.el2.netInviteBtn.hidden, false, 'leaving offers the way back in');
 });
 
-test('the invitation opens the panel that hosts and joins', () => {
+test('the invitation opens the online dialog, not Settings', () => {
   const h = load();
   h.g.el2.netInviteBtn.dispatch('click');
-  assert.ok(h.g.el.settingsModal.classList.contains('show'),
-    'it is a shortcut to Settings, not a second lobby');
+  assert.ok(h.g.el2.onlineModal.classList.contains('show'), 'the dialog that hosts and joins');
+  assert.ok(!h.g.el.settingsModal.classList.contains('show'));
 });
 
 test('a lost connection offers a way back once retrying has given up', () => {
@@ -499,8 +498,8 @@ test('a room we left on purpose is not one we are offered back into', () => {
 
 test('with four seats the status names every player who left', () => {
   const h = load();
-  h.g.el.countSelect.value = '4';
-  h.g.el.countSelect.dispatch('change');
+  h.g.el2.onlineSeatsSelect.value = '4';
+  h.g.el2.onlineSeatsSelect.dispatch('change');
 
   const sock = connect(h);
   sock.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
@@ -568,8 +567,10 @@ test('a live room reads in the language the player picked', () => {
   h.g.el.langCheckbox.checked = true;
   h.g.el.langCheckbox.dispatch('change');
 
+  assert.equal(h.g.el2.netStatusEl.textContent,
+    h.g.txt('netWaiting', { code: 'ABCD', n: 1, total: 2 }), 'the pill');
   assert.equal(h.g.el2.onlineStatus.textContent,
-    h.g.txt('netWaiting', { code: 'ABCD', n: 1, total: 2 }));
+    h.g.txt('tableFilling', { n: 1, total: 2 }), 'and the dialog');
 });
 
 test('every online string has a Turkish counterpart', () => {

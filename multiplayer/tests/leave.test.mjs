@@ -218,7 +218,7 @@ test('if the host leaves the lobby, the players waiting say hello to the new one
   // it fills. Player 2 is host now, and deals only to players it has heard
   // from — player 3's hello went to the old host.
   const p2 = load(), p3 = load();
-  p2.g.el.countSelect.value = '3';
+  p2.g.el2.onlineSeatsSelect.value = '3';
   const s2 = connect(p2, 'ABCD'), s3 = connect(p3, 'ABCD');
   s2.deliver({ t: 'joined', room: 'ABCD', id: 2, host: 1, peers: [{ id: 1, name: '' }] });
   s3.deliver({ t: 'joined', room: 'ABCD', id: 3, host: 1, peers: [{ id: 1, name: '' }, { id: 2, name: '' }] });

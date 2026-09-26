@@ -36,7 +36,7 @@ function arrive(sock, id, token) {
 /** A host that has opened a room for `seats` players. */
 function hostFor(seats) {
   const h = load();
-  h.g.el.countSelect.value = String(seats);
+  h.g.el2.onlineSeatsSelect.value = String(seats);
   const s = connect(h);
   s.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
   return { h, s };
@@ -348,7 +348,7 @@ test('with real dice, both who sits where and who fires first vary', () => {
   const hostSeats = new Set(), firsts = new Set();
   for (let seed = 1; seed <= 12; seed++) {
     const h = load({ randomDeal: true, seed });
-    h.g.el.countSelect.value = '3';
+    h.g.el2.onlineSeatsSelect.value = '3';
     const s = connect(h);
     s.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
     arrive(s, 2);
@@ -470,7 +470,7 @@ test('with real dice, every seat ends up on the left edge', () => {
   const lefts = new Set();
   for (let seed = 1; seed <= 12; seed++) {
     const h = load({ randomDeal: true, seed });
-    h.g.el.countSelect.value = '3';
+    h.g.el2.onlineSeatsSelect.value = '3';
     const s = connect(h);
     s.deliver({ t: 'joined', room: 'ABCD', id: 1, host: 1, peers: [] });
     arrive(s, 2);
