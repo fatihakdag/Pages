@@ -1865,7 +1865,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v91';
+  const BUILD = 'v92';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Tank size: one switch for the option ----------
@@ -5714,9 +5714,16 @@ if ('serviceWorker' in navigator) {
   // near one), the far wing seen from a little below, and the flat vectoring
   // nozzle with an afterburner and its shock diamonds. Drawn in units of the
   // jet's length, so the whole airframe sits inside jetHitBy's box.
+  /** The colour of the seat that called the jet in: its tail and its bombs. */
+  function jetColor(seat = jet && jet.seat) {
+    const t = tanks[seat];
+    return t ? t.color : WEAPONS.jet.color;
+  }
+
   function drawJet() {
     if (!jet) return;
     const w = jetSize();
+    const mark = jetColor();
     const at = jetDrawPos();
     const dead = jet.falling;
     const skin = dead ? '#6b4a34' : '#a4adb6';
@@ -5762,6 +5769,14 @@ if ('serviceWorker' in navigator) {
     poly([-0.30, 0.035, -0.47, 0.075, -0.57, 0.075, -0.49, 0.03]);
     poly([-0.18, -0.062, -0.30, -0.245, -0.37, -0.245, -0.40, -0.062]);
     poly([0.10, 0.035, -0.19, 0.13, -0.28, 0.13, -0.33, 0.045]);
+    // The caller's colour on the tail, the way a squadron marks its jets; the
+    // far fin carries it too, in shadow. Burnt off a wreck.
+    if (!dead) {
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = mark;
+      poly([-0.18, -0.062, -0.30, -0.245, -0.37, -0.245, -0.40, -0.062]);
+      ctx.globalAlpha = 1;
+    }
 
     // Fuselage: the chined nose, the spine running back to the fins, the belly.
     ctx.fillStyle = skin;
@@ -5794,9 +5809,15 @@ if ('serviceWorker' in navigator) {
     poly([-0.44, -0.045, -0.505, -0.038, -0.505, 0.038, -0.44, 0.045]);
 
     // The near fin, canted, and the near tailplane.
-    ctx.fillStyle = shade;
+    ctx.fillStyle = dead ? shade : mark;
     poly([-0.24, -0.062, -0.37, -0.25, -0.44, -0.25, -0.465, -0.055]);
+    ctx.fillStyle = shade;
     poly([-0.33, 0.03, -0.49, 0.08, -0.58, 0.08, -0.50, 0.025]);
+    // A cheatline along the chine, nose to tail, in the same colour.
+    if (!dead) {
+      ctx.fillStyle = mark;
+      poly([0.40, 0.012, 0.28, 0.006, -0.42, 0.012, -0.42, 0.026, 0.28, 0.02]);
+    }
 
     // Bubble canopy, with the gold tint of its coating and a glint.
     const glass = ctx.createLinearGradient(0, -0.115, 0, -0.04);
@@ -5820,11 +5841,14 @@ if ('serviceWorker' in navigator) {
 
     // The stick still aboard, hanging under the bay.
     if (!dead && !jet.bombed) {
-      ctx.fillStyle = WEAPONS.jet.color;
+      ctx.fillStyle = mark;
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = 0.008;
       for (let i = 0; i < JET.bombs; i++) {
         ctx.beginPath();
         ctx.ellipse(0.0 - i * 0.11, 0.095, 0.04, 0.017, 0, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
       }
     }
     ctx.restore();
@@ -6871,15 +6895,22 @@ if ('serviceWorker' in navigator) {
         ctx.fill();
         ctx.restore();
       } else if (pw.jet) {
-        // A finned bomb, nose along its path, so the forward throw reads.
+        // A finned bomb, nose along its path, so the forward throw reads. In
+        // the colour of whoever called the jet in, with a dark rim so a pale
+        // one still shows against a pale sky.
         ctx.save();
         ctx.translate(hx, hy);
         ctx.rotate(Math.atan2(p.vy, p.vx));
         ctx.scale(boost, boost);
+        ctx.fillStyle = jetColor(p.firedBy);
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        ctx.lineWidth = 0.8;
         ctx.beginPath();
         ctx.ellipse(0, 0, 5, 2.4, 0, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
         ctx.fillRect(-7, -2.6, 2.4, 5.2);
+        ctx.strokeRect(-7, -2.6, 2.4, 5.2);
         ctx.restore();
       } else {
         // An unsplit MIRV is drawn fatter than the warheads it carries, and a
@@ -8867,7 +8898,7 @@ if ('serviceWorker' in navigator) {
     heliDrawPos, heliRouteAt, heliLegAt, heliFlyTo, HELI_MIN_LEGS, HELI_MAX_LEGS,
     isShipTheme, drawHeli,
     JET, jetSize, spawnJet, jetFromLeft, summonJet, callInJet, aiCallJet, aiJetTarget, planJetDrop, predictBombX, jetOverFieldSpan, jetRouteAt, jetFlyTo, jetHitBy, jetArmed, jetOverField,
-    launchJetBombs, jetShotDown, jetMeetsHeliAt, jetHeliCollide, moveJet, jetFollowClock, jetDrawPos, jetIn, jetOut, drawJet,
+    launchJetBombs, jetColor, jetShotDown, jetMeetsHeliAt, jetHeliCollide, moveJet, jetFollowClock, jetDrawPos, jetIn, jetOut, drawJet,
     get jet() { return jet; }, set jet(v) { jet = v; },
     SHOT_SKIP_S, SHOT_SKIP_TO_S, SHOT_CATCHUP_FULL_S, CLOCK_RESYNC_MS, netRebaseClock,
     get simClock() { return simClock; },

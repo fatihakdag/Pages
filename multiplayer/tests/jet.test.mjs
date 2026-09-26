@@ -681,3 +681,14 @@ test('a missile chasing a jet ends the same on both screens', (t) => {
   assert.deepEqual(Array.from(guest.g.terrain), Array.from(host.g.terrain), 'the same craters');
   assert.deepEqual(Array.from(guest.g.tanks, t => t.hp), Array.from(host.g.tanks, t => t.hp));
 });
+
+test('the jet and its bombs wear the colour of the seat that called it in', () => {
+  const h = loadFlat();
+  const { g } = h;
+  g.heliDue = g.netNow() + 1e6;
+  g.jet = g.jetIn(routeJet(g, { x: 400, seat: 1 }));
+  assert.equal(g.jetColor(), g.tanks[1].color);
+  assert.notEqual(g.tanks[0].color, g.tanks[1].color);
+  assert.equal(g.jetColor(0), g.tanks[0].color, 'a bomb is coloured by its own firedBy');
+  assert.equal(g.jetColor(9), g.WEAPONS.jet.color, 'no such seat: the weapon colour');
+});
