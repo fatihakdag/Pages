@@ -1,13 +1,42 @@
 // TANK SIZE in Settings: on a small screen tanks and shells are drawn larger
 // than the world's scale ('large', the default), or kept to it ('actual').
 // Either way it is drawing only — the world is the same.
+//
+// The option is switched off for now (TANK_SIZE.option): every tank is drawn
+// at its true size and the setting is hidden. The tests of the option itself
+// switch it on, so it is still known to work when it comes back.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { load } from './harness.mjs';
 
+/** A game with the TANK SIZE option switched back on. */
+function loadOn(opts) {
+  const h = load(opts);
+  h.g.TANK_SIZE.option = true;
+  h.g.initSizePref();
+  h.g.resize();
+  return h;
+}
+
+test('switched off: true size everywhere, no setting, and a stored choice kept', () => {
+  const { g, ctx } = load({ width: 390, height: 600 });
+  assert.equal(g.TANK_SIZE.option, false);
+  assert.equal(g.sizePref, 'actual');
+  assert.equal(g.spriteBoost(), 1, 'a phone is drawn at the world\u2019s own scale');
+  assert.equal(g.el.sizeGroup.style.display, 'none', 'and Settings does not offer it');
+
+  ctx.localStorage.setItem('barrage.tankSize', 'large');
+  g.initSizePref();
+  assert.equal(g.sizePref, 'actual', 'a stored Large does not come back while it is off');
+  g.el.sizeSelect.value = 'large';
+  g.el.sizeSelect.dispatch('change');
+  assert.equal(g.spriteBoost(), 1);
+  assert.equal(ctx.localStorage.getItem('barrage.tankSize'), 'large', 'nor is it thrown away');
+});
+
 test('Large is the default, and grows sprites only where the world is drawn small', () => {
-  const phone = load({ width: 390, height: 600 });
-  const desk = load({ width: 1600, height: 1000 });
+  const phone = loadOn({ width: 390, height: 600 });
+  const desk = loadOn({ width: 1600, height: 1000 });
   assert.equal(phone.g.sizePref, 'large');
   assert.equal(phone.g.el.sizeSelect.value, 'large');
 
@@ -21,7 +50,7 @@ test('Large is the default, and grows sprites only where the world is drawn smal
 });
 
 test('Actual keeps everything to scale, and the choice is remembered', () => {
-  const { g, ctx } = load({ width: 390, height: 600 });
+  const { g, ctx } = loadOn({ width: 390, height: 600 });
   g.el.sizeSelect.value = 'actual';
   g.el.sizeSelect.dispatch('change');
   assert.equal(g.sizePref, 'actual');
@@ -35,7 +64,7 @@ test('Actual keeps everything to scale, and the choice is remembered', () => {
 });
 
 test('the stored choice is restored, and an unknown one falls back to Large', () => {
-  const { g, ctx } = load({ width: 390, height: 600 });
+  const { g, ctx } = loadOn({ width: 390, height: 600 });
   ctx.localStorage.setItem('barrage.tankSize', 'actual');
   g.initSizePref();
   assert.equal(g.sizePref, 'actual');
@@ -48,10 +77,10 @@ test('the stored choice is restored, and an unknown one falls back to Large', ()
 });
 
 test('the option is only offered where it changes anything, and follows a resize', () => {
-  const phone = load({ width: 390, height: 600 });
+  const phone = loadOn({ width: 390, height: 600 });
   assert.equal(phone.g.el.sizeGroup.style.display, '', 'shown on a phone');
 
-  const h = load({ width: 1600, height: 1000 });
+  const h = loadOn({ width: 1600, height: 1000 });
   assert.equal(h.g.el.sizeGroup.style.display, 'none', 'hidden where the world is drawn full size');
 
   // A desktop window narrowed to phone width draws the world small again.
@@ -63,7 +92,7 @@ test('the option is only offered where it changes anything, and follows a resize
 });
 
 test('switching size does not touch the world', () => {
-  const { g } = load({ width: 390, height: 600 });
+  const { g } = loadOn({ width: 390, height: 600 });
   const before = { terrain: Array.from(g.terrain), tanks: g.tanks.map(t => [t.x, t.hp]), W: g.W, H: g.H };
   g.el.sizeSelect.value = 'actual';
   g.el.sizeSelect.dispatch('change');

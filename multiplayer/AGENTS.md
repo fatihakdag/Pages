@@ -333,6 +333,13 @@ it touches lives in `worldTransform()` and `eventToWorld()`.
 
 ### Tank size
 
+**Switched off for now** (`TANK_SIZE.option` at the top of the script): a
+shell drawn touching a grown tank could still miss the real one, and a hit
+that did no damage was confusing. Off, every tank is drawn at its true size
+(`spriteBoost()` is 1), the setting is hidden, and a choice a player stored is
+kept for when it returns. Setting `option` to true brings back everything
+below exactly as it was; its tests switch it on themselves.
+
 The root build draws a tank at a fixed 26px on any screen; here it would come
 out ~10px on a portrait phone. So tanks, shells and the aim preview are drawn
 at no less than `SPRITE_MIN_PX` CSS px per world unit (`spriteBoost()`, up to
@@ -628,7 +635,10 @@ Other things worth knowing:
   behind one. A panel taller than the screen scrolls inside itself, and since
   phones hide scrollbars until you scroll, it shows a fade with a ▼ at its
   foot while there is more below (`.more`, from `refreshMoreHint()` on open,
-  scroll, resize and when the online dialog changes). `refreshOnlineDialog()` makes it follow the connection: with none
+  scroll, resize and when the online dialog changes). In Settings, ONLINE and
+  ROUND share a row of their own (`#actions-row`, the same two columns as the
+  grid), so they pair with each other wherever the grid has two columns and
+  stack where it has one. `refreshOnlineDialog()` makes it follow the connection: with none
   it is the way in — name, HOST with **PLAYERS**, CODE and JOIN — and otherwise
   the room: its code large, "share this code" and how many are here while the
   table fills (`tableFilling`; the pill keeps the code in its line), who is at

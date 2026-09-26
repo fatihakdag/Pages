@@ -708,7 +708,17 @@
   #settings-btn:active { background: #2a2739; }
 
   /* The online group needs HOST + CODE + JOIN across one line. */
-  #settings-grid #online-group { grid-column: 1 / -1; }
+  /* ONLINE and ROUND share a row of their own: the same two columns as the
+     grid above, so they pair exactly where it does and stack where it does,
+     and they always pair with each other — as grid cells they would fall in
+     next to whatever came before, which depends on whether TANK SIZE shows. */
+  #settings-grid #actions-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  #actions-row .ctrl-group { min-width: 0; }
   /* Settings' way to the Play online dialog: online lives there now. */
   #open-online {
     align-self: flex-start;
@@ -761,7 +771,8 @@
   #online-leave.armed .nl-sure { display: inline; }
   /* The pill opens the dialog: say it can be pressed. */
   #net-status { cursor: pointer; }
-  #settings-grid #restart-group { grid-column: 1 / -1; }
+  /* Half a row now: the armed label ("TAP AGAIN TO RESTART") may wrap. */
+  #round-restart { white-space: normal; text-align: left; }
   .restart-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
   #round-restart {
     background: var(--panel-line);
@@ -1702,6 +1713,10 @@
             <option value="off">Off</option>
           </select>
         </div>
+        <!-- The two buttons that open something rather than set it, side by
+             side wherever the grid has two columns and stacked where it has
+             one: each used to fill a whole row to hold one small button. -->
+        <div id="actions-row">
         <div class="ctrl-group" id="online-group">
           <div class="ctrl-label"><span data-i18n="online">ONLINE</span></div>
           <!-- Hosting and joining have a dialog of their own (#online-modal). -->
@@ -1715,6 +1730,7 @@
             <button type="button" id="round-restart"><span aria-hidden="true">↻</span><span class="rr-idle" data-i18n="restartRound">RESTART ROUND</span><span class="rr-sure" data-i18n="restartSure">TAP AGAIN TO RESTART</span></button>
             <span id="restart-note"></span>
           </div>
+        </div>
         </div>
         <div class="ctrl-group" id="prefs-row">
           <div id="sfx-group">
@@ -1849,8 +1865,18 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v84';
+  const BUILD = 'v86';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
+
+  // ---------- Tank size: one switch for the option ----------
+  // TANK SIZE in Settings could draw tanks and shells larger than they are
+  // where the world is drawn small (spriteBoost). It is switched off for now:
+  // a shell drawn touching a grown tank could still miss the real, smaller one
+  // it is aimed at, and a hit that did no damage was confusing. Off, every tank
+  // is drawn at its true size, the setting is hidden, and a choice a player
+  // stored is left alone for when it comes back. Set option to true to bring
+  // it back exactly as it was.
+  const TANK_SIZE = { option: false };
 
   // ---------- Guided missile: one switch for the whole weapon ----------
   // Set enabled to false and the missile leaves the dropdown, every tank's
@@ -2321,7 +2347,7 @@ if ('serviceWorker' in navigator) {
     // floor. Zoom only ever draws it larger, so fitted is the smallest it gets:
     // at or above the floor here, Large and Actual look the same, and the
     // choice is hidden rather than offered to do nothing.
-    sizeGroup.style.display = viewScale < SPRITE_MIN_PX ? '' : 'none';
+    sizeGroup.style.display = TANK_SIZE.option && viewScale < SPRITE_MIN_PX ? '' : 'none';
   }
 
   // ---------- Camera ----------
@@ -2518,20 +2544,24 @@ if ('serviceWorker' in navigator) {
   // It is a preference (TANK SIZE in Settings, stored as barrage.tankSize):
   // 'large' is this, 'actual' keeps everything to the world's scale. Nothing
   // about it travels in a match — it only changes how this screen draws.
+  // While TANK_SIZE.option is off (see the top of the script) it is always
+  // 'actual' and the setting is hidden.
   const SPRITE_MIN_PX = 0.8, SPRITE_MAX_BOOST = 2.2;
   let sizePref = 'large';
   sizeSelect.addEventListener('change', () => {
+    if (!TANK_SIZE.option) return;
     sizePref = sizeSelect.value === 'actual' ? 'actual' : 'large';
     try { localStorage.setItem('barrage.tankSize', sizePref); } catch (e) { /* private mode */ }
   });
   function initSizePref() {
     let stored = null;
     try { stored = localStorage.getItem('barrage.tankSize'); } catch (e) { /* private mode */ }
-    sizePref = stored === 'actual' ? 'actual' : 'large';
+    // Switched off, true size, whatever was stored; the stored choice stays.
+    sizePref = !TANK_SIZE.option || stored === 'actual' ? 'actual' : 'large';
     sizeSelect.value = sizePref;
   }
   function spriteBoost() {
-    if (sizePref === 'actual') return 1;
+    if (!TANK_SIZE.option || sizePref === 'actual') return 1;
     const px = viewScale * camZoom;
     return px > 0 ? Math.min(SPRITE_MAX_BOOST, Math.max(1, SPRITE_MIN_PX / px)) : 1;
   }
@@ -8645,7 +8675,7 @@ if ('serviceWorker' in navigator) {
       nudgeBtns, cards, hpText, langCheckbox, sfxGroup, sfxSlider, themeSelect, sizeSelect, sizeGroup
     },
     initTheme, nextTheme, generateTerrainShape,
-    spriteBoost, initSizePref, SPRITE_MIN_PX, SPRITE_MAX_BOOST, render,
+    spriteBoost, initSizePref, SPRITE_MIN_PX, SPRITE_MAX_BOOST, render, TANK_SIZE,
     get sizePref() { return sizePref; },
     get theme() { return theme; },
     get themePref() { return themePref; },
