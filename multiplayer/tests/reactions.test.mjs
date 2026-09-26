@@ -542,3 +542,77 @@ test('muting the CPU silences it', () => {
   h.advance(1500);
   assert.deepEqual(shown(h), []);
 });
+
+// ---------- you hit yourself ----------
+
+test('hit yourself and the CPU claps, then sometimes laughs as well', () => {
+  const self = evOf({ shooter: 0, self: { seat: 0, dmg: 20 }, hits: [{ seat: 0, dmg: 20, killed: false }] });
+  const h = load();
+  mode(h, 'cpu');
+  // Rolls in order: the odds, who claps, the clap's own (sure) odds and delay,
+  // then whether the same CPU laughs too, and the laugh's odds and delay.
+  h.g.setReactRandom(dice([0.1, 0, 0, 0, 0.2, 0, 0]));
+  h.g.cpuReact(self);
+  h.advance(1200);
+  assert.deepEqual(shown(h), [[1, h.g.EM.CLAP]], 'a clap first');
+  h.advance(1200);
+  assert.deepEqual(shown(h), [[1, h.g.EM.CLAP], [1, h.g.EM.LOL]], 'then the laugh');
+
+  const once = load();
+  mode(once, 'cpu');
+  once.g.setReactRandom(dice([0.1, 0, 0, 0, 0.7]));
+  once.g.cpuReact(self);
+  once.advance(3000);
+  assert.deepEqual(shown(once), [[1, once.g.EM.CLAP]], 'or just the clap');
+
+  const none = load();
+  mode(none, 'cpu');
+  none.g.setReactRandom(dice([0.8]));
+  none.g.cpuReact(self);
+  none.advance(3000);
+  assert.deepEqual(shown(none), [], 'and a quarter of the time it lets it go');
+});
+
+test('it claps even straight after another reaction', () => {
+  const h = load();
+  mode(h, 'cpu');
+  h.g.setReactRandom(() => 0);
+  h.g.cpuReact(evOf({ shooter: 1, hits: [{ seat: 0, dmg: 30, killed: false }] }));   // it taunts you
+  h.advance(1200);
+  h.g.cpuReact(evOf({ shooter: 0, self: { seat: 0, dmg: 20 }, hits: [{ seat: 0, dmg: 20, killed: false }] }));
+  h.advance(1200);
+  assert.deepEqual(shown(h).slice(-1), [[1, h.g.EM.CLAP]]);
+});
+
+test('with two CPUs, one claps and the other laughs, never more', () => {
+  const h = load();
+  mode(h, 'cpu');
+  h.g.el.countSelect.value = '4';
+  h.g.el.countSelect.dispatch('change');
+  // the odds, clapper = seat 3 (last of 1..3), its clap, laugher = seat 1 (first of the others)
+  h.g.setReactRandom(dice([0.1, 0.99, 0, 0, 0]));
+  h.g.cpuReact(evOf({ shooter: 0, self: { seat: 0, dmg: 20 }, hits: [{ seat: 0, dmg: 20, killed: false }] }));
+  h.advance(3000);
+  assert.deepEqual(shown(h), [[3, h.g.EM.CLAP], [1, h.g.EM.LOL]]);
+});
+
+test('a CPU already destroyed has nothing to say about it', () => {
+  const h = load();
+  mode(h, 'cpu');
+  h.g.el.countSelect.value = '3';
+  h.g.el.countSelect.dispatch('change');
+  h.g.tanks[1].alive = false;
+  h.g.setReactRandom(dice([0.1, 0.99, 0, 0, 0.9]));   // seat 2 claps; no laugh from it
+  h.g.cpuReact(evOf({ shooter: 0, self: { seat: 0, dmg: 20 }, hits: [{ seat: 0, dmg: 20, killed: false }] }));
+  h.advance(3000);
+  assert.deepEqual(shown(h), [[2, h.g.EM.CLAP]]);
+});
+
+test('a CPU that hits itself still only flinches', () => {
+  const h = load();
+  mode(h, 'cpu');
+  h.g.setReactRandom(() => 0);
+  h.g.cpuReact(evOf({ shooter: 1, self: { seat: 1, dmg: 20 }, hits: [{ seat: 1, dmg: 20, killed: false }] }));
+  h.advance(3000);
+  assert.deepEqual(shown(h), [[1, h.g.EM.WHOA]]);
+});

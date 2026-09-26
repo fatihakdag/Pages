@@ -1865,7 +1865,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v87';
+  const BUILD = 'v88';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Tank size: one switch for the option ----------
@@ -3260,6 +3260,7 @@ if ('serviceWorker' in navigator) {
     stopAllSound(); // a round can end mid-burn; nothing sustained may survive it
     roundStart = performance.now();
     lastTimerText = '';
+    roundDealtBehindDialog = dialogOpen();
     buildTanks();
     currentPlayer = firstSeat();
     turnSeq = 0;
@@ -3657,6 +3658,7 @@ if ('serviceWorker' in navigator) {
   let openModal = null, modalOpener = null;
 
   function dialogOpen() { return openModal !== null; }
+  let roundDealtBehindDialog = false;   // set by resetGame, cleared by closeDialog
   const settingsIsOpen = () => openModal === settingsModal;
   const onlineIsOpen = () => openModal === onlineModal;
 
@@ -3691,6 +3693,13 @@ if ('serviceWorker' in navigator) {
     openModal.classList.remove('show');
     openModal = null;
     refreshMoreHint();
+    // A round dealt behind the dialog starts now, clock and CPU both.
+    if (roundDealtBehindDialog) {
+      roundDealtBehindDialog = false;
+      roundStart = performance.now();
+      lastTimerText = '';
+    }
+    aiResume();
     const back = modalOpener;
     modalOpener = null;
     if (back && back.focus) back.focus();
@@ -4448,8 +4457,22 @@ if ('serviceWorker' in navigator) {
     return fallback;
   }
 
+  // A CPU does not play behind a dialog. Changing TANKS or OPPONENTS in
+  // Settings deals a new round there and then, and a CPU dealt the first shot
+  // took it while the panel was still up; one already thinking when you
+  // opened Settings fired behind it too. It waits, and plays when the dialog
+  // closes (closeDialog → aiResume).
+  let aiHeld = false;
+  function aiHold() { aiHeld = true; }
+  function aiResume() {
+    if (!aiHeld) return;
+    aiHeld = false;
+    maybeAiTurn();
+  }
+
   function maybeAiTurn() {
     if (!isAi(currentPlayer) || state !== 'AIMING') return;
+    if (dialogOpen()) { aiHold(); return; }
     cpuAimReady = false;
     updateHUD();
     const cfg = DIFFICULTY_SETTINGS[aiDifficulty] || DIFFICULTY_SETTINGS.medium;
@@ -4459,6 +4482,7 @@ if ('serviceWorker' in navigator) {
       turnToken === token && state === 'AIMING' && currentPlayer === seat;
     setTimeout(() => {
       if (!stillOurTurn()) return;
+      if (dialogOpen()) { aiHold(); return; }
       const shot = chooseAiShot(aiDifficulty);
       const shooter = tanks[seat];
       shooter.angle = shot.angle;
@@ -4487,7 +4511,11 @@ if ('serviceWorker' in navigator) {
       syncControlsFromTank(); // pushes the seat's choice into the shared select
       cpuAimReady = true;
       // hold a beat longer when the arc is on screen, so it can be read
-      setTimeout(() => { if (stillOurTurn()) fire(); }, aiFireDelayMs());
+      setTimeout(() => {
+        if (!stillOurTurn()) return;
+        if (dialogOpen()) { aiHold(); return; }
+        fire();
+      }, aiFireDelayMs());
     }, cfg.thinkMs);
   }
 
@@ -8398,7 +8426,7 @@ if ('serviceWorker' in navigator) {
   // its own (reactRandom), so reacting never shifts the AI's aim.
   const CPU_EMOTE_GAP_MS = 6000;
   const CPU_EMOTE_ODDS = { taunt: 0.5, hurt: 0.35, rip: 0.7, selfHit: 0.5, laugh: 0.3,
-                           won: 0.8, lost: 0.7, answer: 0.45, mad: 0.85 };
+                           won: 0.8, lost: 0.7, answer: 0.45, mad: 0.85, mock: 0.75 };
   // A hit that takes this much off a CPU (a quarter of its health) makes it
   // angry most of the time, gap or no gap — a heavy hit is always news.
   const CPU_BIG_HIT = 25;
@@ -8411,15 +8439,31 @@ if ('serviceWorker' in navigator) {
    * Maybe have CPU `seat` react with `e`, with probability `odds`. `urgent`
    * skips the gap since its last reaction, for what it would never let pass.
    */
-  function cpuEmote(seat, e, odds, urgent = false) {
+  function cpuEmote(seat, e, odds, urgent = false, after = 0) {
     if (!cpuReacts() || !isAi(seat) || !tanks[seat]) return false;
     const now = performance.now();
     if (!urgent && now - cpuEmoteAt < CPU_EMOTE_GAP_MS) return false;
     if (reactRandom() >= odds) return false;
     cpuEmoteAt = now;
     const token = cpuEmoteToken;
-    setTimeout(() => { if (token === cpuEmoteToken) showEmote(seat, e); }, 500 + reactRandom() * 600);
+    setTimeout(() => { if (token === cpuEmoteToken) showEmote(seat, e); }, after + 500 + reactRandom() * 600);
     return true;
+  }
+
+  /**
+   * You hit yourself: most of the time a CPU claps (it is not a compliment),
+   * and then there is a laugh — from another CPU if there is one, or now and
+   * then from the same one. Two reactions at most, however many CPUs there are,
+   * so a crowd of them mocks you without burying the screen.
+   */
+  function cpuMock() {
+    const alive = tanks.map((_, i) => i).filter(i => isAi(i) && tanks[i].alive);
+    if (!alive.length || reactRandom() >= CPU_EMOTE_ODDS.mock) return;
+    const clapper = alive[Math.floor(reactRandom() * alive.length)];
+    cpuEmote(clapper, EM.CLAP, 1, true);
+    const others = alive.filter(i => i !== clapper);
+    if (others.length) cpuEmote(others[Math.floor(reactRandom() * others.length)], EM.LOL, 1, true, 700);
+    else if (reactRandom() < 0.5) cpuEmote(clapper, EM.LOL, 1, true, 900);
   }
 
   /** The one reaction, if any, a CPU seat has to what a shot did. */
@@ -8445,6 +8489,8 @@ if ('serviceWorker' in navigator) {
     // Hit hard by someone else and still standing: angry, most of the time.
     const heavy = ev.hits.find(h => isAi(h.seat) && h.dmg >= CPU_BIG_HIT);
     if (heavy) { cpuEmote(heavy.seat, EM.MAD, CPU_EMOTE_ODDS.mad, true); return; }
+    // You hit yourself.
+    if (!isAi(ev.shooter) && ev.self) { cpuMock(); return; }
     if (isAi(ev.shooter)) {
       if (ev.self) { cpuEmote(ev.shooter, EM.WHOA, CPU_EMOTE_ODDS.selfHit); return; }
       if (ev.hits.some(h => !isAi(h.seat))) { cpuEmote(ev.shooter, EM.TAUNT, CPU_EMOTE_ODDS.taunt); return; }
@@ -8705,6 +8751,7 @@ if ('serviceWorker' in navigator) {
     eventToWorld, CAM_MIN, CAM_MAX,
     get camZoom() { return camZoom; }, get camX() { return camX; }, get camY() { return camY; },
     get camPanned() { return camPanned; }, set camPanned(v) { camPanned = v; },
+    cpuMock, get aiHeld() { return aiHeld; }, get roundStart() { return roundStart; },
     buzz, hitPattern, feelHits, shakeOffset, setShakeOn, SHAKE_MS, get shakeOn() { return shakeOn; },
     get camReturn() { return camReturn; }, seatViews, camSaveView, camTurnStarted, localHumanSeat,
     camNewBoard, camWatchSky, CAM_MARGIN, CAM_LEAD, get skyHandsOff() { return skyHandsOff; },

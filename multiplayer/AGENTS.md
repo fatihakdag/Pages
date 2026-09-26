@@ -217,7 +217,12 @@ old Android too.
   (`NEAR_MISS`), a wild one (`WILD_MISS`), the round over. It reacts with 💀
   destroyed, 😈 after hitting you, 😱 when hit lightly, 😡 most of the time
   (`CPU_EMOTE_ODDS.mad`) when a hit takes `CPU_BIG_HIT` (25) or more off it —
-  that one ignores the gap — and 😂 at a wild miss. At the
+  that one ignores the gap — and 😂 at a wild miss. Hit yourself and it
+  mocks you (`cpuMock()`, `CPU_EMOTE_ODDS.mock`, also ignoring the gap): a
+  living CPU picked at random claps 👏, and a different one laughs 😂 a
+  moment later — or, with only one CPU, the same one does half the time. Two
+  reactions at most however many CPUs there are, so a table of them never
+  buries the screen. A CPU that hits itself only flinches (😱). At the
   end of a round a CPU that won laughs (😂) as often as it says 🤝, and one
   that lost is mostly 😡 or 💀, now and then 🤝 — the CPU the last shot
   finished off, if one was. It may answer your 😈, 👏 or 🤝 (`cpuAnswer()`). One per shot at most, never within
@@ -632,7 +637,13 @@ Other things worth knowing:
   mechanism (`openDialog` / `closeDialog`): one open at a time, Escape and the
   backdrop close it, focus goes back to what opened it, and while either is up
   the keyboard belongs to it (`dialogOpen()`), so SPACE never fires from
-  behind one. A panel taller than the screen scrolls inside itself, and since
+  behind one. Nor does a CPU play behind one: `maybeAiTurn()` checks
+  `dialogOpen()` before it thinks and again before it fires, and if a dialog
+  is up it holds (`aiHeld`) and `closeDialog()` sets it going again. Changing
+  TANKS or OPPONENTS deals a new round there and then, and a CPU dealt the
+  first shot used to take it behind the panel; a round dealt behind a dialog
+  also starts its clock only when the dialog closes. Online nothing waits —
+  the stand-ins there are not `isAi()` seats. A panel taller than the screen scrolls inside itself, and since
   phones hide scrollbars until you scroll, it shows a fade with a ▼ at its
   foot while there is more below (`.more`, from `refreshMoreHint()` on open,
   scroll, resize and when the online dialog changes). In Settings, ONLINE and
