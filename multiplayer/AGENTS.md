@@ -155,7 +155,7 @@ switching to the other.
 
 ## Reactions
 
-Eight fixed emoji — 👏 🔥 😂 😱 😈 🙏 💀 🤝, in `EMOTES` — that a player sends
+Eight fixed emoji — 👏 😡 😂 😱 😈 🙏 💀 🤝, in `EMOTES` — that a player sends
 over their own tank. Everything is in `// ---------- Reactions ----------`.
 Only this build has them. Emoji 1–3 era characters only, so they render on
 old Android too.
@@ -171,7 +171,10 @@ old Android too.
   by `placeTray()` from the button's own position, on whichever side has more
   room — above it on a phone, below it in the desktop rail, where an upward
   tray would cover the scores — and always on screen, so no layout has to
-  make room for it. A tap anywhere else
+  make room for it. In the two-rail landscape layout the right rail is full,
+  so `placeNetGroup()` moves the whole `#net-group` — status and button — into
+  the left rail's `#info-row`, above the clock and SETTINGS, and back again
+  when the layout changes (two media queries, listened to). A tap anywhere else
   closes it. `sendEmote(e)` shows the bubble here at once. Nothing is ever
   suggested or offered after a shot: reacting is only ever the player's idea.
 - **The wire**: an `emote` message carries `e`, an **index** into `EMOTES`,
@@ -190,9 +193,12 @@ old Android too.
   in `emoteHold` and is shown when `finishShot()` lands it. One sent mid-flight
   is about the shot everyone is watching and shows at once.
 - **Drawing**: a bubble over the tank in the sender's colour (`drawEmotes()`,
-  CSS pixels like the wind gauge and YOU, stacked above YOU when that is up),
-  three per seat at most, gone after `EMOTE_SHOW_MS`; a copy on the player's
-  card; and `Sound.pop`, panned to the tank. Dead tanks' players can still
+  CSS pixels like the wind gauge and YOU, stacked above YOU when that is up).
+  They go on a canvas of their own, `#emote-layer`, sized with the game
+  canvas in `resize()` and stacked above the round-over overlay — on the game
+  canvas the overlay hid them, just when GG is said. Three per seat at most,
+  gone after `EMOTE_SHOW_MS`; a copy on the player's card; and `Sound.pop`,
+  panned to the tank. Dead tanks' players can still
   react — they are often the most talkative.
 - **The CPU reacts**, against the CPU only (`cpuReact()`), to what a shot did.
   Every screen plays every shot and lands on the same board, so it works that
@@ -201,8 +207,10 @@ old Android too.
   helicopter or jet shot down, and `shotLanded()` in `finishShot()` hands them
   to `classifyShot()` (pure) — hits, kills, a self-hit, a near miss
   (`NEAR_MISS`), a wild one (`WILD_MISS`), the round over. It reacts with 💀
-  destroyed, 😈 after hitting you, 😱 when hit, 😂 at a wild miss, 🤝 at the
-  end, and it may answer your 😈, 👏 or 🤝 (`cpuAnswer()`). One per shot at most, never within
+  destroyed, 😈 after hitting you, 😱 when hit and 😂 at a wild miss. At the
+  end of a round a CPU that won laughs (😂) as often as it says 🤝, and one
+  that lost is mostly 😡 or 💀, now and then 🤝 — the CPU the last shot
+  finished off, if one was. It may answer your 😈, 👏 or 🤝 (`cpuAnswer()`). One per shot at most, never within
   `CPU_EMOTE_GAP_MS`, odds in `CPU_EMOTE_ODDS`, half a second or so after the
   fact, and a new round cancels one on its way. Its dice are `reactRandom`, not
   `Math.random`, so reacting never shifts the AI's aim; the harness hands every

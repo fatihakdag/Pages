@@ -60,7 +60,7 @@ const shown = (h) => Array.from(h.g.emotes, m => [m.seat, m.e]);
 test('the set is eight fixed emoji, each named in both languages', () => {
   const h = load();
   const chars = Array.from(h.g.EMOTES, e => e.ch);
-  assert.deepEqual(chars, ['👏', '🔥', '😂', '😱', '😈', '🙏', '💀', '🤝']);
+  assert.deepEqual(chars, ['👏', '😡', '😂', '😱', '😈', '🙏', '💀', '🤝']);
   for (const e of h.g.EMOTES) assert.notEqual(h.g.txt(e.key), e.key, `${e.key} in English`);
   h.g.el.langCheckbox.checked = true;
   h.g.el.langCheckbox.dispatch('change');
@@ -165,7 +165,7 @@ test('a reaction to a shot this screen is still replaying waits for it to land',
   gs.deliver({ t: 'msg', from: 1, d: hs.payloads('turn')[0] });   // the guest starts its replay
   assert.ok(host.advanceUntil(() => host.g.state === 'AIMING'), 'the host has seen it land');
 
-  host.g.sendEmote(host.g.EM.FIRE);   // about the landing, from a later turn
+  host.g.sendEmote(host.g.EM.MAD);   // about the landing, from a later turn
   relayLast(hs, gs, 1);
   assert.deepEqual(shown(guest), [], 'no spoiler: the guest\'s shell is still in the air');
   assert.equal(guest.g.emoteHold.length, 1);
@@ -190,7 +190,7 @@ test('E opens the tray, a number sends from it, Escape closes it', () => {
   assert.equal(h.g.trayOpen(), true);
   assert.equal(h.g.el3.reactBtn.attributes['aria-expanded'], 'true');
   h.key('2');
-  assert.deepEqual(shown(h), [[0, 1]], '2 is 🔥');
+  assert.deepEqual(shown(h), [[0, 1]], '2 is 😡');
   assert.equal(h.g.trayOpen(), false, 'sending closes it');
   h.key('3');
   assert.deepEqual(shown(h), [[0, 1]], 'closed, numbers are not reactions');
@@ -365,13 +365,60 @@ test('a new round cancels a reaction still on its way', () => {
   assert.deepEqual(shown(h), []);
 });
 
-test('it says GG at the end of a round', () => {
+/** Dice that give these values in order, then 0. */
+const dice = (values) => { const q = [...values]; return () => (q.length ? q.shift() : 0); };
+
+/** What the CPU says at the end of a round, rolled with these dice. */
+function endOfRound(ev, rolls) {
   const h = load();
   mode(h, 'cpu');
-  h.g.setReactRandom(() => 0);
-  h.g.cpuReact(evOf({ over: true, winner: 1 }));
+  h.g.setReactRandom(dice(rolls));
+  h.g.cpuReact(evOf({ over: true, ...ev }));
   h.advance(1200);
-  assert.deepEqual(shown(h), [[1, h.g.EM.GG]]);
+  return shown(h);
+}
+
+test('a CPU that wins laughs about it as often as it says GG', () => {
+  const won = { winner: 1, hits: [{ seat: 0, dmg: 40, killed: true }], kills: [0] };
+  assert.deepEqual(endOfRound(won, [0.2]), [[1, 2]], '😂');
+  assert.deepEqual(endOfRound(won, [0.7]), [[1, 7]], '🤝');
+  assert.deepEqual(endOfRound(won, [0.2, 0.95]), [], 'and sometimes says nothing');
+});
+
+test('a CPU that loses is mostly mad or dead about it', () => {
+  const lost = { shooter: 0, winner: 0, hits: [{ seat: 1, dmg: 40, killed: true }], kills: [1] };
+  assert.deepEqual(endOfRound(lost, [0.1]), [[1, 1]], '😡');
+  assert.deepEqual(endOfRound(lost, [0.5]), [[1, 6]], '💀');
+  assert.deepEqual(endOfRound(lost, [0.9]), [[1, 7]], 'or, now and then, 🤝');
+  assert.deepEqual(endOfRound(lost, [0.1, 0.95]), [], 'and sometimes nothing at all');
+});
+
+test('with two CPUs, the one the last shot finished off is the one that sulks', () => {
+  const h = load();
+  mode(h, 'cpu');
+  h.g.el.countSelect.value = '3';
+  h.g.el.countSelect.dispatch('change');
+  h.g.setReactRandom(dice([0.1]));
+  h.g.cpuReact(evOf({ over: true, winner: 0, hits: [{ seat: 2, dmg: 40, killed: true }], kills: [2] }));
+  h.advance(1200);
+  assert.deepEqual(shown(h), [[2, h.g.EM.MAD]]);
+});
+
+test('at the end of a round, reactions are drawn above the round-over screen', () => {
+  const h = load();
+  mode(h, 'cpu');
+  h.g.state = 'GAMEOVER';
+  h.g.el.overlay.classList.add('show');
+  const onLayer = [], onGame = [];
+  h.layerCtx.fillText = (t) => onLayer.push(t);
+  const gameCtx = h.g.canvas.getContext('2d');
+  const had = gameCtx.fillText;
+  gameCtx.fillText = (t) => onGame.push(t);
+  h.g.showEmote(1, h.g.EM.GG);
+  h.advance(50);   // a frame or two
+  gameCtx.fillText = had;
+  assert.ok(onLayer.includes('🤝'), 'on the layer that sits over the overlay');
+  assert.ok(!onGame.includes('🤝'), 'not on the game canvas underneath it');
 });
 
 test('it answers a taunt', () => {

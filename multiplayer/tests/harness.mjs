@@ -223,6 +223,9 @@ export function load(opts = {}) {
   const canvasCtx = noopCanvasContext();
   const canvas = document.getElementById('game');
   canvas.getContext = () => canvasCtx;
+  // Reactions draw on a layer of their own above the round-over overlay.
+  const layerCtx = noopCanvasContext();
+  document.getElementById('emote-layer').getContext = () => layerCtx;
   canvas.width = width;
   canvas.height = height;
 
@@ -394,6 +397,8 @@ export function load(opts = {}) {
       for (const fn of documentListeners.visibilitychange || []) fn({});
     },
 
+    /** The reactions layer's 2d context (the game canvas has its own). */
+    layerCtx,
     /** Canvas transforms applied so far, most recent last. */
     transforms() { return canvasCtx.transforms; },
     clearTransforms() { canvasCtx.transforms.length = 0; },
