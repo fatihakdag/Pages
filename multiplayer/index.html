@@ -1819,7 +1819,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <script>
 (() => {
-  const BUILD = 'v81';
+  const BUILD = 'v82';
   console.log('%cBarrage build ' + BUILD, 'color:#ff7a45;font-weight:bold');
 
   // ---------- Guided missile: one switch for the whole weapon ----------
@@ -2321,6 +2321,7 @@ if ('serviceWorker' in navigator) {
   /** Zoom to `z` while pinning the world point under (fx, fy), each 0..1 of the canvas. */
   function camZoomTo(z, fx = 0.5, fy = 0.5) {
     camReturn = null;   // only ever called for the player's own zooming
+    skyHandsOff = false;
     const worldX = camX + fx * camViewW();
     const worldY = camY + fy * camViewH();
     camZoom = Math.min(CAM_MAX, Math.max(CAM_MIN, z));
@@ -2352,11 +2353,56 @@ if ('serviceWorker' in navigator) {
   function localHumanSeat(seat) { return netPlaying() ? seat === online.seat : !isAi(seat); }
   function camSaveView(seat) { seatViews.set(seat, { zoom: camZoom, x: camX, y: camY, panned: camPanned }); }
   function camTurnStarted() {
+    if (skyHold()) return;   // the sky clearing brings it back instead
     camReturn = null;
     const v = seatViews.get(currentPlayer);
     if (v && state === 'AIMING' && localHumanSeat(currentPlayer)) camReturn = v;
   }
   function camForgetViews() { seatViews.clear(); camReturn = null; }
+
+  // How far inside the view's edges a followed target is kept, as a share of
+  // the view, and how far ahead of a moving one to look (see camFollow).
+  const CAM_MARGIN = 0.18, CAM_LEAD = 0.35;
+
+  /** A new board — a restart, a rematch, back to a local game: the whole field. */
+  function camNewBoard() {
+    camForgetViews();
+    skyBusy = false;
+    skyView = null;
+    skyHandsOff = false;
+    camFit();
+  }
+
+  // A helicopter or a jet in the sky zooms the view out to the whole field,
+  // so wherever you were looking you can see where it is. The view you had is
+  // kept (skyView) and eased back to once the sky is clear — the aircraft gone,
+  // or shot down and its wreck landed — or, if it has become your turn in the
+  // meantime, your own turn view instead (camTurnStarted waits for the sky).
+  // Zoom or pan while it is up and the camera is yours: nothing is undone
+  // when it goes.
+  let skyBusy = false;      // an aircraft was up at the last frame
+  let skyView = null;       // the view from before it came, if it was zoomed in
+  let skyHandsOff = false;  // the zoom-out is ours, and the player has not touched the camera since
+
+  function camWatchSky() {
+    const busy = !!heli || !!jet;
+    if (busy === skyBusy) return;
+    skyBusy = busy;
+    if (busy) {
+      skyHandsOff = true;
+      skyView = camZoom > CAM_MIN + 0.01 ? { zoom: camZoom, x: camX, y: camY, panned: camPanned } : null;
+      if (skyView) camReturn = { zoom: CAM_MIN, x: 0, y: 0, panned: false };
+      return;
+    }
+    if (skyHandsOff) {
+      const mine = state === 'AIMING' && localHumanSeat(currentPlayer) ? seatViews.get(currentPlayer) : null;
+      camReturn = mine || skyView;
+    }
+    skyView = null;
+    skyHandsOff = false;
+  }
+  /** The sky is holding the full view: turn views wait for it to clear. */
+  function skyHold() { return skyBusy && skyHandsOff; }
 
   /**
    * One frame of easing back to a saved view (camFollow calls it first). The
@@ -2401,6 +2447,7 @@ if ('serviceWorker' in navigator) {
   /** Move the view by a screen-pixel delta. */
   function camPanByPixels(dxPx, dyPx) {
     camReturn = null;   // the player moving the view themselves
+    skyHandsOff = false;
     if (!viewW || !viewH) return;
     camX -= dxPx / viewW * camViewW();
     camY -= dyPx / viewH * camViewH();
@@ -3173,7 +3220,7 @@ if ('serviceWorker' in navigator) {
     overlay.classList.remove('show');
     markYou();
     reactionsNewRound();
-    camForgetViews();
+    camNewBoard();
     syncControlsFromTank();
     maybeAiTurn();
   }
@@ -5632,6 +5679,7 @@ if ('serviceWorker' in navigator) {
    * takes precedence until the turn changes — see camPanned.
    */
   function camFollow(dt) {
+    camWatchSky();
     if (camEaseBack(dt)) return;
     if (camZoom <= CAM_MIN) return;
     let target = null;
@@ -5649,8 +5697,26 @@ if ('serviceWorker' in navigator) {
     // nextTurn() runs -- and then straight off to the next one, so you would
     // watch the view travel to your own tank for no reason before it left.
     if (!target) return;
-    const wantX = Math.min(SIM_W - camViewW(), Math.max(0, target.x - camViewW() / 2));
-    const wantY = Math.min(SIM_H - camViewH(), Math.max(0, target.y - camViewH() / 2));
+    // Only as far as it takes to keep the target comfortably in view: it
+    // must stay CAM_MARGIN of the view inside every edge, now and CAM_LEAD
+    // seconds on at its current speed, so a fast shell is caught before it
+    // leaves. A shot whose whole flight fits on screen never moves the camera,
+    // and nor does a turn passing to a tank that is already in view. Centring
+    // on the target every frame slid the view about for nothing.
+    const mx = camViewW() * CAM_MARGIN, my = camViewH() * CAM_MARGIN;
+    let wantX = camX, wantY = camY;
+    const ahead = { x: target.x + (target.vx || 0) * CAM_LEAD, y: target.y + (target.vy || 0) * CAM_LEAD };
+    // Never below the ground: a shell about to land would otherwise be
+    // "leaving" through the floor, and the view would dip for nothing.
+    if (ahead.x >= 0 && ahead.x < SIM_W) ahead.y = Math.min(ahead.y, groundHeightAt(ahead.x));
+    for (const p of [target, ahead]) {
+      if (p.x < wantX + mx) wantX = p.x - mx;
+      else if (p.x > wantX + camViewW() - mx) wantX = p.x - camViewW() + mx;
+      if (p.y < wantY + my) wantY = p.y - my;
+      else if (p.y > wantY + camViewH() - my) wantY = p.y - camViewH() + my;
+    }
+    wantX = Math.min(SIM_W - camViewW(), Math.max(0, wantX));
+    wantY = Math.min(SIM_H - camViewH(), Math.max(0, wantY));
     // Ease rather than snap: a hard cut makes the arc impossible to read.
     const k = Math.min(1, dt * 6);
     camX += (wantX - camX) * k;
@@ -7154,7 +7220,7 @@ if ('serviceWorker' in navigator) {
       // A new round, or a seat this screen has not held: point at the tank.
       // Someone else resuming into the same round is neither.
       if (d.round !== online.round || d.seats.indexOf(online.id) !== online.seat) markYou();
-      if (d.round !== online.round) { reactionsNewRound(); camForgetViews(); }
+      if (d.round !== online.round) { reactionsNewRound(); camNewBoard(); }
       // The host's word on which seats are empty and which the CPU is playing:
       // a restart keeps a missing player's chair for them, and every screen
       // has to agree on who covers it.
@@ -8474,6 +8540,7 @@ if ('serviceWorker' in navigator) {
     get camZoom() { return camZoom; }, get camX() { return camX; }, get camY() { return camY; },
     get camPanned() { return camPanned; }, set camPanned(v) { camPanned = v; },
     get camReturn() { return camReturn; }, seatViews, camSaveView, camTurnStarted, localHumanSeat,
+    camNewBoard, camWatchSky, CAM_MARGIN, CAM_LEAD, get skyHandsOff() { return skyHandsOff; },
     get turnToken() { return turnToken; }, get lastWinner() { return lastWinner; },
     get turnSeq() { return turnSeq; },
     get activeShot() { return activeShot; },

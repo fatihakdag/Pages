@@ -456,3 +456,15 @@ test('the Settings restart is off while a match is still being joined', () => {
   assert.equal(h.g.online.status, 'waiting');
   assert.equal(h.g.el.roundRestartBtn.disabled, true);
 });
+
+test('a rematch shows every screen the whole new battlefield', () => {
+  const { host, guest, hs, gs } = liveMatch();
+  host.g.camZoomTo(3);
+  guest.g.camZoomTo(2.5);
+  guest.g.camCenterOn(700, 380);
+  host.g.el.restartBtn.dispatch('click');
+  gs.deliver({ t: 'msg', from: 1, d: hs.payloads('start').slice(-1)[0] });
+  assert.equal(host.g.camZoom, host.g.CAM_MIN, 'the host, who dealt it');
+  assert.equal(guest.g.camZoom, guest.g.CAM_MIN, 'and the guest, who was dealt it');
+  assert.equal(guest.g.camX, 0);
+});

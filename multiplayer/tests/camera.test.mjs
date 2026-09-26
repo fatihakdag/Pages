@@ -287,10 +287,10 @@ test('the view holds on the impact instead of swinging back to the shooter', () 
   h.advanceUntil(() => g.state === 'EXPLODING' || g.state === 'AIMING');
   assert.equal(g.state, 'EXPLODING', 'the shell landed');
 
-  const shooterX = g.tanks[0].x;
   const atImpact = g.camX;
-  assert.ok(Math.abs(atImpact - shooterX) > 100,
-    `the view is downrange at impact, not on the shooter: cam ${atImpact.toFixed(0)}, tank ${shooterX}`);
+  const blast = g.explosions[g.explosions.length - 1];
+  assert.ok(blast.x > g.camX && blast.x < g.camX + g.camViewW(),
+    `the impact is in view: blast at ${blast.x.toFixed(0)}, view ${g.camX.toFixed(0)}..${(g.camX + g.camViewW()).toFixed(0)}`);
 
   // Through the whole explosion the view must not drift back toward the seat
   // that fired -- it is still currentPlayer until the turn advances.
@@ -304,10 +304,15 @@ test('the view holds on the impact instead of swinging back to the shooter', () 
   h.advanceUntil(() => g.state === 'AIMING');
   assert.equal(g.currentPlayer, 1);
   h.advance(1500);
-  const centre = g.camX + g.camViewW() / 2;
-  assert.ok(Math.abs(centre - g.tanks[1].x) < 60,
-    `and settles on the next player: ${centre.toFixed(0)} vs ${g.tanks[1].x}`);
+  assert.ok(comfortablyInView(g, g.tanks[1].x),
+    `and brings the next player into view: ${g.tanks[1].x} in ${g.camX.toFixed(0)}..${(g.camX + g.camViewW()).toFixed(0)}`);
 });
+
+/** Inside the view by at least the follow margin (a pixel of easing aside). */
+function comfortablyInView(g, x) {
+  const m = g.camViewW() * g.CAM_MARGIN;
+  return x >= g.camX + m - 1 && x <= g.camX + g.camViewW() - m + 1;
+}
 
 // ---------- your own view back on your turn ----------
 
@@ -363,7 +368,7 @@ test('each player sharing the screen gets their own view back', () => {
   assert.ok(near(g.camX, second.x), 'and player 2 on theirs');
 });
 
-test('not framed by hand: your zoom comes back, centred on your tank as it was', () => {
+test('not framed by hand: your zoom comes back, with your tank in view', () => {
   const h = hotSeat();
   const { g } = h;
   g.camZoomTo(3);                // zoomed with the buttons: the camera follows you
@@ -372,9 +377,7 @@ test('not framed by hand: your zoom comes back, centred on your tank as it was',
   h.fireAndSettle();
   h.advance(1500);
   assert.equal(g.camZoom, 3, 'your zoom');
-  const t = g.tanks[0];
-  const cx = g.camX + g.camViewW() / 2;
-  assert.ok(Math.abs(cx - t.x) < 5, `centred on your tank (${cx} vs ${t.x})`);
+  assert.ok(comfortablyInView(g, g.tanks[0].x), 'your tank is in view');
   assert.equal(g.camPanned, false);
 });
 
@@ -413,4 +416,129 @@ test('against the CPU, your view is back after its turn; a new round forgets it'
 
   g.resetGame();
   assert.equal(g.seatViews.size, 0, 'a new board: the old framing does not fit it');
+});
+
+// ---------- a new board, following only when needed, and the sky ----------
+
+test('a new round starts with the whole battlefield in view', () => {
+  const h = hotSeat();
+  const { g } = h;
+  g.camZoomTo(3); g.camCenterOn(600, 380); g.camPanned = true;
+  g.resetGame();
+  assert.equal(g.camZoom, g.CAM_MIN);
+  assert.equal(g.camX, 0);
+  assert.equal(g.camY, 0);
+  assert.equal(g.camPanned, false);
+  h.advance(500);
+  assert.equal(g.camZoom, g.CAM_MIN, 'and stays there');
+});
+
+test('a shot whose whole flight is in view does not move the camera', () => {
+  const h = hotSeat();
+  const { g } = h;
+  h.placeTanksAt([450, 580]);    // both tanks in view, so the turn passing does not move it either
+  g.camZoomTo(2);
+  g.camCenterOn(450, 330);        // the tanks, the arc and the ground all well inside
+  h.advance(600);
+  const at = { x: g.camX, y: g.camY };
+  g.tanks[0].angle = 80; g.tanks[0].power = 30;   // a short lob, up and down nearby
+  g.fire();
+  let moved = 0;
+  while (g.state !== 'AIMING' && moved === 0) {
+    h.advance(16);
+    if (Math.abs(g.camX - at.x) > 1e-6 || Math.abs(g.camY - at.y) > 1e-6) moved++;
+  }
+  assert.equal(moved, 0, 'not a pixel');
+  assert.equal(g.camZoom, 2, 'and the zoom is kept');
+});
+
+test('a long shot is followed, and never leaves the screen', () => {
+  const h = hotSeat();
+  const { g } = h;
+  h.placeTanksAt([120, 880]);
+  g.camZoomTo(3);
+  h.advance(600);
+  g.tanks[0].angle = 45; g.tanks[0].power = 70;
+  g.fire();
+  const start = g.camX;
+  while (g.state === 'FIRING') {
+    h.advance(16);
+    const p = g.projectiles[0];
+    if (!p || p.x < 0 || p.x > g.W || p.y < 0) continue;
+    assert.ok(p.x >= g.camX && p.x <= g.camX + g.camViewW(), `shell at ${p.x.toFixed(0)} out of ${g.camX.toFixed(0)}..${(g.camX + g.camViewW()).toFixed(0)}`);
+  }
+  assert.ok(g.camX > start + 100, 'the view went downrange with it');
+});
+
+test('a turn passing to a tank already in view does not move the camera', () => {
+  const h = hotSeat();
+  const { g } = h;
+  h.placeTanksAt([420, 540]);
+  g.camZoomTo(2);
+  g.camCenterOn(480, 380);
+  h.advance(300);
+  const at = g.camX;
+  h.fireAndSettle();   // straight up: nobody is hit
+  assert.equal(g.currentPlayer, 1);
+  h.advance(1000);
+  assert.ok(Math.abs(g.camX - at) < 1e-6, 'both tanks were in view all along');
+});
+
+test('a helicopter zooms the view out, and its leaving zooms it back', () => {
+  const h = hotSeat();
+  const { g } = h;
+  g.camZoomTo(3); g.camCenterOn(450, 380); g.camPanned = true;
+  const mine = { x: g.camX, y: g.camY };
+  g.spawnHeli();
+  h.advance(1500);
+  assert.equal(g.camZoom, g.CAM_MIN, 'the whole field, to see where it is');
+
+  g.heli = null;       // flown off
+  h.advance(1500);
+  assert.equal(g.camZoom, 3, 'back to the zoom you had');
+  assert.ok(near(g.camX, mine.x) && near(g.camY, mine.y), 'and where you had it');
+});
+
+test('a jet does the same', () => {
+  const h = hotSeat();
+  const { g } = h;
+  g.camZoomTo(2.5);
+  assert.equal(g.summonJet(), true);
+  h.advance(2000);
+  assert.equal(g.camZoom, g.CAM_MIN);
+  g.jet = null;
+  h.advance(1500);
+  assert.equal(g.camZoom, 2.5);
+});
+
+test('zoom while the aircraft is up and the view is yours: nothing is undone', () => {
+  const h = hotSeat();
+  const { g } = h;
+  g.camZoomTo(3);
+  g.spawnHeli();
+  h.advance(1500);
+  g.camZoomTo(2);      // the player looks closer, on purpose
+  assert.equal(g.skyHandsOff, false);
+  g.heli = null;
+  h.advance(1500);
+  assert.equal(g.camZoom, 2, 'left as they put it');
+});
+
+test('your turn view waits for the sky to clear', () => {
+  const h = hotSeat();
+  const { g } = h;
+  g.camZoomTo(3); g.camCenterOn(450, 380); g.camPanned = true;
+  const mine = { x: g.camX, y: g.camY };
+  h.fireAndSettle();               // player 1 fires; player 2's turn
+  g.spawnHeli();
+  h.advance(1500);
+  assert.equal(g.camZoom, g.CAM_MIN);
+  h.fireAndSettle();               // player 2 fires; back to player 1
+  assert.equal(g.currentPlayer, 0);
+  h.advance(1500);
+  assert.equal(g.camZoom, g.CAM_MIN, 'still the whole field while it is up');
+  g.heli = null;
+  h.advance(1500);
+  assert.equal(g.camZoom, 3, 'then your own view');
+  assert.ok(near(g.camX, mine.x) && near(g.camY, mine.y));
 });

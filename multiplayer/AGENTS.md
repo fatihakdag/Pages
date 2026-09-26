@@ -287,9 +287,22 @@ it touches lives in `worldTransform()` and `eventToWorld()`.
   and unlike everything else on the battlefield: it is a gesture on a screen,
   so the same finger travel is the same shot at any zoom. `drawAimDrag()` is
   drawn under `screenTransform()` for the same reason.
-- `camFollow()` runs each frame: zoomed in, it eases onto the shell while one
-  is in the air and onto whoever is aiming between turns — without it, zoom is
-  useless, because firing loses the shell immediately.
+- `camFollow()` runs each frame: zoomed in, it keeps the shell in view while
+  one is in the air, and whoever is aiming between turns — but only as far as
+  that takes. The target has to stay `CAM_MARGIN` of the view inside every
+  edge, now and `CAM_LEAD` seconds ahead at its speed (never below the
+  ground), so a shot whose whole flight fits on screen never moves the camera
+  and a turn passing to a tank already in view does not either. It never
+  changes the zoom. Without it zoom would be useless: firing would lose the
+  shell at once.
+- **A new board shows the whole battlefield** (`camNewBoard()`): a restart, a
+  rematch on every screen, LEAVE back to a local game.
+- **An aircraft zooms the view out.** A helicopter or a jet in the sky eases
+  the view out to the whole field so it can be seen wherever you were
+  looking (`camWatchSky()`), and back to the view you had once the sky is
+  clear — or to your own turn view, if your turn came meanwhile
+  (`camTurnStarted` waits, `skyHold()`). Zoom or pan while it is up and the
+  camera is yours: nothing is undone when it goes.
 - A deliberate pan sets `camPanned` and owns the camera until the turn changes,
   so following never yanks the view away from someone looking on purpose.
 - **Your own view comes back on your turn.** Zoomed in, following the shell
